@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { getAccountFull } from "@/lib/crud";
+import { getAccountFull, listAccountOpportunities } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfRelatedLists, type RelatedListDefinition } from "@/components/SfRelatedLists";
 import type { Column } from "@/components/SfListView";
@@ -61,6 +61,41 @@ const ACCOUNT_RELATED_LISTS: RelatedListDefinition[] = [
     rowDefaults: (row) => ({ name: row.name ?? "", title: row.title ?? "", email: row.email ?? "", phone: row.phone ?? "", decision_role: row.decision_role ?? "" }),
     transform: (form, parentId) => ({ ...form, account_id: parentId }),
     refreshKeys: (parentId) => [["account-full", parentId], ["contacts-with-acc"]],
+    defaultVisible: true,
+  },
+
+  {
+    key: "opportunities",
+    label: "Oportunidades",
+    table: "opportunities",
+    load: (parentId) => listAccountOpportunities({ data: { accountId: parentId } }),
+    columns: [
+      { key: "name", label: "Oportunidade", render: (row) => row.name, sortValue: (row) => row.name, searchValue: (row) => row.name },
+      { key: "stage", label: "Estágio", render: (row) => row.stage, sortValue: (row) => row.stage },
+      { key: "amount", label: "Valor", render: (row) => fmtMoney(Number(row.amount)), sortValue: (row) => Number(row.amount), align: "right" },
+    ] as Column<any>[],
+    fields: [
+      { name: "name", label: "Nome da oportunidade", required: true },
+      { name: "instrument_type", label: "Tipo de instrumento", type: "select", options: ["Contrato", "ACS", "Aditivo", "Outros Serviços"] },
+      { name: "stage", label: "Estágio", type: "select", options: ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"] },
+      { name: "segment", label: "Segmento", type: "select", options: ["Ferroviário", "Portuário", "Rodoviário"] },
+      { name: "amount", label: "Valor da oportunidade", type: "number" },
+      { name: "close_date", label: "Data de fechamento", type: "date" },
+      { name: "contract_start", label: "Início da vigência", type: "date" },
+      { name: "contract_end", label: "Fim da vigência", type: "date" },
+      { name: "diesel_pct", label: "Reajuste diesel (%)", type: "number" },
+      { name: "igpm_pct", label: "Reajuste IGP-M (%)", type: "number" },
+      { name: "ipca_pct", label: "Reajuste IPCA (%)", type: "number" },
+      { name: "contracting_parties", label: "Contratante(s)" },
+      { name: "vli_entity", label: "Entidade contratada VLI" },
+      { name: "joint_debtor", label: "Devedor solidário" },
+      { name: "integration_tariff", label: "Tarifa de integração", type: "select", options: ["CBS", "Líquida"] },
+      { name: "take_or_pay", label: "Take or Pay", type: "checkbox" },
+    ] as FieldDef[],
+    createDefaults: () => ({ name: "", instrument_type: "Contrato", stage: "Prospecção", segment: "", amount: 0, close_date: "", contract_start: "", contract_end: "", diesel_pct: 0, igpm_pct: 100, ipca_pct: 0, contracting_parties: "", vli_entity: "VLI Multimodal S.A.", joint_debtor: "", integration_tariff: "Líquida", take_or_pay: false }),
+    rowDefaults: (row) => ({ name: row.name ?? "", instrument_type: row.instrument_type ?? "Contrato", stage: row.stage ?? "Prospecção", segment: row.segment ?? "", amount: row.amount ?? 0, close_date: row.close_date ?? "", contract_start: row.contract_start ?? "", contract_end: row.contract_end ?? "", diesel_pct: row.diesel_pct ?? 0, igpm_pct: row.igpm_pct ?? 0, ipca_pct: row.ipca_pct ?? 0, contracting_parties: row.contracting_parties ?? "", vli_entity: row.vli_entity ?? "", joint_debtor: row.joint_debtor ?? "", integration_tariff: row.integration_tariff ?? "Líquida", take_or_pay: !!row.take_or_pay }),
+    transform: (form, parentId) => ({ ...form, account_id: parentId, take_or_pay: form.take_or_pay ? 1 : 0 }),
+    refreshKeys: (parentId) => [["account-full", parentId], ["opportunities"]],
     defaultVisible: true,
   },
 ];
