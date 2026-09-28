@@ -4,7 +4,9 @@ import { useState } from "react";
 import { listContactsWithAccount, listAccountOptions, deleteRecord } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfListView, type Column } from "@/components/SfListView";
-import { SfRecordDialog } from "@/components/SfRecordDialog";
+import { SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
+import { SfBulkRecordDialog } from "@/components/SfBulkRecordDialog";
+import { exportCsv } from "@/lib/csv";
 import { PAPEIS } from "@/lib/options";
 
 type Row = {
@@ -36,6 +38,8 @@ function ContactsPage() {
   const qc = useQueryClient();
   const [showNew, setShowNew] = useState(false);
   const [editRow, setEditRow] = useState<Row | null>(null);
+  const [bulkEditRows, setBulkEditRows] = useState<Row[] | null>(null);
+  const [bulkCreate, setBulkCreate] = useState(false);
 
   const { data = [] } = useQuery({
     queryKey: ["contacts-with-acc"],
@@ -128,6 +132,20 @@ function ContactsPage() {
   ];
 
   const accountNameToId = new Map(accountList.map((a) => [a.name, a.id]));
+  const fields: FieldDef[] = [
+            { name: "name", label: "Nome", required: true },
+            { name: "title", label: "Cargo" },
+            { name: "email", label: "E-mail" },
+            { name: "phone", label: "Telefone" },
+            { name: "decision_role", label: "Papel na decisão", type: "select", options: PAPEIS },
+            {
+              name: "account_name",
+              label: "Conta",
+              type: "select",
+              required: true,
+              options: accountList.map((a) => a.name),
+            },
+          ];
 
   return (
     <SfShell>
@@ -138,6 +156,7 @@ function ContactsPage() {
           <div className="sf-ph-sub">{data.length} itens</div>
         </div>
         <div className="sf-ph-actions">
+          <button className="sf-btn" onClick={() => setBulkCreate(true)}>Criar em lote</button>
           <button className="sf-btn sf-btn--brand" onClick={() => setShowNew(true)}>
             Novo
           </button>
@@ -151,12 +170,33 @@ function ContactsPage() {
         defaultSortKey="name"
         itemLabel="contatos"
         searchPlaceholder="Pesquisar contatos…"
+        bulkActions={[
+          { label: "Editar selecionados", onRun: (rows) => setBulkEditRows(rows) },
+          { label: "Exportar CSV", onRun: (rows) => exportCsv(rows, fields) },
+          { label: "Excluir selecionados", variant: "danger", onRun: async (rows) => {
+            if (!confirm(`Excluir ${rows.length} contatos selecionados? Esta ação não pode ser desfeita.`)) return;
+            await Promise.all(rows.map((row) => deleteRecord({ data: { table: "contacts", id: row.id } })));
+            qc.invalidateQueries({ queryKey: ["contacts-with-acc"] });
+          } },
+        ]}
         rowActions={[
           { label: "Editar", onRun: (r) => setEditRow(r) },
           { label: "Excluir", onRun: deleteContact },
         ]}
       />
 
+      {bulkCreate && (
+        <SfBulkRecordDialog table="contacts" fields={fields} defaults={{}} transform={(form) => {
+          const { account_name, ...rest } = form;
+          return { ...rest, account_id: accountNameToId.get(account_name) };
+        }} onClose={() => setBulkCreate(false)} onSaved={() => qc.invalidateQueries({ queryKey: ["contacts-with-acc"] })} />
+      )}
+      {bulkEditRows && (
+        <SfBulkRecordDialog table="contacts" fields={fields} defaults={{}} rows={bulkEditRows} transform={(form) => {
+          const { account_name, ...rest } = form;
+          return { ...rest, account_id: accountNameToId.get(account_name) };
+        }} onClose={() => setBulkEditRows(null)} onSaved={() => qc.invalidateQueries({ queryKey: ["contacts-with-acc"] })} />
+      )}
       {(showNew || editRow) && (
         <SfRecordDialog
           title={editRow ? `Editar ${editRow.name}` : "Novo contato"}
@@ -175,20 +215,7 @@ function ContactsPage() {
             decision_role: editRow?.decision_role ?? "",
             account_name: editRow?.account_name ?? "",
           }}
-          fields={[
-            { name: "name", label: "Nome", required: true },
-            { name: "title", label: "Cargo" },
-            { name: "email", label: "E-mail" },
-            { name: "phone", label: "Telefone" },
-            { name: "decision_role", label: "Papel na decisão", type: "select", options: PAPEIS },
-            {
-              name: "account_name",
-              label: "Conta",
-              type: "select",
-              required: true,
-              options: accountList.map((a) => a.name),
-            },
-          ]}
+          fields={fields}
           transform={(f) => {
             const { account_name, ...rest } = f;
             return { ...rest, account_id: accountNameToId.get(account_name) };
