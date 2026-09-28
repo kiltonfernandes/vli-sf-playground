@@ -169,3 +169,32 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
   await db.delete(t).where(id ? eq((t as typeof t & { id: never }).id, id) : isNull((t as typeof t & { id: never }).id));
   return { ok: true };
 });
+
+
+/** Deletes records from every registered object, then optionally restores demo data. */
+export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(async ({ data: input }) => {
+  await ensureSchema();
+  const { mode } = input as { mode: "clear" | "factory" };
+  if (mode !== "clear" && mode !== "factory") throw new Error("Modo de reset inválido.");
+
+  // Delete in reverse registration order so dependent objects are removed first.
+  for (const table of Object.values(TABLES).reverse() as any[]) {
+    await db.delete(table);
+  }
+
+  if (mode === "factory") {
+    const now = new Date().toISOString();
+    const demoAccounts = [
+      { name: "VLI Logística", type: "Cliente - Direto", industry: "Logística", city: "São Paulo", state: "SP", account_owner: "Maria Silva", health: "Verde", customer_status: "Cliente", risk_level: "Baixo", lifetime_value: 1250000, revenue: 8200000, employees: 450, branch_name: "Matriz", phone: "(11) 3000-0000", website: "https://vli-logistica.example", notes: "Conta de demonstração" },
+      { name: "Ferrovia Central", type: "Cliente - Direto", industry: "Transporte", city: "Belo Horizonte", state: "MG", account_owner: "João Santos", health: "Amarelo", customer_status: "Cliente", risk_level: "Médio", lifetime_value: 640000, revenue: 4100000, employees: 220, branch_name: "Minas Gerais", phone: "(31) 3000-0000", website: "https://ferrovia.example", notes: "Conta de demonstração" },
+    ];
+    const ids = demoAccounts.map(() => crypto.randomUUID());
+    await db.insert(accounts).values(demoAccounts.map((account, index) => ({ id: ids[index], ...account, created_at: now, updated_at: now })));
+    await db.insert(contacts).values([
+      { id: crypto.randomUUID(), account_id: ids[0], name: "Ana Costa", title: "Diretora Comercial", email: "ana.costa@example.com", phone: "(11) 99999-1000", decision_role: "Decisor", created_at: now, updated_at: now },
+      { id: crypto.randomUUID(), account_id: ids[1], name: "Pedro Almeida", title: "Gerente de Operações", email: "pedro.almeida@example.com", phone: "(31) 99999-2000", decision_role: "Influenciador", created_at: now, updated_at: now },
+    ]);
+  }
+
+  return { ok: true, mode };
+});
