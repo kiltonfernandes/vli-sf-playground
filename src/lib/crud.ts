@@ -169,6 +169,7 @@ export const deleteRecordsBulk = createServerFn({ method: "POST" }).handler(asyn
     throw new Error("A operação deve conter entre 1 e 100 registros.");
   }
   if (table === "accounts") {
+    await db.delete(opportunities).where(inArray(opportunities.account_id, uniqueIds));
     await db.delete(contacts).where(inArray(contacts.account_id, uniqueIds));
   }
   await db.delete(target).where(inArray(target.id, uniqueIds));
@@ -182,6 +183,9 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
   if (table === "accounts") {
+    await db.delete(opportunities).where(
+      id ? eq(opportunities.account_id, id) : isNull(opportunities.account_id),
+    );
     await db.delete(contacts).where(
       id ? eq(contacts.account_id, id) : isNull(contacts.account_id),
     );
