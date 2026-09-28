@@ -12,6 +12,8 @@ Use the three numeric segments as follows. Increment only the segment that match
 
 ## Version history
 
+- `v2.06.03` — Refine the Opportunity Path key fields panel with a functional Edit action.
+
 - `v2.05.03` — Add a Salesforce-style Path to the Opportunity record page, enforce stage transitions server-side, and update the README with the project changelog, data model, relationships, and validation rules.
 
 - `v1.02.03` — Show the current app version beside CRM and establish the versioning policy.
