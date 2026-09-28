@@ -70,7 +70,7 @@ const ACCOUNT_RELATED_LISTS: RelatedListDefinition[] = [
     table: "opportunities",
     load: (parentId) => listAccountOpportunities({ data: { accountId: parentId } }),
     columns: [
-      { key: "name", label: "Oportunidade", render: (row) => row.name, sortValue: (row) => row.name, searchValue: (row) => row.name },
+      { key: "name", label: "Oportunidade", render: (row) => <Link to="/opportunities/$id" params={{ id: row.id }} style={{ color: "#0176d3", fontWeight: 600 }}>{row.name}</Link>, sortValue: (row) => row.name, searchValue: (row) => row.name },
       { key: "stage", label: "Estágio", render: (row) => row.stage, sortValue: (row) => row.stage },
       { key: "amount", label: "Valor", render: (row) => fmtMoney(Number(row.amount)), sortValue: (row) => Number(row.amount), align: "right" },
     ] as Column<any>[],
