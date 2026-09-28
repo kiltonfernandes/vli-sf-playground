@@ -162,7 +162,7 @@ function AccountDetailPage() {
         style={{
           padding: 24,
           display: "grid",
-          gridTemplateColumns: tab === "Visão geral" ? "2fr 1fr" : "1fr",
+          gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)",
           gap: 16,
         }}
       >
