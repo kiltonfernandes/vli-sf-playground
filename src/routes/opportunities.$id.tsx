@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { getOpportunityFull, listAccountOptions } from "@/lib/crud";
+import { getOpportunityFull, listAccountOptions, saveRecord } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfRelatedLists } from "@/components/SfRelatedLists";
 import { SfDeleteButton, SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
@@ -20,6 +20,9 @@ function OpportunityRecordPage() {
   const { id } = Route.useParams();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [pathOpen, setPathOpen] = useState(true);
+  const [pathBusy, setPathBusy] = useState(false);
+  const [pathMessage, setPathMessage] = useState("");
   const { data, isLoading } = useQuery({
     queryKey: ["opportunity-full", id],
     queryFn: () => getOpportunityFull({ data: { id } }),
@@ -85,6 +88,36 @@ function OpportunityRecordPage() {
       </div>
     </div>
 
+    <OpportunityPath
+      stage={opportunity.stage}
+      opportunityId={id}
+      accountName={account?.name ?? "—"}
+      instrument={opportunity.instrument_type}
+      segment={opportunity.segment ?? "—"}
+      closeDate={opportunity.close_date ? fmtDate(opportunity.close_date) : "—"}
+      open={pathOpen}
+      busy={pathBusy}
+      message={pathMessage}
+      onToggle={() => setPathOpen((value) => !value)}
+      onAdvance={async () => {
+        setPathBusy(true);
+        setPathMessage("");
+        try {
+          await saveRecord({ data: { table: "opportunities", recordId: id, data: { stage: "Negociação" } } });
+          await Promise.all([
+            qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
+            qc.invalidateQueries({ queryKey: ["opportunities"] }),
+            qc.invalidateQueries({ queryKey: ["account-full", opportunity.account_id] }),
+          ]);
+          setPathMessage("Etapa atualizada para Negociação.");
+        } catch (error) {
+          setPathMessage(error instanceof Error ? error.message : "Não foi possível atualizar a etapa.");
+        } finally {
+          setPathBusy(false);
+        }
+      }}
+    />
+
     <div className="sf-highlights">
       <Highlight label="Conta de gestão" value={account?.name ?? "—"} />
       <Highlight label="Tipo de instrumento" value={opportunity.instrument_type} />
@@ -129,6 +162,52 @@ function OpportunityRecordPage() {
     {editing && <SfRecordDialog title={`Editar ${opportunity.name}`} table="opportunities" recordId={id} fields={fields} defaults={defaults} transform={transform}
       onClose={() => setEditing(false)} onSaved={() => { qc.invalidateQueries({ queryKey: ["opportunity-full", id] }); qc.invalidateQueries({ queryKey: ["opportunities"] }); qc.invalidateQueries({ queryKey: ["account-full", opportunity.account_id] }); }} />}
   </SfShell>;
+}
+
+function OpportunityPath({ stage, accountName, instrument, segment, closeDate, open, busy, message, onToggle, onAdvance }: {
+  stage: string; accountName: string; instrument: string; segment: string; closeDate: string;
+  open: boolean; busy: boolean; message: string; onToggle: () => void; onAdvance: () => void;
+}) {
+  const activeIndex = Math.max(0, STAGES.indexOf(stage));
+  const canAdvance = stage === "Prospecção";
+  const guidance: Record<string, string[]> = {
+    "Prospecção": ["Confirme a conta de gestão e o tipo de instrumento.", "Avance para Negociação para habilitar a preparação da cotação."],
+    "Negociação": ["Revise os dados comerciais e jurídicos da oportunidade.", "Para avançar, será necessário concluir e sincronizar uma cotação."],
+    "Aprovação": ["A oportunidade aguarda decisão das alçadas responsáveis.", "Uma aprovação registrada será necessária para formalizar."],
+    "Formalização": ["Prepare as partes, vigência, reajuste e tarifa de integração.", "O fechamento depende da formalização e da integração NetLex."],
+    "Fechado": ["O ciclo comercial da oportunidade foi concluído."],
+  };
+  return <section className="sf-path-card" aria-label="Caminho da oportunidade">
+    <button className="sf-path-collapse" aria-label={open ? "Recolher caminho" : "Expandir caminho"} aria-expanded={open} onClick={onToggle}>{open ? "⌃" : "⌄"}</button>
+    {open && <>
+      <div className="sf-path-main">
+        <div className="sf-path-steps" role="list" aria-label="Etapas">
+          {STAGES.map((item, index) => <div key={item} role="listitem" aria-current={index === activeIndex ? "step" : undefined}
+            className={"sf-path-step" + (index < activeIndex ? " is-complete" : "") + (index === activeIndex ? " is-current" : "")}>
+            <span className="sf-path-check">{index < activeIndex ? "✓" : ""}</span><span>{item}</span>
+          </div>)}
+        </div>
+        <button className="sf-btn sf-btn--brand sf-path-action" disabled={!canAdvance || busy} onClick={onAdvance}>
+          {busy ? "Salvando…" : "✓  Marcar etapa como concluída"}
+        </button>
+      </div>
+      <div className="sf-path-panels">
+        <div className="sf-path-keyfields">
+          <div className="sf-path-panel-heading"><span>Campos principais</span><span className="sf-path-edit-hint">Resumo da oportunidade</span></div>
+          <div className="sf-path-field"><span>Conta de gestão</span><strong>{accountName}</strong></div>
+          <div className="sf-path-field"><span>Tipo de instrumento</span><strong>{instrument}</strong></div>
+          <div className="sf-path-field"><span>Segmento</span><strong>{segment}</strong></div>
+          <div className="sf-path-field"><span>Fechamento previsto</span><strong>{closeDate}</strong></div>
+        </div>
+        <div className="sf-path-guidance">
+          <div className="sf-path-panel-heading">Orientações para o sucesso</div>
+          <ul>{(guidance[stage] ?? []).map((item) => <li key={item}>{item}</li>)}</ul>
+          {!canAdvance && stage !== "Fechado" && <p className="sf-path-blocker">{stage === "Negociação" ? "Avanço bloqueado: conclua e sincronize uma Cotação primeiro." : stage === "Aprovação" ? "Avanço bloqueado: registre a aprovação antes da formalização." : "Avanço bloqueado: a integração NetLex ainda não está disponível."}</p>}
+        </div>
+      </div>
+      {message && <div className="sf-path-message" role="status">{message}</div>}
+    </>}
+  </section>;
 }
 
 function Highlight({ label, value }: { label: string; value: string }) {
