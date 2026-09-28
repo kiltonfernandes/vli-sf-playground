@@ -1,6 +1,6 @@
 import type { FieldDef } from "@/components/SfRecordDialog";
 
-export function exportCsv(rows: Array<Record<string, unknown>>, fields: FieldDef[]) {
+export function exportCsv(rows: any[], fields: FieldDef[]) {
   if (!rows.length) return;
   const columns = fields.filter((field) => field.name in rows[0]);
   const cell = (value: unknown) => {
