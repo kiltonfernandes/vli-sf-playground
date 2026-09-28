@@ -231,7 +231,7 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
   );
 
   return (
-    <div className="sf-card">
+    <div className="sf-card" data-related-list={listId}>
       <div className="sf-card-header" style={{ display: "flex", justifyContent: "space-between" }}>
         <span>{definition.label} ({rows.length})</span>
         {!fullScreen && <button className="sf-link" onClick={onManage}>Configurar</button>}
