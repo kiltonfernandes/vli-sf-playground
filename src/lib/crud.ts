@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db, ensureSchema } from "./db";
-import { accounts, contacts, TABLES, type TableName } from "./schema";
+import { accounts, contacts, opportunities, TABLES, type TableName } from "./schema";
 
 type SaveInput = {
   table: TableName;
@@ -27,6 +27,28 @@ export const homeDashboard = createServerFn({ method: "GET" }).handler(async () 
     db.select({ id: contacts.id }).from(contacts),
   ]);
   return { accounts: top, contactCount: contactRows.length };
+});
+
+
+export const listOpportunities = createServerFn({ method: "GET" }).handler(async () => {
+  await ensureSchema();
+  const rows = await db.select({
+    id: opportunities.id, account_id: opportunities.account_id, name: opportunities.name,
+    instrument_type: opportunities.instrument_type, stage: opportunities.stage, segment: opportunities.segment,
+    amount: opportunities.amount, close_date: opportunities.close_date, contract_start: opportunities.contract_start,
+    contract_end: opportunities.contract_end, diesel_pct: opportunities.diesel_pct, igpm_pct: opportunities.igpm_pct,
+    ipca_pct: opportunities.ipca_pct, contracting_parties: opportunities.contracting_parties,
+    vli_entity: opportunities.vli_entity, joint_debtor: opportunities.joint_debtor,
+    integration_tariff: opportunities.integration_tariff, take_or_pay: opportunities.take_or_pay,
+    account_name: accounts.name,
+  }).from(opportunities).leftJoin(accounts, eq(opportunities.account_id, accounts.id)).orderBy(asc(opportunities.name));
+  return rows.map((row) => ({ ...row, account_name: row.account_name ?? "—" }));
+});
+
+export const listAccountOpportunities = createServerFn({ method: "GET" }).handler(async ({ data: input }) => {
+  await ensureSchema();
+  const { accountId } = input as { accountId: string };
+  return db.select().from(opportunities).where(eq(opportunities.account_id, accountId)).orderBy(asc(opportunities.name));
 });
 
 export const listAccounts = createServerFn({ method: "GET" }).handler(async () => {
