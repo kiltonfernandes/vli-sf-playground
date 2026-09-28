@@ -7,7 +7,7 @@ type Props = {
   table: string;
   fields: FieldDef[];
   defaults: Record<string, any>;
-  rows?: Array<Record<string, any>>;
+  rows?: any[];
   transform?: (form: Record<string, any>) => Record<string, any>;
   onClose: () => void;
   onSaved: () => void;
