@@ -186,8 +186,12 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
   async function removeRow(row: any) {
     const title = row.name ?? row.id;
     if (!confirm(`Excluir “${title}” desta lista? A exclusão remove o registro do objeto.`)) return;
-    await deleteRecord({ data: { table: definition.table, id: row.id } });
-    await refresh();
+    try {
+      await deleteRecord({ data: { table: definition.table, id: row.id } });
+      await refresh();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível excluir o registro.");
+    }
   }
 
   const content = (
