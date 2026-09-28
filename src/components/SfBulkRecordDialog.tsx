@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { saveRecord } from "@/lib/crud";
+import { saveRecordsBulk } from "@/lib/crud";
 import { generateRecord, randomSeed } from "@/lib/generators";
 import type { FieldDef } from "./SfRecordDialog";
 
@@ -34,13 +34,15 @@ export function SfBulkRecordDialog({ table, fields, defaults, rows = [], transfo
             throw new Error(field.label + " é obrigatório.");
           }
         }
-        for (const row of rows) {
+        const updates = rows.map((row) => {
           const patch = Object.fromEntries(chosen.map((field) => [field.name, form[field.name]]));
           const merged = { ...row, ...patch };
-          await saveRecord({ data: { table, recordId: row.id, data: transform ? transform(merged) : patch } });
-        }
+          return { recordId: row.id, data: transform ? transform(merged) : patch };
+        });
+        await saveRecordsBulk({ data: { table, records: updates } });
       } else {
         const amount = Math.max(1, Math.min(100, Math.floor(count) || 1));
+        const records = [];
         for (let i = 0; i < amount; i++) {
           const generated = generateRecord(table, seed + i, fields);
           if (!generated) throw new Error("Este objeto ainda não tem um gerador registrado.");
@@ -49,8 +51,9 @@ export function SfBulkRecordDialog({ table, fields, defaults, rows = [], transfo
               throw new Error("O gerador não preencheu o campo obrigatório: " + field.label);
             }
           }
-          await saveRecord({ data: { table, recordId: null, data: transform ? transform({ ...defaults, ...generated }) : generated } });
+          records.push({ recordId: null, data: transform ? transform({ ...defaults, ...generated }) : generated });
         }
+        await saveRecordsBulk({ data: { table, records } });
       }
       onSaved();
       onClose();
