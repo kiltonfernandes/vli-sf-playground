@@ -59,6 +59,30 @@ export function ensureSchema(): Promise<void> {
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_contacts_account_id ON contacts(account_id)`,
     );
+    await client.execute(`CREATE TABLE IF NOT EXISTS opportunities (
+      id text PRIMARY KEY,
+      account_id text NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      name text NOT NULL,
+      instrument_type text NOT NULL DEFAULT 'Contrato',
+      stage text NOT NULL DEFAULT 'Prospecção',
+      segment text,
+      amount real NOT NULL DEFAULT 0,
+      close_date text,
+      contract_start text,
+      contract_end text,
+      diesel_pct real NOT NULL DEFAULT 0,
+      igpm_pct real NOT NULL DEFAULT 0,
+      ipca_pct real NOT NULL DEFAULT 0,
+      contracting_parties text,
+      vli_entity text,
+      joint_debtor text,
+      integration_tariff text NOT NULL DEFAULT 'Líquida',
+      take_or_pay integer NOT NULL DEFAULT 0,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )`);
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_opportunities_account_id ON opportunities(account_id)`);
+
   })();
   return schemaReady;
 }

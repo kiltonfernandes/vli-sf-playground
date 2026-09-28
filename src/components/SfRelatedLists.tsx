@@ -41,8 +41,16 @@ export function SfRelatedLists({ objectType, parentId, definitions }: Props) {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as RelatedListItem[] | null;
       if (Array.isArray(saved)) {
-        setItems(saved.filter((item) => definitions.some((definition) => definition.key === item.definitionKey)));
+        const knownKey = storageKey + ":known-definitions";
+        const known = JSON.parse(localStorage.getItem(knownKey) ?? "[]") as string[];
+        const newlyAvailable = definitions.filter((definition) => definition.defaultVisible && !known.includes(definition.key));
+        const existing = saved.filter((item) => definitions.some((definition) => definition.key === item.definitionKey));
+        setItems([...existing, ...newlyAvailable.map((definition) => ({
+          id: `default-${definition.key}-${Date.now()}`,
+          definitionKey: definition.key,
+        }))]);
       }
+      localStorage.setItem(storageKey + ":known-definitions", JSON.stringify(definitions.map((definition) => definition.key)));
     } catch { /* Use defaults if browser storage is invalid. */ }
     setStorageReady(true);
   }, [storageKey]);

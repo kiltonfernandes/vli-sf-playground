@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db, ensureSchema } from "./db";
-import { accounts, contacts, TABLES, type TableName } from "./schema";
+import { accounts, contacts, opportunities, TABLES, type TableName } from "./schema";
 
 type SaveInput = {
   table: TableName;
@@ -27,6 +27,28 @@ export const homeDashboard = createServerFn({ method: "GET" }).handler(async () 
     db.select({ id: contacts.id }).from(contacts),
   ]);
   return { accounts: top, contactCount: contactRows.length };
+});
+
+
+export const listOpportunities = createServerFn({ method: "GET" }).handler(async () => {
+  await ensureSchema();
+  const rows = await db.select({
+    id: opportunities.id, account_id: opportunities.account_id, name: opportunities.name,
+    instrument_type: opportunities.instrument_type, stage: opportunities.stage, segment: opportunities.segment,
+    amount: opportunities.amount, close_date: opportunities.close_date, contract_start: opportunities.contract_start,
+    contract_end: opportunities.contract_end, diesel_pct: opportunities.diesel_pct, igpm_pct: opportunities.igpm_pct,
+    ipca_pct: opportunities.ipca_pct, contracting_parties: opportunities.contracting_parties,
+    vli_entity: opportunities.vli_entity, joint_debtor: opportunities.joint_debtor,
+    integration_tariff: opportunities.integration_tariff, take_or_pay: opportunities.take_or_pay,
+    account_name: accounts.name,
+  }).from(opportunities).leftJoin(accounts, eq(opportunities.account_id, accounts.id)).orderBy(asc(opportunities.name));
+  return rows.map((row) => ({ ...row, account_name: row.account_name ?? "—" }));
+});
+
+export const listAccountOpportunities = createServerFn({ method: "GET" }).handler(async ({ data: input }) => {
+  await ensureSchema();
+  const { accountId } = input as { accountId: string };
+  return db.select().from(opportunities).where(eq(opportunities.account_id, accountId)).orderBy(asc(opportunities.name));
 });
 
 export const listAccounts = createServerFn({ method: "GET" }).handler(async () => {
@@ -65,12 +87,11 @@ export const getAccountFull = createServerFn({ method: "GET" }).handler(async ({
   await ensureSchema();
   const { id } = input as { id: string };
   const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
-  const contactRows = await db
-    .select()
-    .from(contacts)
-    .where(eq(contacts.account_id, id))
-    .orderBy(asc(contacts.name));
-  return { account: account ?? null, contacts: contactRows };
+  const [contactRows, opportunityRows] = await Promise.all([
+    db.select().from(contacts).where(eq(contacts.account_id, id)).orderBy(asc(contacts.name)),
+    db.select().from(opportunities).where(eq(opportunities.account_id, id)).orderBy(asc(opportunities.name)),
+  ]);
+  return { account: account ?? null, contacts: contactRows, opportunities: opportunityRows };
 });
 
 export const getContactFull = createServerFn({ method: "GET" }).handler(async ({ data: input }) => {
@@ -148,6 +169,7 @@ export const deleteRecordsBulk = createServerFn({ method: "POST" }).handler(asyn
     throw new Error("A operação deve conter entre 1 e 100 registros.");
   }
   if (table === "accounts") {
+    await db.delete(opportunities).where(inArray(opportunities.account_id, uniqueIds));
     await db.delete(contacts).where(inArray(contacts.account_id, uniqueIds));
   }
   await db.delete(target).where(inArray(target.id, uniqueIds));
@@ -161,6 +183,9 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
   if (table === "accounts") {
+    await db.delete(opportunities).where(
+      id ? eq(opportunities.account_id, id) : isNull(opportunities.account_id),
+    );
     await db.delete(contacts).where(
       id ? eq(contacts.account_id, id) : isNull(contacts.account_id),
     );

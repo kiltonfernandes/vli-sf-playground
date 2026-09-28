@@ -8,6 +8,7 @@ const TABS: Array<{ label: string; to: string }> = [
   { label: "Início", to: "/" },
   { label: "Contas", to: "/accounts" },
   { label: "Contatos", to: "/contacts" },
+  { label: "Oportunidades", to: "/opportunities" },
 ];
 
 export function SfShell({ children }: { children: ReactNode }) {

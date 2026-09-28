@@ -2,6 +2,7 @@ import type { FieldDef } from "@/components/SfRecordDialog";
 import { runGenerator, type Generator } from "./core";
 import { accountsGenerator } from "./accounts";
 import { contactsGenerator } from "./contacts";
+import { opportunitiesGenerator } from "./opportunities";
 
 export { randomSeed } from "./core";
 export type { Generator } from "./core";
@@ -10,6 +11,7 @@ export type { Generator } from "./core";
 export const generators: Record<string, Generator> = {
   accounts: accountsGenerator,
   contacts: contactsGenerator,
+  opportunities: opportunitiesGenerator,
 };
 
 export function generateRecord(table: string, seed: number, fields: FieldDef[]) {
