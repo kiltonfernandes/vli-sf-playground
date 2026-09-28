@@ -136,6 +136,8 @@ function AccountDetailPage() {
   }
 
   const contacts = data!.contacts;
+  const opportunities = data!.opportunities ?? [];
+  const opportunityTotal = opportunities.reduce((total, opportunity) => total + Number(opportunity.amount ?? 0), 0);
 
   return (
     <SfShell>
@@ -176,6 +178,7 @@ function AccountDetailPage() {
           <HealthPill health={a.health as "Verde"} />
         </Highlight>
         <Highlight label="Valor de vida" value={fmtMoney(Number(a.lifetime_value))} />
+        <Highlight label="Valor em oportunidades" value={fmtMoney(opportunityTotal)} />
         <Highlight label="Faturamento anual" value={fmtMoney(Number(a.revenue))} />
         <Highlight label="Funcionários" value={String(a.employees ?? 0)} />
         <Highlight label="Criada em" value={fmtDate(a.created_at)} />
@@ -227,6 +230,8 @@ function AccountDetailPage() {
               <Card title="Resumo">
                 <div className="sf-fields">
                   <Field label="Contatos" value={String(contacts.length)} />
+                  <Field label="Oportunidades" value={String(opportunities.length)} />
+                  <Field label="Valor das oportunidades" value={fmtMoney(opportunityTotal)} />
                   <Field label="Valor de vida" value={fmtMoney(Number(a.lifetime_value))} />
                   <Field label="Faturamento anual" value={fmtMoney(Number(a.revenue))} />
                 </div>
