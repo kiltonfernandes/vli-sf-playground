@@ -3,6 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { getAccountFull } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
+import { SfRelatedLists, type RelatedListDefinition } from "@/components/SfRelatedLists";
+import type { Column } from "@/components/SfListView";
+import type { FieldDef } from "@/components/SfRecordDialog";
 import { SfDeleteButton, SfRecordDialog } from "@/components/SfRecordDialog";
 import { fmtMoney, fmtDate, HealthPill, RiskPill, StatusPill } from "@/lib/format";
 import { PAPEIS } from "@/lib/options";
@@ -23,6 +26,44 @@ export const Route = createFileRoute("/accounts/$id")({
 
 type Tab = "Visão geral" | "Detalhes" | "Contatos";
 const TABS: Tab[] = ["Visão geral", "Detalhes", "Contatos"];
+
+const ACCOUNT_RELATED_LISTS: RelatedListDefinition[] = [
+  {
+    key: "contacts",
+    label: "Contatos",
+    table: "contacts",
+    load: async (parentId) => {
+      const result = await getAccountFull({ data: { id: parentId } });
+      return (result?.contacts ?? []).map((contact) => ({
+        ...contact,
+        account_name: result?.account?.name ?? "—",
+      }));
+    },
+    columns: [
+      {
+        key: "name",
+        label: "Nome",
+        render: (row) => <Link to="/contacts/$id" params={{ id: row.id }} style={{ color: "#0176d3", fontWeight: 600 }}>{row.name}</Link>,
+        sortValue: (row) => row.name,
+        searchValue: (row) => row.name,
+      },
+      { key: "title", label: "Cargo", render: (row) => row.title ?? "—", sortValue: (row) => row.title ?? "" },
+      { key: "account_name", label: "Conta", render: (row) => row.account_name, sortValue: (row) => row.account_name },
+    ] as Column<any>[],
+    fields: [
+      { name: "name", label: "Nome", required: true },
+      { name: "title", label: "Cargo" },
+      { name: "email", label: "E-mail" },
+      { name: "phone", label: "Telefone" },
+      { name: "decision_role", label: "Papel na decisão", type: "select", options: PAPEIS },
+    ] as FieldDef[],
+    createDefaults: () => ({ name: "", title: "", email: "", phone: "", decision_role: "" }),
+    rowDefaults: (row) => ({ name: row.name ?? "", title: row.title ?? "", email: row.email ?? "", phone: row.phone ?? "", decision_role: row.decision_role ?? "" }),
+    transform: (form, parentId) => ({ ...form, account_id: parentId }),
+    refreshKeys: (parentId) => [["account-full", parentId], ["contacts-with-acc"]],
+    defaultVisible: true,
+  },
+];
 
 function AccountDetailPage() {
   const { id } = Route.useParams();
@@ -121,7 +162,7 @@ function AccountDetailPage() {
         style={{
           padding: 24,
           display: "grid",
-          gridTemplateColumns: tab === "Visão geral" ? "2fr 1fr" : "1fr",
+          gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)",
           gap: 16,
         }}
       >
@@ -145,9 +186,7 @@ function AccountDetailPage() {
                   </div>
                 )}
               </Card>
-              <Card title={`Contatos (${contacts.length})`}>
-                <ContactsTable rows={contacts} />
-              </Card>
+              
             </div>
             <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
               <Card title="Resumo">
@@ -157,6 +196,7 @@ function AccountDetailPage() {
                   <Field label="Faturamento anual" value={fmtMoney(Number(a.revenue))} />
                 </div>
               </Card>
+              <SfRelatedLists objectType="accounts" parentId={id} definitions={ACCOUNT_RELATED_LISTS} />
             </div>
           </>
         )}
@@ -189,6 +229,8 @@ function AccountDetailPage() {
             <ContactsTable rows={contacts} />
           </Card>
         )}
+
+        {tab !== "Visão geral" && <SfRelatedLists objectType="accounts" parentId={id} definitions={ACCOUNT_RELATED_LISTS} />}
       </div>
 
       {showNewContact && (

@@ -168,8 +168,12 @@ export function SfListView<T>({
   async function runBulk(action: BulkAction<T>) {
     const chosen = filtered.filter((r) => selected.has(rowKey(r)));
     if (chosen.length === 0) return;
-    await action.onRun(chosen);
-    setSelected(new Set());
+    try {
+      await action.onRun(chosen);
+      setSelected(new Set());
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "A ação em lote falhou. Os itens continuam selecionados.");
+    }
   }
 
   const updatedLabel = (() => {

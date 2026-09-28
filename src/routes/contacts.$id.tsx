@@ -2,8 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getContactFull } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
+import { SfRelatedLists, type RelatedListDefinition } from "@/components/SfRelatedLists";
 import { SfDeleteButton } from "@/components/SfRecordDialog";
 import { fmtDate } from "@/lib/format";
+
+const CONTACT_RELATED_LISTS: RelatedListDefinition[] = [];
 
 export const Route = createFileRoute("/contacts/$id")({
   head: () => ({
@@ -89,7 +92,7 @@ function ContactDetailPage() {
         <Hi label="Criado em" value={fmtDate(c.created_at)} />
       </div>
 
-      <div style={{ padding: 24, display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
+      <div style={{ padding: 24, display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)", gap: 16 }}>
         <Card title="Informações do contato">
           <div className="sf-fields">
             <Field label="Nome" value={c.name} />
@@ -100,17 +103,20 @@ function ContactDetailPage() {
             <Field label="Conta" value={a?.name ?? "—"} />
           </div>
         </Card>
-        <Card title="Conta">
-          {a ? (
-            <div className="sf-fields">
-              <Field label="Nome" value={a.name} />
-              <Field label="Setor" value={a.industry ?? "—"} />
-              <Field label="Local" value={[a.city, a.state].filter(Boolean).join(", ") || "—"} />
-            </div>
-          ) : (
-            <div style={{ padding: 16, color: "#706e6b" }}>Sem conta vinculada.</div>
-          )}
-        </Card>
+        <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+          <Card title="Conta">
+            {a ? (
+              <div className="sf-fields">
+                <Field label="Nome" value={a.name} />
+                <Field label="Setor" value={a.industry ?? "—"} />
+                <Field label="Local" value={[a.city, a.state].filter(Boolean).join(", ") || "—"} />
+              </div>
+            ) : (
+              <div style={{ padding: 16, color: "#706e6b" }}>Sem conta vinculada.</div>
+            )}
+          </Card>
+          <SfRelatedLists objectType="contacts" parentId={id} definitions={CONTACT_RELATED_LISTS} />
+        </div>
       </div>
     </SfShell>
   );

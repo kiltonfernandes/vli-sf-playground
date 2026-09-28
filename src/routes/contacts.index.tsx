@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { listContactsWithAccount, listAccountOptions, deleteRecord } from "@/lib/crud";
+import { listContactsWithAccount, listAccountOptions, deleteRecord, deleteRecordsBulk } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfListView, type Column } from "@/components/SfListView";
 import { SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
@@ -175,7 +175,7 @@ function ContactsPage() {
           { label: "Exportar CSV", onRun: (rows) => exportCsv(rows, fields) },
           { label: "Excluir selecionados", variant: "danger", onRun: async (rows) => {
             if (!confirm(`Excluir ${rows.length} contatos selecionados? Esta ação não pode ser desfeita.`)) return;
-            await Promise.all(rows.map((row) => deleteRecord({ data: { table: "contacts", id: row.id } })));
+            await deleteRecordsBulk({ data: { table: "contacts", ids: rows.map((row) => row.id) } });
             qc.invalidateQueries({ queryKey: ["contacts-with-acc"] });
           } },
         ]}
