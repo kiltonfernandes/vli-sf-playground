@@ -99,6 +99,7 @@ function OpportunityRecordPage() {
       busy={pathBusy}
       message={pathMessage}
       onToggle={() => setPathOpen((value) => !value)}
+      onEdit={() => setEditing(true)}
       onAdvance={async () => {
         setPathBusy(true);
         setPathMessage("");
@@ -164,9 +165,9 @@ function OpportunityRecordPage() {
   </SfShell>;
 }
 
-function OpportunityPath({ stage, accountName, instrument, segment, closeDate, open, busy, message, onToggle, onAdvance }: {
+function OpportunityPath({ stage, accountName, instrument, segment, closeDate, open, busy, message, onToggle, onEdit, onAdvance }: {
   stage: string; accountName: string; instrument: string; segment: string; closeDate: string;
-  open: boolean; busy: boolean; message: string; onToggle: () => void; onAdvance: () => void;
+  open: boolean; busy: boolean; message: string; onToggle: () => void; onEdit: () => void; onAdvance: () => void;
 }) {
   const activeIndex = Math.max(0, STAGES.indexOf(stage));
   const canAdvance = stage === "Prospecção";
@@ -193,7 +194,7 @@ function OpportunityPath({ stage, accountName, instrument, segment, closeDate, o
       </div>
       <div className="sf-path-panels">
         <div className="sf-path-keyfields">
-          <div className="sf-path-panel-heading"><span>Campos principais</span><span className="sf-path-edit-hint">Resumo da oportunidade</span></div>
+          <div className="sf-path-panel-heading"><span>Campos principais</span><button className="sf-link" onClick={onEdit}>Editar</button></div>
           <div className="sf-path-field"><span>Conta de gestão</span><strong>{accountName}</strong></div>
           <div className="sf-path-field"><span>Tipo de instrumento</span><strong>{instrument}</strong></div>
           <div className="sf-path-field"><span>Segmento</span><strong>{segment}</strong></div>
