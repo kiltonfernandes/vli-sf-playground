@@ -32,7 +32,6 @@ function OpportunitiesPage() {
   const [bulkCreate, setBulkCreate] = useState(false);
   const { data: rows = [] } = useQuery({ queryKey: ["opportunities"], queryFn: async () => await listOpportunities() as Opportunity[] });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts-min"], queryFn: async () => await listAccountOptions() as { id: string; name: string }[] });
-  const accountNameById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
   const accountIdByName = useMemo(() => new Map(accounts.map((account) => [account.name, account.id])), [accounts]);
 
   const fields: FieldDef[] = [
@@ -65,7 +64,7 @@ function OpportunitiesPage() {
   ];
   const transform = (form: Record<string, any>) => {
     const { account_name, ...rest } = form;
-    return { ...rest, account_id: accountIdByName.get(account_name) };
+    return { ...rest, account_id: accountIdByName.get(account_name), take_or_pay: rest.take_or_pay ? 1 : 0 };
   };
   const defaults = (row?: Opportunity | null) => ({
     name: row?.name ?? "", account_name: row?.account_name ?? "",
