@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { saveRecord, deleteRecord } from "@/lib/crud";
+import { deleteRecord } from "@/lib/crud";
 import { SfListView, type Column } from "@/components/SfListView";
 import { SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
 import { SfBulkRecordDialog } from "@/components/SfBulkRecordDialog";
@@ -162,6 +162,7 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
 }) {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  const [bulkCreateOpen, setBulkCreateOpen] = useState(false);
   const [editRow, setEditRow] = useState<any | null>(null);
   const [bulkRows, setBulkRows] = useState<any[] | null>(null);
   const queryKey = ["related-list", parentId, definition.key];
@@ -190,7 +191,7 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
         <span style={{ fontSize: 13, color: "#444" }}>{isLoading ? "Carregando…" : `${rows.length} registros`}</span>
         <div style={{ display: "flex", gap: 6 }}>
           {!fullScreen && <button className="sf-btn" title="Abrir em tela cheia" onClick={onFullScreen}>⛶ Tela cheia</button>}
-          <button className="sf-btn sf-btn--brand" onClick={() => setCreateOpen(true)}>Novo</button>
+          <button className="sf-btn" onClick={() => setBulkCreateOpen(true)}>Criar em lote</button>\n          <button className="sf-btn sf-btn--brand" onClick={() => setCreateOpen(true)}>Novo</button>
         </div>
       </div>
       <SfListView
@@ -215,7 +216,7 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
       {createOpen && <SfRecordDialog title={`Novo: ${definition.label}`} table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setCreateOpen(false)} onSaved={refresh} />}
       {editRow && <SfRecordDialog title={`Editar: ${editRow.name ?? definition.label}`} table={definition.table} recordId={editRow.id} fields={definition.fields} defaults={definition.rowDefaults(editRow, parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setEditRow(null)} onSaved={refresh} />}
       {bulkRows && <SfBulkRecordDialog table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} rows={bulkRows} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setBulkRows(null)} onSaved={refresh} />}
-      {createOpen && <SfBulkRecordDialog table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setCreateOpen(false)} onSaved={refresh} />}
+      {bulkCreateOpen && <SfBulkRecordDialog table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setCreateOpen(false)} onSaved={refresh} />}
     </>
   );
 
