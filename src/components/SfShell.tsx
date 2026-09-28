@@ -1,5 +1,6 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { APP_VERSION } from "../lib/version";
 
 const TABS: Array<{ label: string; to: string }> = [
   { label: "Início", to: "/" },
@@ -22,6 +23,7 @@ export function SfShell({ children }: { children: ReactNode }) {
         <div className="sf-gh-left">
           <div className="sf-cloud-logo" aria-hidden></div>
           <span className="sf-gh-title">CRM</span>
+          <span className="sf-gh-version" title="Versão do aplicativo">{APP_VERSION}</span>
         </div>
         <div className="sf-gh-search">
           <input className="sf-search-input" placeholder="Pesquisar" />
