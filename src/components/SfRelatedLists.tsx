@@ -217,7 +217,7 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
       {createOpen && <SfRecordDialog title={`Novo: ${definition.label}`} table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setCreateOpen(false)} onSaved={refresh} />}
       {editRow && <SfRecordDialog title={`Editar: ${editRow.name ?? definition.label}`} table={definition.table} recordId={editRow.id} fields={definition.fields} defaults={definition.rowDefaults(editRow, parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setEditRow(null)} onSaved={refresh} />}
       {bulkRows && <SfBulkRecordDialog table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} rows={bulkRows} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setBulkRows(null)} onSaved={refresh} />}
-      {bulkCreateOpen && <SfBulkRecordDialog table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setCreateOpen(false)} onSaved={refresh} />}
+      {bulkCreateOpen && <SfBulkRecordDialog table={definition.table} fields={definition.fields} defaults={definition.createDefaults(parentId)} transform={definition.transform ? (form) => definition.transform!(form, parentId) : undefined} onClose={() => setBulkCreateOpen(false)} onSaved={refresh} />}
     </>
   );
 
