@@ -30,25 +30,30 @@ type Props = {
 
 export function SfRelatedLists({ objectType, parentId, definitions }: Props) {
   const storageKey = `sf-related-lists:${objectType}`;
-  const [items, setItems] = useState<RelatedListItem[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as RelatedListItem[] | null;
-        if (Array.isArray(saved)) return saved.filter((item) => definitions.some((definition) => definition.key === item.definitionKey));
-      } catch { /* Use defaults if browser storage is invalid. */ }
-    }
-    return definitions.filter((definition) => definition.defaultVisible).map((definition, index) => ({
+  const [items, setItems] = useState<RelatedListItem[]>(() =>
+    definitions.filter((definition) => definition.defaultVisible).map((definition, index) => ({
       id: `default-${definition.key}-${index}`,
       definitionKey: definition.key,
-    }));
-  });
+    })),
+  );
+  const [storageReady, setStorageReady] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as RelatedListItem[] | null;
+      if (Array.isArray(saved)) {
+        setItems(saved.filter((item) => definitions.some((definition) => definition.key === item.definitionKey)));
+      }
+    } catch { /* Use defaults if browser storage is invalid. */ }
+    setStorageReady(true);
+  }, [storageKey]);
+
   const [manageOpen, setManageOpen] = useState(false);
   const [choice, setChoice] = useState("");
   const [fullScreen, setFullScreen] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(items));
-  }, [items, storageKey]);
+    if (storageReady) localStorage.setItem(storageKey, JSON.stringify(items));
+  }, [items, storageKey, storageReady]);
 
   const activeItems = items.map((item) => ({
     ...item,
