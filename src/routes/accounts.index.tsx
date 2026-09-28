@@ -4,7 +4,9 @@ import { useState } from "react";
 import { listAccounts, deleteRecord } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfListView, type Column } from "@/components/SfListView";
-import { SfRecordDialog } from "@/components/SfRecordDialog";
+import { SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
+import { SfBulkRecordDialog } from "@/components/SfBulkRecordDialog";
+import { exportCsv } from "@/lib/csv";
 import { fmtMoney, HealthPill, StatusPill } from "@/lib/format";
 import { TIPOS, STATUS, RISCOS, SAUDE } from "@/lib/options";
 
@@ -46,6 +48,8 @@ function AccountsListPage() {
   const qc = useQueryClient();
   const [showNew, setShowNew] = useState(false);
   const [editRow, setEditRow] = useState<Account | null>(null);
+  const [bulkEditRows, setBulkEditRows] = useState<Account[] | null>(null);
+  const [bulkCreate, setBulkCreate] = useState(false);
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["accounts"],
@@ -65,6 +69,25 @@ function AccountsListPage() {
     }
     qc.invalidateQueries({ queryKey: ["accounts"] });
   }
+
+  const fields: FieldDef[] = [
+            { name: "name", label: "Nome da conta", required: true },
+            { name: "type", label: "Tipo", type: "select", options: TIPOS },
+            { name: "industry", label: "Setor" },
+            { name: "city", label: "Cidade" },
+            { name: "state", label: "Estado" },
+            { name: "phone", label: "Telefone" },
+            { name: "website", label: "Site" },
+            { name: "account_owner", label: "Responsável" },
+            { name: "revenue", label: "Faturamento anual", type: "number" },
+            { name: "employees", label: "Funcionários", type: "number" },
+            { name: "lifetime_value", label: "Valor de vida (LTV)", type: "number" },
+            { name: "health", label: "Saúde", type: "select", options: SAUDE },
+            { name: "customer_status", label: "Status", type: "select", options: STATUS },
+            { name: "risk_level", label: "Risco", type: "select", options: RISCOS },
+            { name: "branch_name", label: "Filial" },
+            { name: "notes", label: "Observações", type: "textarea" },
+          ];
 
   const columns: Column<Account>[] = [
     {
@@ -171,6 +194,7 @@ function AccountsListPage() {
           <div className="sf-ph-sub">{accounts.length} itens • Ordenado por nome da conta</div>
         </div>
         <div className="sf-ph-actions">
+          <button className="sf-btn" onClick={() => setBulkCreate(true)}>Criar em lote</button>
           <button className="sf-btn sf-btn--brand" onClick={() => setShowNew(true)}>
             Nova
           </button>
@@ -192,12 +216,27 @@ function AccountsListPage() {
             Atualizar
           </button>
         }
+        bulkActions={[
+          { label: "Editar selecionados", onRun: (rows) => setBulkEditRows(rows) },
+          { label: "Exportar CSV", onRun: (rows) => exportCsv(rows, fields) },
+          { label: "Excluir selecionados", variant: "danger", onRun: async (rows) => {
+            if (!confirm(`Excluir ${rows.length} contas selecionadas? Os contatos vinculados também serão removidos.`)) return;
+            await Promise.all(rows.map((row) => deleteRecord({ data: { table: "accounts", id: row.id } })));
+            qc.invalidateQueries({ queryKey: ["accounts"] });
+          } },
+        ]}
         rowActions={[
           { label: "Editar", onRun: (r) => setEditRow(r) },
           { label: "Excluir", onRun: deleteAccount },
         ]}
       />
 
+      {bulkCreate && (
+        <SfBulkRecordDialog table="accounts" fields={fields} defaults={{}} onClose={() => setBulkCreate(false)} onSaved={() => qc.invalidateQueries({ queryKey: ["accounts"] })} />
+      )}
+      {bulkEditRows && (
+        <SfBulkRecordDialog table="accounts" fields={fields} defaults={{}} rows={bulkEditRows} onClose={() => setBulkEditRows(null)} onSaved={() => qc.invalidateQueries({ queryKey: ["accounts"] })} />
+      )}
       {(showNew || editRow) && (
         <SfRecordDialog
           title={editRow ? `Editar ${editRow.name}` : "Nova conta"}
@@ -226,24 +265,7 @@ function AccountsListPage() {
             branch_name: editRow?.branch_name ?? "",
             notes: editRow?.notes ?? "",
           }}
-          fields={[
-            { name: "name", label: "Nome da conta", required: true },
-            { name: "type", label: "Tipo", type: "select", options: TIPOS },
-            { name: "industry", label: "Setor" },
-            { name: "city", label: "Cidade" },
-            { name: "state", label: "Estado" },
-            { name: "phone", label: "Telefone" },
-            { name: "website", label: "Site" },
-            { name: "account_owner", label: "Responsável" },
-            { name: "revenue", label: "Faturamento anual", type: "number" },
-            { name: "employees", label: "Funcionários", type: "number" },
-            { name: "lifetime_value", label: "Valor de vida (LTV)", type: "number" },
-            { name: "health", label: "Saúde", type: "select", options: SAUDE },
-            { name: "customer_status", label: "Status", type: "select", options: STATUS },
-            { name: "risk_level", label: "Risco", type: "select", options: RISCOS },
-            { name: "branch_name", label: "Filial" },
-            { name: "notes", label: "Observações", type: "textarea" },
-          ]}
+          fields={fields}
         />
       )}
     </SfShell>
