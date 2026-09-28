@@ -120,8 +120,8 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(async 
   };
   const target = TABLES[table] as any;
   if (!target) throw new Error(`Objeto desconhecido: ${table}`);
-  if (!Array.isArray(records) || records.length === 0 || records.length > 100) {
-    throw new Error("A operação deve conter entre 1 e 100 registros.");
+  if (!Array.isArray(records) || records.length === 0 || records.length > 500) {
+    throw new Error("A operação deve conter entre 1 e 500 registros.");
   }
   const now = new Date().toISOString();
   for (let offset = 0; offset < records.length; offset += 10) {
@@ -144,7 +144,7 @@ export const deleteRecordsBulk = createServerFn({ method: "POST" }).handler(asyn
   const target = TABLES[table] as any;
   const uniqueIds = Array.from(new Set(ids ?? []));
   if (!target) throw new Error(`Objeto desconhecido: ${table}`);
-  if (uniqueIds.length === 0 || uniqueIds.length > 100) {
+  if (uniqueIds.length === 0 || uniqueIds.length > 500) {
     throw new Error("A operação deve conter entre 1 e 100 registros.");
   }
   if (table === "accounts") {
