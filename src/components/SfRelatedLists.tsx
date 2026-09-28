@@ -191,7 +191,8 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
         <span style={{ fontSize: 13, color: "#444" }}>{isLoading ? "Carregando…" : `${rows.length} registros`}</span>
         <div style={{ display: "flex", gap: 6 }}>
           {!fullScreen && <button className="sf-btn" title="Abrir em tela cheia" onClick={onFullScreen}>⛶ Tela cheia</button>}
-          <button className="sf-btn" onClick={() => setBulkCreateOpen(true)}>Criar em lote</button>\n          <button className="sf-btn sf-btn--brand" onClick={() => setCreateOpen(true)}>Novo</button>
+          <button className="sf-btn" onClick={() => setBulkCreateOpen(true)}>Criar em lote</button>
+          <button className="sf-btn sf-btn--brand" onClick={() => setCreateOpen(true)}>Novo</button>
         </div>
       </div>
       <SfListView
