@@ -13,3 +13,4 @@ Use the three numeric segments as follows. Increment only the segment that match
 ## Version history
 
 - `v1.02.03` — Show the current app version beside CRM and establish the versioning policy.
+- `v2.02.03` — Add global data reset and factory restore, plus object list customization.
