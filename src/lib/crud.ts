@@ -122,12 +122,44 @@ export const getContactFull = createServerFn({ method: "GET" }).handler(async ({
   return { contact, account: account ?? null };
 });
 
+const OPPORTUNITY_STAGES = ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"] as const;
+
+/** Valida a máquina de estados no servidor para formulários individuais e operações em lote. */
+async function validateOpportunityStage(recordId: string | null | undefined, data: Record<string, unknown>) {
+  if (!Object.prototype.hasOwnProperty.call(data, "stage")) return;
+  const nextStage = String(data.stage ?? "");
+  if (!OPPORTUNITY_STAGES.includes(nextStage as (typeof OPPORTUNITY_STAGES)[number])) {
+    throw new Error("Selecione uma etapa válida para a oportunidade.");
+  }
+  if (!recordId) {
+    if (nextStage !== "Prospecção") throw new Error("Toda oportunidade deve começar em Prospecção.");
+    return;
+  }
+
+  const [current] = await db.select({ stage: opportunities.stage }).from(opportunities).where(eq(opportunities.id, recordId));
+  if (!current) throw new Error("Oportunidade não encontrada.");
+  if (current.stage === nextStage) return;
+  if (current.stage === "Prospecção" && nextStage === "Negociação") return;
+  if (current.stage === "Aprovação" && nextStage === "Negociação") return;
+  if (current.stage === "Negociação" && nextStage === "Aprovação") {
+    throw new Error("Antes de avançar, conclua e sincronize uma Cotação.");
+  }
+  if (current.stage === "Aprovação" && nextStage === "Formalização") {
+    throw new Error("Antes de formalizar, registre a aprovação da oportunidade.");
+  }
+  if (current.stage === "Formalização" && nextStage === "Fechado") {
+    throw new Error("O fechamento depende da formalização via NetLex.");
+  }
+  throw new Error("A oportunidade só pode avançar pelas etapas disponíveis no Path.");
+}
+
 /** Insert ou update genérico, usado pelo SfRecordDialog. */
 export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ data: input }) => {
   await ensureSchema();
   const { table, recordId, data } = input as SaveInput;
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
+  if (table === "opportunities") await validateOpportunityStage(recordId, data);
   const now = new Date().toISOString();
   const values = { ...(data as object), updated_at: now };
   if (recordId) {
@@ -157,7 +189,8 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(async 
   const now = new Date().toISOString();
   for (let offset = 0; offset < records.length; offset += 10) {
     const chunk = records.slice(offset, offset + 10);
-    await Promise.all(chunk.map(({ recordId, data }) => {
+    await Promise.all(chunk.map(async ({ recordId, data }) => {
+      if (table === "opportunities") await validateOpportunityStage(recordId, data);
       const values = { ...data, updated_at: now };
       if (recordId) {
         return db.update(target).set(values).where(eq(target.id, recordId));
