@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, isNull } from "drizzle-orm";
 import { db, ensureSchema } from "./db";
 import { accounts, contacts, TABLES, type TableName } from "./schema";
 
@@ -105,7 +105,8 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
       .set(values as never)
       .where(eq((t as typeof t & { id: never }).id, recordId));
   } else {
-    await db.insert(t).values({ ...values, created_at: now } as never);
+    // Sempre gera o id no servidor — nunca confia no payload do cliente.
+    await db.insert(t).values({ id: crypto.randomUUID(), ...values, created_at: now } as never);
   }
   return { ok: true };
 });
@@ -117,8 +118,11 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
   if (table === "accounts") {
-    await db.delete(contacts).where(eq(contacts.account_id, id));
+    await db.delete(contacts).where(
+      id ? eq(contacts.account_id, id) : isNull(contacts.account_id),
+    );
   }
-  await db.delete(t).where(eq((t as typeof t & { id: never }).id, id));
+  // Registros salvos sem id (bug antigo) ficam com id NULL — limpa pelo IS NULL.
+  await db.delete(t).where(id ? eq((t as typeof t & { id: never }).id, id) : isNull((t as typeof t & { id: never }).id));
   return { ok: true };
 });
