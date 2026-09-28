@@ -224,13 +224,13 @@ function AccountDetailPage() {
           </Card>
         )}
 
-        {tab !== "Visão geral" && <SfRelatedLists objectType="accounts" parentId={id} definitions={ACCOUNT_RELATED_LISTS} />}
-
         {tab === "Contatos" && (
           <Card title={`Contatos (${contacts.length})`}>
             <ContactsTable rows={contacts} />
           </Card>
         )}
+
+        {tab !== "Visão geral" && <SfRelatedLists objectType="accounts" parentId={id} definitions={ACCOUNT_RELATED_LISTS} />}
       </div>
 
       {showNewContact && (
