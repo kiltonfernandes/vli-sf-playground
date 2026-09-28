@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteRecord } from "@/lib/crud";
+import { deleteRecord, deleteRecordsBulk } from "@/lib/crud";
 import { SfListView, type Column } from "@/components/SfListView";
 import { SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
 import { SfBulkRecordDialog } from "@/components/SfBulkRecordDialog";
@@ -210,7 +210,7 @@ function RelatedListSection({ listId, definition, parentId, onManage, onFullScre
           { label: "Exportar CSV", onRun: (selectedRows) => exportCsv(selectedRows, definition.fields) },
           { label: "Excluir selecionados", variant: "danger", onRun: async (selectedRows) => {
             if (!confirm(`Excluir ${selectedRows.length} registros selecionados? Esta ação não pode ser desfeita.`)) return;
-            await Promise.all(selectedRows.map((row) => deleteRecord({ data: { table: definition.table, id: row.id } })));
+            await deleteRecordsBulk({ data: { table: definition.table, ids: selectedRows.map((row) => String(row.id)) } });
             await refresh();
           } },
         ]}
