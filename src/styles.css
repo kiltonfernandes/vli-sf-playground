@@ -190,6 +190,16 @@
   color: #032d60;
   font-size: 15px;
 }
+.sf-gh-version {
+  padding: 2px 7px;
+  border: 1px solid #dddbda;
+  border-radius: 10px;
+  color: #706e6b;
+  background: #fafaf9;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
 .sf-gh-search {
   flex: 1;
 }

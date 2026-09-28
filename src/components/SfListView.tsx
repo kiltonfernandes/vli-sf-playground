@@ -35,6 +35,7 @@ type Props<T> = {
   pageSize?: number;
   bulkActions?: BulkAction<T>[];
   rowActions?: RowAction<T>[];
+  objectKey?: string;
 };
 
 export function SfListView<T>({
@@ -49,6 +50,7 @@ export function SfListView<T>({
   pageSize: initialPageSize = 25,
   bulkActions = [],
   rowActions = [],
+  objectKey = itemLabel,
 }: Props<T>) {
   const [q, setQ] = useState("");
   const [sorts, setSorts] = useState<{ key: string; dir: "asc" | "desc" }[]>(
@@ -65,6 +67,28 @@ export function SfListView<T>({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [columnSettingsOpen, setColumnSettingsOpen] = useState(false);
+  const [columnPrefs, setColumnPrefs] = useState<{ order: string[]; hidden: string[] }>(() => {
+    if (typeof window === "undefined") return { order: [], hidden: [] };
+    try { return JSON.parse(localStorage.getItem("sf-columns:" + objectKey) || '{"order":[],"hidden":[]}'); }
+    catch { return { order: [], hidden: [] }; }
+  });
+  const shownColumns = useMemo(() => {
+    const byKey = new Map(columns.map((column) => [column.key, column]));
+    const ordered = [...columnPrefs.order.map((key) => byKey.get(key)).filter((column): column is Column<T> => !!column), ...columns.filter((column) => !columnPrefs.order.includes(column.key))];
+    return ordered.filter((column) => !columnPrefs.hidden.includes(column.key));
+  }, [columns, columnPrefs]);
+  function saveColumnPrefs(next: typeof columnPrefs) {
+    setColumnPrefs(next);
+    localStorage.setItem("sf-columns:" + objectKey, JSON.stringify(next));
+  }
+  function moveColumn(key: string, delta: number) {
+    const keys = [...(columnPrefs.order.length ? columnPrefs.order : columns.map((column) => column.key))];
+    const index = keys.indexOf(key), target = index + delta;
+    if (target < 0 || target >= keys.length) return;
+    [keys[index], keys[target]] = [keys[target], keys[index]];
+    saveColumnPrefs({ ...columnPrefs, order: keys });
+  }
 
   const filtered = useMemo(() => {
     let out = rows;
@@ -223,7 +247,7 @@ export function SfListView<T>({
           <button className="slds-icon-btn" title="Atualizar" onClick={() => location.reload()}>
             ⟳
           </button>
-          <button className="slds-icon-btn" title="Editar"></button>
+          <button className={"slds-icon-btn " + (columnSettingsOpen ? "is-active" : "")} title="Configurar colunas" aria-label="Configurar colunas" onClick={() => setColumnSettingsOpen((open) => !open)}>⚙</button>
           <button className="slds-icon-btn" title="Gráficos"></button>
           <button
             className={`slds-icon-btn ${filterPanel ? "is-active" : ""}`}
@@ -273,6 +297,24 @@ export function SfListView<T>({
         </div>
       )}
 
+      {columnSettingsOpen && (
+        <div className="sf-modal-backdrop" onClick={() => setColumnSettingsOpen(false)}>
+          <section className="sf-modal" role="dialog" aria-modal="true" aria-label={`Configurações da lista de ${itemLabel}`} onClick={(event) => event.stopPropagation()}>
+            <div className="sf-modal-header"><h2>Colunas da lista</h2><button className="sf-btn" onClick={() => setColumnSettingsOpen(false)}>Fechar</button></div>
+            <div className="sf-modal-body">
+              <p>Escolha as colunas visíveis e ajuste a ordem.</p>
+              {columns.map((column, index) => (
+                <div key={column.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #ecebea" }}>
+                  <input type="checkbox" checked={!columnPrefs.hidden.includes(column.key)} onChange={(event) => saveColumnPrefs({ ...columnPrefs, hidden: event.target.checked ? columnPrefs.hidden.filter((key) => key !== column.key) : [...columnPrefs.hidden, column.key] })} />
+                  <span style={{ flex: 1 }}>{column.label}</span>
+                  <button className="sf-btn" disabled={index === 0} onClick={() => moveColumn(column.key, -1)}>↑</button>
+                  <button className="sf-btn" disabled={index === columns.length - 1} onClick={() => moveColumn(column.key, 1)}>↓</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
       <div className="slds-lv-body">
         {/* Main panel */}
         <div className="slds-lv-main">
@@ -290,7 +332,7 @@ export function SfListView<T>({
                     />
                   </th>
                   <th className="slds-lv-th-num">#</th>
-                  {columns.map((c) => {
+                  {shownColumns.map((c) => {
                     const sIdx = sorts.findIndex((s) => s.key === c.key);
                     const isSort = sIdx !== -1;
                     const dir = isSort ? sorts[sIdx].dir : null;
@@ -327,7 +369,7 @@ export function SfListView<T>({
                         <input type="checkbox" checked={isSel} onChange={() => toggleRow(id)} />
                       </td>
                       <td className="slds-lv-td-num">{(safePage - 1) * pageSize + i + 1}</td>
-                      {columns.map((c) => (
+                      {shownColumns.map((c) => (
                         <td key={c.key} style={{ textAlign: c.align ?? "left" }}>
                           {c.render(r)}
                         </td>
