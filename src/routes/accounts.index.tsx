@@ -194,6 +194,7 @@ function AccountsListPage() {
           <div className="sf-ph-sub">{accounts.length} itens • Ordenado por nome da conta</div>
         </div>
         <div className="sf-ph-actions">
+          <button className="sf-btn" onClick={() => setBulkCreate(true)}>Criar em lote</button>
           <button className="sf-btn sf-btn--brand" onClick={() => setShowNew(true)}>
             Nova
           </button>
@@ -215,7 +216,16 @@ function AccountsListPage() {
             Atualizar
           </button>
         }
-        bulkActions={[\n          { label: "Editar selecionados", onRun: (rows) => setBulkEditRows(rows) },\n          { label: "Exportar CSV", onRun: (rows) => exportCsv(rows, fields) },\n          { label: "Excluir selecionados", variant: "danger", onRun: async (rows) => {\n            if (!confirm(`Excluir ${rows.length} contas selecionadas? Os contatos vinculados também serão removidos.`)) return;\n            await Promise.all(rows.map((row) => deleteRecord({ data: { table: "accounts", id: row.id } })));\n            qc.invalidateQueries({ queryKey: ["accounts"] });\n          } },\n        ]}\n        rowActions={[
+        bulkActions={[
+          { label: "Editar selecionados", onRun: (rows) => setBulkEditRows(rows) },
+          { label: "Exportar CSV", onRun: (rows) => exportCsv(rows, fields) },
+          { label: "Excluir selecionados", variant: "danger", onRun: async (rows) => {
+            if (!confirm(`Excluir ${rows.length} contas selecionadas? Os contatos vinculados também serão removidos.`)) return;
+            await Promise.all(rows.map((row) => deleteRecord({ data: { table: "accounts", id: row.id } })));
+            qc.invalidateQueries({ queryKey: ["accounts"] });
+          } },
+        ]}
+        rowActions={[
           { label: "Editar", onRun: (r) => setEditRow(r) },
           { label: "Excluir", onRun: deleteAccount },
         ]}
