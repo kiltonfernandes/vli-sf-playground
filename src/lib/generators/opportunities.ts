@@ -1,7 +1,7 @@
 import type { Generator } from "./core";
 
 const INSTRUMENTS = ["Contrato", "ACS", "Aditivo", "Outros Serviços"];
-const STAGES = ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"];
+
 const SEGMENTS = ["Ferroviário", "Portuário", "Rodoviário"];
 
 export const opportunitiesGenerator: Generator = (f) => {
@@ -27,7 +27,7 @@ export const opportunitiesGenerator: Generator = (f) => {
   return {
     name: `${f.helpers.arrayElement(["Contrato", "Renovação", "Expansão", "Operação"])} ${f.company.name()}`,
     instrument_type: instrument,
-    stage: f.helpers.arrayElement(STAGES),
+    stage: "Prospecção",
     segment,
     amount: f.number.int({ min: 100_000, max: 25_000_000 }),
     close_date: f.date.soon({ days: 120 }).toISOString().slice(0, 10),

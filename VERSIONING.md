@@ -12,6 +12,8 @@ Use the three numeric segments as follows. Increment only the segment that match
 
 ## Version history
 
+- `v2.05.03` — Add a Salesforce-style Path to the Opportunity record page, enforce stage transitions server-side, and update the README with the project changelog, data model, relationships, and validation rules.
+
 - `v1.02.03` — Show the current app version beside CRM and establish the versioning policy.
 - `v2.02.03` — Add global data reset and factory restore, plus object list customization.
 - `v2.03.03` — Add the Opportunity object with Account relationship and seeded Faker generation, without inserting sample records.
