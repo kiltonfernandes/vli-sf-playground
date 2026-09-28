@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getContactFull } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
+import { SfRelatedLists } from "@/components/SfRelatedLists";
 import { SfDeleteButton } from "@/components/SfRecordDialog";
 import { fmtDate } from "@/lib/format";
 
@@ -111,6 +112,7 @@ function ContactDetailPage() {
             <div style={{ padding: 16, color: "#706e6b" }}>Sem conta vinculada.</div>
           )}
         </Card>
+        <SfRelatedLists objectType="contacts" parentId={id} definitions={[]} />
       </div>
     </SfShell>
   );
