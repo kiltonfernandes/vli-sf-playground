@@ -6,6 +6,9 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v2.06.03 — Edição pelos campos principais do Path
+- Torna o link **Editar** do painel de campos principais do Path funcional; ele abre a edição da oportunidade.
+
 ### v2.05.03 — Path e regras de etapa da Oportunidade
 - Adiciona Path estilo Salesforce na página individual da oportunidade, logo abaixo do cabeçalho do registro.
 - Exibe as etapas Prospecção → Negociação → Aprovação → Formalização → Fechado, campos principais e orientações contextuais.
