@@ -94,6 +94,16 @@ export const getAccountFull = createServerFn({ method: "GET" }).handler(async ({
   return { account: account ?? null, contacts: contactRows, opportunities: opportunityRows };
 });
 
+export const getOpportunityFull = createServerFn({ method: "GET" }).handler(async ({ data: input }) => {
+  await ensureSchema();
+  const { id } = input as { id: string };
+  const [opportunity] = await db.select().from(opportunities).where(eq(opportunities.id, id));
+  if (!opportunity) return null;
+  const [account] = await db.select({ id: accounts.id, name: accounts.name, industry: accounts.industry, city: accounts.city, state: accounts.state })
+    .from(accounts).where(eq(accounts.id, opportunity.account_id));
+  return { opportunity, account: account ?? null };
+});
+
 export const getContactFull = createServerFn({ method: "GET" }).handler(async ({ data: input }) => {
   await ensureSchema();
   const { id } = input as { id: string };

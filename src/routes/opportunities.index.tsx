@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { deleteRecord, deleteRecordsBulk, listAccountOptions, listOpportunities } from "@/lib/crud";
@@ -54,7 +54,7 @@ function OpportunitiesPage() {
     { name: "take_or_pay", label: "Take or Pay", type: "checkbox" },
   ];
   const columns: Column<Opportunity>[] = [
-    { key: "name", label: "Oportunidade", render: (row) => row.name, sortValue: (row) => row.name, searchValue: (row) => row.name },
+    { key: "name", label: "Oportunidade", render: (row) => <Link to="/opportunities/$id" params={{ id: row.id }} style={{ color: "#0176d3", fontWeight: 600 }}>{row.name}</Link>, sortValue: (row) => row.name, searchValue: (row) => row.name },
     { key: "account", label: "Conta de gestão", render: (row) => row.account_name, sortValue: (row) => row.account_name, searchValue: (row) => row.account_name },
     { key: "instrument", label: "Instrumento", render: (row) => row.instrument_type, sortValue: (row) => row.instrument_type, filterOptions: INSTRUMENTS, filterValue: (row) => row.instrument_type },
     { key: "stage", label: "Estágio", render: (row) => row.stage, sortValue: (row) => row.stage, filterOptions: STAGES, filterValue: (row) => row.stage },
