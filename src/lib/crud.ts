@@ -87,12 +87,11 @@ export const getAccountFull = createServerFn({ method: "GET" }).handler(async ({
   await ensureSchema();
   const { id } = input as { id: string };
   const [account] = await db.select().from(accounts).where(eq(accounts.id, id));
-  const contactRows = await db
-    .select()
-    .from(contacts)
-    .where(eq(contacts.account_id, id))
-    .orderBy(asc(contacts.name));
-  return { account: account ?? null, contacts: contactRows };
+  const [contactRows, opportunityRows] = await Promise.all([
+    db.select().from(contacts).where(eq(contacts.account_id, id)).orderBy(asc(contacts.name)),
+    db.select().from(opportunities).where(eq(opportunities.account_id, id)).orderBy(asc(opportunities.name)),
+  ]);
+  return { account: account ?? null, contacts: contactRows, opportunities: opportunityRows };
 });
 
 export const getContactFull = createServerFn({ method: "GET" }).handler(async ({ data: input }) => {
