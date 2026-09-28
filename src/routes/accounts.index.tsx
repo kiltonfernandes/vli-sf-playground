@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { listAccounts, deleteRecord } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfListView, type Column } from "@/components/SfListView";
 import { SfRecordDialog } from "@/components/SfRecordDialog";
@@ -50,17 +50,17 @@ function AccountsListPage() {
   const { data: accounts = [] } = useQuery({
     queryKey: ["accounts"],
     queryFn: async () => {
-      const { data } = await supabase.from("accounts").select("*").order("name");
-      return (data ?? []) as unknown as Account[];
+      return (await listAccounts()) as unknown as Account[];
     },
   });
 
   async function deleteAccount(a: Account) {
     if (!confirm(`Excluir a conta "${a.name}"? Os contatos vinculados também serão removidos.`))
       return;
-    const { error } = await supabase.from("accounts").delete().eq("id", a.id);
-    if (error) {
-      alert(error.message);
+    try {
+      await deleteRecord({ data: { table: "accounts", id: a.id } });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao excluir.");
       return;
     }
     qc.invalidateQueries({ queryKey: ["accounts"] });

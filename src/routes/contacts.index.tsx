@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { listContactsWithAccount, listAccountOptions, deleteRecord } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfListView, type Column } from "@/components/SfListView";
 import { SfRecordDialog } from "@/components/SfRecordDialog";
@@ -40,31 +40,23 @@ function ContactsPage() {
   const { data = [] } = useQuery({
     queryKey: ["contacts-with-acc"],
     queryFn: async () => {
-      const [contacts, accounts] = await Promise.all([
-        supabase.from("contacts").select("*").order("name"),
-        supabase.from("accounts").select("id,name"),
-      ]);
-      const accMap = new Map((accounts.data ?? []).map((a) => [a.id, a.name]));
-      return ((contacts.data ?? []) as any[]).map((c) => ({
-        ...c,
-        account_name: accMap.get(c.account_id) ?? "—",
-      })) as Row[];
+      return (await listContactsWithAccount()) as unknown as Row[];
     },
   });
 
   const { data: accountList = [] } = useQuery({
     queryKey: ["accounts-min"],
     queryFn: async () => {
-      const { data } = await supabase.from("accounts").select("id,name").order("name");
-      return (data ?? []) as { id: string; name: string }[];
+      return (await listAccountOptions()) as { id: string; name: string }[];
     },
   });
 
   async function deleteContact(c: Row) {
     if (!confirm(`Excluir o contato "${c.name}"? Esta ação não pode ser desfeita.`)) return;
-    const { error } = await supabase.from("contacts").delete().eq("id", c.id);
-    if (error) {
-      alert(error.message);
+    try {
+      await deleteRecord({ data: { table: "contacts", id: c.id } });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao excluir.");
       return;
     }
     qc.invalidateQueries({ queryKey: ["contacts-with-acc"] });

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { saveRecord, deleteRecord } from "@/lib/crud";
 import { generators, generateRecord, randomSeed } from "@/lib/generators";
 
 export type FieldDef = {
@@ -53,17 +53,14 @@ export function SfRecordDialog({
     setErr(null);
     setSaving(true);
     const payload = transform ? transform(form) : form;
-    const { error } = recordId
-      ? await (supabase
-          .from(table as any)
-          .update(payload)
-          .eq("id", recordId) as any)
-      : await (supabase.from(table as any).insert(payload) as any);
-    setSaving(false);
-    if (error) {
-      setErr(error.message);
+    try {
+      await saveRecord({ data: { table, recordId: recordId ?? null, data: payload } });
+    } catch (e) {
+      setSaving(false);
+      setErr(e instanceof Error ? e.message : "Erro ao salvar o registro.");
       return;
     }
+    setSaving(false);
     onSaved?.();
     onClose();
   }
@@ -200,15 +197,14 @@ export function SfDeleteButton({
   async function go() {
     if (!confirm("Excluir este registro? Esta ação não pode ser desfeita.")) return;
     setBusy(true);
-    const { error } = await (supabase
-      .from(table as any)
-      .delete()
-      .eq("id", id) as any);
-    setBusy(false);
-    if (error) {
-      alert(error.message);
+    try {
+      await deleteRecord({ data: { table, id } });
+    } catch (e) {
+      setBusy(false);
+      alert(e instanceof Error ? e.message : "Erro ao excluir o registro.");
       return;
     }
+    setBusy(false);
     onDeleted?.();
     if (redirectTo) window.location.href = redirectTo;
   }

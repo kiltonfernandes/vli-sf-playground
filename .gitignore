@@ -28,6 +28,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# SQLite local (dev sem Turso)
+*.db
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

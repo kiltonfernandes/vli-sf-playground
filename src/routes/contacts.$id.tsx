@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getContactFull } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfDeleteButton } from "@/components/SfRecordDialog";
 import { fmtDate } from "@/lib/format";
@@ -25,14 +25,7 @@ function ContactDetailPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["contact-full", id],
     queryFn: async () => {
-      const { data: c } = await supabase.from("contacts").select("*").eq("id", id).maybeSingle();
-      if (!c) return null;
-      const { data: account } = await supabase
-        .from("accounts")
-        .select("id,name,industry,city,state")
-        .eq("id", c.account_id)
-        .maybeSingle();
-      return { contact: c as any, account: account as any };
+      return await getContactFull({ data: { id } });
     },
   });
 

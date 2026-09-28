@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { homeDashboard } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { fmtMoney } from "@/lib/format";
 
@@ -31,17 +31,7 @@ function HomePage() {
   const { data } = useQuery({
     queryKey: ["home-dashboard"],
     queryFn: async () => {
-      const [accounts, contacts] = await Promise.all([
-        supabase
-          .from("accounts")
-          .select("id,name,health,risk_level,lifetime_value,account_owner")
-          .order("lifetime_value", { ascending: false }),
-        supabase.from("contacts").select("id"),
-      ]);
-      return {
-        accounts: (accounts.data ?? []) as Account[],
-        contactCount: (contacts.data ?? []).length,
-      };
+      return await homeDashboard();
     },
   });
 

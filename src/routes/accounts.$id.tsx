@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { getAccountFull } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfDeleteButton, SfRecordDialog } from "@/components/SfRecordDialog";
 import { fmtMoney, fmtDate, HealthPill, RiskPill, StatusPill } from "@/lib/format";
@@ -33,11 +33,7 @@ function AccountDetailPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["account-full", id],
     queryFn: async () => {
-      const [acc, contacts] = await Promise.all([
-        supabase.from("accounts").select("*").eq("id", id).maybeSingle(),
-        supabase.from("contacts").select("*").eq("account_id", id).order("name"),
-      ]);
-      return { account: acc.data as any, contacts: (contacts.data ?? []) as any[] };
+      return await getAccountFull({ data: { id } });
     },
   });
 

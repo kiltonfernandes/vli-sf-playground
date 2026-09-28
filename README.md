@@ -1,6 +1,6 @@
 # VLI SF Playground 🚂
 
-CRM de estudos em **português do Brasil** com interface no estilo **Salesforce Lightning**, construído com **TanStack Start** (React 19 + SSR), **Tailwind CSS 4** e componentes **shadcn/Radix UI**, com backend no **Supabase**.
+CRM de estudos em **português do Brasil** com interface no estilo **Salesforce Lightning**, construído com **TanStack Start** (React 19 + SSR), **Tailwind CSS 4** e componentes **shadcn/Radix UI**, com **Drizzle ORM** sobre **Turso (libSQL/SQLite)**. Todo o acesso ao banco roda no servidor, via server functions do TanStack Start.
 
 ## Objetos
 
