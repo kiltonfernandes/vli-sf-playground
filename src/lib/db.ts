@@ -197,6 +197,22 @@ export function ensureSchema(): Promise<void> {
       sql: `INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`,
       args: ["current_approver_id", "", now],
     });
+    // Aprovadores chumbados no sistema: sempre disponíveis para assumir a visão de alçada.
+    const defaultApprovers: Array<[string, string, string]> = [
+      ["Marina Duarte", "Diretoria", "marina.duarte@example.com"],
+      ["Ricardo Nunes", "Gerente Geral", "ricardo.nunes@example.com"],
+      ["Fernanda Lopes", "Gerente Geral", "fernanda.lopes@example.com"],
+    ];
+    const existing = await client.execute(`SELECT email FROM approvers`);
+    const existingEmails = new Set(existing.rows.map((row) => String(row.email)));
+    for (const [name, level, email] of defaultApprovers) {
+      if (!existingEmails.has(email)) {
+        await client.execute({
+          sql: `INSERT INTO approvers (id, name, level, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [crypto.randomUUID(), name, level, email, now, now],
+        });
+      }
+    }
   })();
   return schemaReady;
 }
