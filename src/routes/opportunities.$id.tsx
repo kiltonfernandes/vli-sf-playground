@@ -15,6 +15,7 @@ import { SfDeleteButton, SfRecordDialog, type FieldDef } from "@/components/SfRe
 import { SfBulkRecordDialog } from "@/components/SfBulkRecordDialog";
 import { SfListView, type Column } from "@/components/SfListView";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { BusinessRulesChecklist, type BusinessRule } from "@/components/BusinessRulesChecklist";
 
 const INSTRUMENTS = ["Contrato", "ACS", "Aditivo", "Outros Serviços"];
 const STAGES = ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"];
@@ -90,6 +91,57 @@ function OpportunityRecordPage() {
 
   const opportunity = data.opportunity;
   const account = data.account;
+  const hasSyncedQuote = quoteRows.some(
+    (quote) => !!quote.is_synced && quote.status === "Sincronizada",
+  );
+  const opportunityRules: BusinessRule[] = [
+    {
+      label: "Conta de gestão vinculada",
+      passed: !!account,
+      detail: account?.name ?? "Vincule uma Conta de gestão à Oportunidade.",
+    },
+    {
+      label: "Instrumento aceito para Cotação",
+      passed: ["Contrato", "ACS"].includes(opportunity.instrument_type),
+      detail: ["Contrato", "ACS"].includes(opportunity.instrument_type)
+        ? opportunity.instrument_type
+        : "O fluxo atual aceita Contrato ou ACS.",
+    },
+    {
+      label: "Segmento ferroviário",
+      passed: opportunity.segment === "Ferroviário",
+      detail: opportunity.segment ?? "Selecione Ferroviário.",
+    },
+    {
+      label: "Vigência preenchida e válida",
+      passed: isOpportunityTermValid(opportunity),
+      detail: isOpportunityTermValid(opportunity)
+        ? `${fmtDate(opportunity.contract_start)} a ${fmtDate(opportunity.contract_end)}`
+        : opportunity.instrument_type === "ACS"
+          ? "Preencha as datas e mantenha a vigência abaixo de 12 meses."
+          : "Preencha início e fim da vigência em ordem válida.",
+    },
+    {
+      label: "Dia de aplicação do diesel definido",
+      passed: [1, 10, 20].includes(Number(opportunity.application_day)),
+      detail: `Dia atual: ${opportunity.application_day ?? "não definido"}`,
+    },
+    {
+      label: "Oportunidade em Negociação",
+      passed: STAGES.indexOf(opportunity.stage) >= STAGES.indexOf("Negociação"),
+      detail:
+        STAGES.indexOf(opportunity.stage) >= STAGES.indexOf("Negociação")
+          ? `Etapa atual: ${opportunity.stage}`
+          : "Avance a Oportunidade para criar a Cotação.",
+    },
+    {
+      label: "Cotação concluída e sincronizada",
+      passed: hasSyncedQuote,
+      detail: hasSyncedQuote
+        ? "A Oportunidade pode avançar para Aprovação."
+        : "Conclua e sincronize uma Cotação para liberar Aprovação.",
+    },
+  ];
   const fields: FieldDef[] = [
     { name: "name", label: "Nome da oportunidade", required: true },
     {
@@ -112,7 +164,13 @@ function OpportunityRecordPage() {
     { name: "close_date", label: "Data de fechamento", type: "date" },
     { name: "contract_start", label: "Início da vigência", type: "date" },
     { name: "contract_end", label: "Fim da vigência", type: "date" },
-    { name: "application_day", label: "Dia de aplicação", type: "select", options: ["1", "10", "20"], required: true },
+    {
+      name: "application_day",
+      label: "Dia de aplicação",
+      type: "select",
+      options: ["1", "10", "20"],
+      required: true,
+    },
     { name: "diesel_pct", label: "Reajuste diesel (%)", type: "number" },
     { name: "igpm_pct", label: "Reajuste IGP-M (%)", type: "number" },
     { name: "ipca_pct", label: "Reajuste IPCA (%)", type: "number" },
@@ -353,9 +411,8 @@ function OpportunityRecordPage() {
 
       <OpportunityPath
         stage={opportunity.stage}
-        hasSyncedQuote={quoteRows.some(
-          (quote) => !!quote.is_synced && quote.status === "Sincronizada",
-        )}
+        hasSyncedQuote={hasSyncedQuote}
+        rules={opportunityRules}
         opportunityId={id}
         accountName={account?.name ?? "—"}
         instrument={opportunity.instrument_type}
@@ -532,7 +589,10 @@ function OpportunityRecordPage() {
               <Field label="Contratante(s)" value={opportunity.contracting_parties ?? "—"} />
               <Field label="Entidade VLI" value={opportunity.vli_entity ?? "—"} />
               <Field label="Devedor solidário" value={opportunity.joint_debtor ?? "—"} />
-              <Field label="Tarifa padrão para novas Cotações" value={opportunity.integration_tariff} />
+              <Field
+                label="Tarifa padrão para novas Cotações"
+                value={opportunity.integration_tariff}
+              />
               <Field label="Take or Pay" value={opportunity.take_or_pay ? "Sim" : "Não"} />
             </div>
           </Card>
@@ -652,6 +712,7 @@ function OpportunityRecordPage() {
 function OpportunityPath({
   stage,
   hasSyncedQuote,
+  rules,
   accountName,
   instrument,
   segment,
@@ -665,6 +726,7 @@ function OpportunityPath({
 }: {
   stage: string;
   hasSyncedQuote: boolean;
+  rules: BusinessRule[];
   accountName: string;
   instrument: string;
   segment: string;
@@ -678,27 +740,6 @@ function OpportunityPath({
 }) {
   const activeIndex = Math.max(0, STAGES.indexOf(stage));
   const canAdvance = stage === "Prospecção" || (stage === "Negociação" && hasSyncedQuote);
-  const guidance: Record<string, string[]> = {
-    Prospecção: [
-      "Confirme a conta de gestão e o tipo de instrumento.",
-      "Avance para Negociação para habilitar a preparação da cotação.",
-    ],
-    Negociação: [
-      "Revise os dados comerciais e jurídicos da oportunidade.",
-      hasSyncedQuote
-        ? "A Cotação está sincronizada. Avance para Aprovação."
-        : "Para avançar, conclua e sincronize uma cotação.",
-    ],
-    Aprovação: [
-      "A oportunidade aguarda decisão das alçadas responsáveis.",
-      "Uma aprovação registrada será necessária para formalizar.",
-    ],
-    Formalização: [
-      "Prepare as partes, vigência, reajuste e tarifa de integração.",
-      "O fechamento depende da formalização e da integração NetLex.",
-    ],
-    Fechado: ["O ciclo comercial da oportunidade foi concluído."],
-  };
   return (
     <section className="sf-path-card" aria-label="Caminho da oportunidade">
       <button
@@ -762,29 +803,7 @@ function OpportunityPath({
                 <strong>{closeDate}</strong>
               </div>
             </div>
-            <div className="sf-path-guidance">
-              <div className="sf-path-panel-heading">Orientações para o sucesso</div>
-              <ul>
-                {(guidance[stage] ?? []).map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-              {stage === "Negociação" && !hasSyncedQuote && (
-                <p className="sf-path-blocker">
-                  Avanço bloqueado: conclua e sincronize uma Cotação primeiro.
-                </p>
-              )}
-              {stage === "Aprovação" && (
-                <p className="sf-path-blocker">
-                  Avanço bloqueado: registre a aprovação antes da formalização.
-                </p>
-              )}
-              {stage === "Formalização" && (
-                <p className="sf-path-blocker">
-                  Avanço bloqueado: a integração NetLex ainda não está disponível.
-                </p>
-              )}
-            </div>
+            <BusinessRulesChecklist rules={rules} />
           </div>
           {message && (
             <div className="sf-path-message" role="status">
@@ -795,6 +814,17 @@ function OpportunityPath({
       )}
     </section>
   );
+}
+
+function isOpportunityTermValid(opportunity: any) {
+  if (!opportunity.contract_start || !opportunity.contract_end) return false;
+  const start = new Date(`${opportunity.contract_start}T00:00:00Z`);
+  const end = new Date(`${opportunity.contract_end}T00:00:00Z`);
+  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || end < start) return false;
+  if (opportunity.instrument_type !== "ACS") return true;
+  const limit = new Date(start);
+  limit.setUTCMonth(limit.getUTCMonth() + 12);
+  return end < limit;
 }
 
 function Highlight({ label, value }: { label: string; value: string }) {

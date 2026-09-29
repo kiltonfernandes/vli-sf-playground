@@ -12,6 +12,7 @@ Use the three numeric segments as follows. Increment only the segment that match
 
 ## Version history
 
+- `v4.13.03` — Replace static success guidance with live business-rule checklists on Opportunity and Quote pages; show completion in green and pending requirements in red.
 - `v4.12.03` — Make Faker Accounts management Accounts; generate supported railway Contracts/ACS with future-validity windows and application day; create eligible planned flows when needed without exposing the FLOU source rule; let the first Item-and-Schedule screenflow select CBS or net tariff; automatically apply the Opportunity day to diesel dates.
 - `v3.12.03` — Enable Opportunity Path Negociação → Aprovação only after a Quote is completed and synced; refresh related Quote state after sync.
 - `v3.11.03` — Replace separate Item and Agenda forms with a guided, atomic Item + Agenda screenflow, including multiple periods/services, deterministic Faker seed and server-side validation.

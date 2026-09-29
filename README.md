@@ -6,6 +6,13 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v4.13.03 — Acompanhamento das regras de negócio
+
+- Troca as orientações estáticas na Oportunidade por um checklist calculado com a Conta, o instrumento, o segmento, a vigência, o dia de aplicação, a etapa e o estado da Cotação.
+- Adiciona ao lado da Cotação um checklist calculado dos Itens e Agendas: Conta do Fluxo, origem FLOU, dimensões completas, volume e tarifa, FRETE, Base Diesel e data, rateio, duplicidade e regras de ACS.
+- Cada regra pendente aparece em vermelho e cada regra atendida em verde; o painel recalcula após salvar, editar, excluir, concluir ou sincronizar registros.
+- Verificação: build de produção aprovado.
+
 ### v4.12.03 — Regras de geração e entrada da Cotação
 
 - Contas criadas pelo Faker passam a ser sempre Contas de gestão (`Cliente - Direto`).

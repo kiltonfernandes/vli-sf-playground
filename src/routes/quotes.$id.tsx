@@ -15,6 +15,7 @@ import { SfShell } from "@/components/SfShell";
 import { SfRecordDialog, SfDeleteButton, type FieldDef } from "@/components/SfRecordDialog";
 import { QuoteItemEditDialog, QuoteItemScreenflow } from "@/components/QuoteItemScreenflow";
 import { fmtMoney } from "@/lib/format";
+import { BusinessRulesChecklist } from "@/components/BusinessRulesChecklist";
 
 const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
 export const Route = createFileRoute("/quotes/$id")({
@@ -61,6 +62,7 @@ function QuotePage() {
   const tariffMode = q.tariff_mode || options?.opportunity?.integration_tariff || "Líquida";
   const canChangeTariff = !items.some((item) => item.schedules?.length);
   const applicationDay = Number(options?.opportunity?.application_day ?? 10);
+  const businessRules = getQuoteBusinessRules(q, items, options, tariffMode, applicationDay);
   const baseLabels = new Map((options?.dieselBases ?? []).map((base: any) => [base.name, base.id]));
   const scheduleFields: FieldDef[] = [
     { name: "year", label: "Ano", type: "number", required: true },
@@ -221,7 +223,8 @@ function QuotePage() {
           value={String(items.reduce((n, item) => n + item.schedules.length, 0))}
         />
       </div>
-      <div style={{ padding: 20, display: "grid", gap: 14 }}>
+      <div className="quote-record-layout">
+        <div className="quote-record-main">
         <Section id="header" title="Detalhes da Cotação" subtitle="Cabeçalho e vínculo Salesforce">
           <div className="sf-fields">
             <Field label="Oportunidade" value={q.opportunity_name} />
@@ -367,67 +370,6 @@ function QuotePage() {
             ))}
           </div>
         </Section>
-        <Section
-          id="rules"
-          title="Regras e validações aplicadas"
-          subtitle="Ferroviário · Contrato e ACS"
-        >
-          <ul style={{ margin: 0, lineHeight: 1.8, paddingLeft: 22 }}>
-            <li>
-              <strong>Cliente</strong>
-              <ul>
-                <li>
-                  É a Conta de gestão da Oportunidade.
-                  <ul>
-                    <li>O sistema oferece os Fluxos Planejados elegíveis vinculados a essa Conta.</li>
-                  </ul>
-                </li>
-                <li>
-                  <strong>Origem</strong>
-                  <ul>
-                    <li>
-                      <strong>Destino</strong>
-                      <ul>
-                        <li>
-                          <strong>Mercadoria</strong>
-                          <ul>
-                            <li>
-                              <strong>Modal</strong> — neste escopo, Ferroviário.
-                            </li>
-                          </ul>
-                        </li>
-                      </ul>
-                    </li>
-                  </ul>
-                </li>
-              </ul>
-            </li>
-            <li>
-              <strong>Itens e agendas</strong>
-              <ul>
-                <li>Volume é inteiro e positivo; CBS ou tarifa líquida deve estar preenchida.</li>
-                <li>Cada grupo tem FRETE, Base Diesel e rateio que fecha o total e soma 100%.</li>
-                <li>A Data de aplicação diesel usa automaticamente o dia configurado na Oportunidade.</li>
-                <li>
-                  Duplicidade usa código de fluxo, ano/mês, divisão, praça e serviço, inclusive
-                  entre Cotações.
-                </li>
-              </ul>
-            </li>
-            <li>
-              <strong>ACS</strong>
-              <ul>
-                <li>Vigência inferior a 12 meses; não aceita tolerâncias nem Take or Pay.</li>
-              </ul>
-            </li>
-            <li>
-              <strong>Oportunidade</strong>
-              <ul>
-                <li>Concluir e sincronizar libera o avanço para Aprovação.</li>
-              </ul>
-            </li>
-          </ul>
-        </Section>
         <div
           className="sf-card"
           style={{
@@ -473,6 +415,10 @@ function QuotePage() {
             </button>
           </div>
         </div>
+        </div>
+        <aside className="quote-record-aside">
+          <BusinessRulesChecklist rules={businessRules} />
+        </aside>
       </div>
       {(newItem || scheduleItem) && (
         <QuoteItemScreenflow
@@ -649,4 +595,191 @@ function Field({ label, value }: { label: string; value: string }) {
       <div className="sf-field-value">{value}</div>
     </div>
   );
+}
+
+function getQuoteBusinessRules(
+  quote: any,
+  items: any[],
+  options: any,
+  tariffMode: string,
+  applicationDay: number,
+): BusinessRule[] {
+  const schedules = items.flatMap((item) =>
+    (item.schedules ?? []).map((schedule: any) => ({ ...schedule, item })),
+  );
+  const groups = new Map<string, any[]>();
+  for (const schedule of schedules) {
+    groups.set(schedule.schedule_key, [...(groups.get(schedule.schedule_key) ?? []), schedule]);
+  }
+  const accountMatches =
+    items.length > 0 && items.every((item) => item.account_id === quote.account_id);
+  const dimensionsComplete =
+    items.length > 0 &&
+    items.every(
+      (item) =>
+        item.modal === "Ferroviário" &&
+        item.origin_system === "FLOU" &&
+        !!item.origin_id &&
+        !!item.destination_id &&
+        !!item.merchandise_id,
+    );
+  const hasSchedules = schedules.length > 0;
+  const tariffRulesPass =
+    hasSchedules &&
+    schedules.every((row) => {
+      const selected = Number(tariffMode === "CBS" ? row.tariff_cbs : row.tariff_net);
+      const other = Number(tariffMode === "CBS" ? row.tariff_net : row.tariff_cbs);
+      return (
+        Number.isInteger(Number(row.volume)) && Number(row.volume) > 0 && selected > 0 && other <= 0
+      );
+    });
+  const freightPass =
+    groups.size > 0 &&
+    [...groups.values()].every((rows) =>
+      rows.some((row) => String(row.service).toUpperCase() === "FRETE"),
+    );
+  const dieselPass =
+    hasSchedules &&
+    schedules.every((row) => {
+      if (!row.diesel_base_id || !row.diesel_base_date) return false;
+      const value = String(row.diesel_base_date);
+      const full = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      const monthYear = value.match(/^(\d{2})\/(\d{4})$/);
+      if (full)
+        return (
+          Number(full[1]) === applicationDay &&
+          Number(full[2]) === Number(row.month) &&
+          Number(full[3]) === Number(row.year)
+        );
+      return (
+        !!monthYear &&
+        Number(monthYear[1]) === Number(row.month) &&
+        Number(monthYear[2]) === Number(row.year)
+      );
+    });
+  const allocationPass =
+    groups.size > 0 &&
+    [...groups.values()].every((rows) => {
+      const amountField = tariffMode === "CBS" ? "accessory_cbs" : "accessory_net";
+      const percentField = tariffMode === "CBS" ? "accessory_cbs_pct" : "accessory_net_pct";
+      const amounts = rows.map((row) => Number(row[amountField] ?? 0));
+      const percentages = rows.map((row) => Number(row[percentField] ?? 0));
+      const mainTariff = Number(tariffMode === "CBS" ? rows[0].tariff_cbs : rows[0].tariff_net);
+      const amountCents = amounts.reduce((sum, value) => sum + Math.round(value * 100), 0);
+      const mainCents = Math.round(mainTariff * 100);
+      const percentTotal = percentages.reduce((sum, value) => sum + value, 0);
+      return Math.abs(amountCents - mainCents) <= 2 && Math.abs(percentTotal - 100) <= 0.2;
+    });
+  const localCounts = new Map<string, number>();
+  for (const row of schedules) {
+    const key = `${row.schedule_key}|${row.service}`;
+    localCounts.set(key, (localCounts.get(key) ?? 0) + 1);
+  }
+  const otherQuoteSchedules = (options?.usedSchedules ?? []).filter(
+    (row: any) => row.quote_id !== quote.id,
+  );
+  const noDuplicates =
+    hasSchedules &&
+    [...localCounts.values()].every((count) => count === 1) &&
+    schedules.every(
+      (row) =>
+        !otherQuoteSchedules.some(
+          (other: any) => other.schedule_key === row.schedule_key && other.service === row.service,
+        ),
+    );
+  const opportunity = options?.opportunity;
+  const termValid = isQuoteTermValid(opportunity);
+  const acsRulesPass =
+    opportunity?.instrument_type !== "ACS" ||
+    (termValid &&
+      items.every((item) => !item.top_eligible) &&
+      schedules.every(
+        (row) =>
+          Number(row.tolerance_vli_volume ?? 0) === 0 &&
+          Number(row.tolerance_client_volume ?? 0) === 0 &&
+          Number(row.tolerance_vli_tariff ?? 0) === 0 &&
+          Number(row.tolerance_client_tariff ?? 0) === 0,
+      ));
+  const synced = !!quote.is_synced && quote.status === "Sincronizada";
+
+  return [
+    {
+      label: "Cliente igual à Conta de gestão",
+      passed: accountMatches,
+      detail: accountMatches
+        ? `${quote.account_name}: todos os Itens usam Fluxos desta Conta.`
+        : "Adicione um Item com Fluxo da Conta de gestão desta Oportunidade.",
+    },
+    {
+      label: "Origem, destino, mercadoria e modal definidos",
+      passed: dimensionsComplete,
+      detail: dimensionsComplete
+        ? "Os Itens usam Fluxos ferroviários completos."
+        : "Selecione um Fluxo ferroviário elegível em cada Item.",
+    },
+    {
+      label: "Volume inteiro e tarifa selecionada preenchidos",
+      passed: tariffRulesPass,
+      detail: tariffRulesPass
+        ? `Volumes positivos e tarifa ${tariffMode} consistente em todas as linhas.`
+        : `Adicione agendas com volume inteiro positivo e somente tarifa ${tariffMode}.`,
+    },
+    {
+      label: "FRETE presente em cada grupo de Agenda",
+      passed: freightPass,
+      detail: freightPass
+        ? `${groups.size} grupo(s) conferidos.`
+        : "Cada grupo de período e praça precisa conter uma linha FRETE.",
+    },
+    {
+      label: "Base Diesel e data automática válidas",
+      passed: dieselPass,
+      detail: dieselPass
+        ? `Base e data compatíveis com o dia ${applicationDay}.`
+        : "Informe a Base Diesel e a data correspondente ao período; o dia vem da Oportunidade.",
+    },
+    {
+      label: "Rateio fecha a tarifa e soma 100%",
+      passed: allocationPass,
+      detail: allocationPass
+        ? "Valores e percentuais das linhas acessórias conferidos."
+        : "Confira os valores e percentuais dos serviços em cada grupo.",
+    },
+    {
+      label: "Sem serviço duplicado na chave da Agenda",
+      passed: noDuplicates,
+      detail: noDuplicates
+        ? "Nenhum serviço repetido nesta ou em outra Cotação."
+        : "A mesma chave de Agenda já contém esse serviço.",
+    },
+    ...(opportunity?.instrument_type === "ACS"
+      ? [
+          {
+            label: "Regras ACS atendidas",
+            passed: acsRulesPass,
+            detail: acsRulesPass
+              ? "Vigência abaixo de 12 meses e sem tolerâncias ou Take or Pay."
+              : "ACS exige vigência abaixo de 12 meses e não aceita tolerâncias nem Take or Pay.",
+          },
+        ]
+      : []),
+    {
+      label: "Cotação concluída e sincronizada",
+      passed: synced,
+      detail: synced
+        ? "A sincronização foi concluída na Oportunidade."
+        : "Valide e conclua a Cotação; depois sincronize com a Oportunidade.",
+    },
+  ];
+}
+
+function isQuoteTermValid(opportunity: any) {
+  if (!opportunity?.contract_start || !opportunity?.contract_end) return false;
+  const start = new Date(`${opportunity.contract_start}T00:00:00Z`);
+  const end = new Date(`${opportunity.contract_end}T00:00:00Z`);
+  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || end < start) return false;
+  if (opportunity.instrument_type !== "ACS") return true;
+  const limit = new Date(start);
+  limit.setUTCMonth(limit.getUTCMonth() + 12);
+  return end < limit;
 }

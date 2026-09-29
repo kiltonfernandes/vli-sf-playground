@@ -1164,6 +1164,102 @@ body[data-lab-accent] .sf-icon-btn:hover {
   min-width: 0;
   padding: 0 8px;
 }
+.sf-business-rules {
+  overflow: hidden;
+}
+.sf-business-rules-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sf-business-rules-header > span {
+  color: #706e6b;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+}
+.sf-business-rules-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  list-style: none;
+}
+.sf-business-rules-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.sf-business-rules-list li.is-passed {
+  border-color: #91c9a5;
+  background: #f0f9f2;
+  color: #216e39;
+}
+.sf-business-rules-list li.is-pending {
+  border-color: #e5a4a4;
+  background: #fff4f4;
+  color: #a61a1a;
+}
+.sf-business-rules-icon {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.sf-business-rules-list li.is-passed .sf-business-rules-icon {
+  background: #2e844a;
+}
+.sf-business-rules-list li.is-pending .sf-business-rules-icon {
+  background: #ba0517;
+}
+.sf-business-rules-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.sf-business-rules-copy strong {
+  font-weight: 600;
+}
+.sf-business-rules-copy small {
+  color: #514f4d;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.quote-record-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 340px);
+  align-items: start;
+  gap: 16px;
+  padding: 20px;
+}
+.quote-record-main {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+.quote-record-aside {
+  position: sticky;
+  top: 16px;
+  min-width: 0;
+}
+@media (max-width: 950px) {
+  .quote-record-layout {
+    grid-template-columns: 1fr;
+  }
+  .quote-record-aside {
+    position: static;
+  }
+}
 .sf-path-panel-heading {
   display: flex;
   min-height: 34px;

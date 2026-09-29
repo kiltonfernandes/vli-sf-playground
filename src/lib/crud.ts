@@ -235,6 +235,7 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
       destination_id: planned_flows.destination_id,
       merchandise_id: planned_flows.merchandise_id,
       modal: planned_flows.modal,
+      origin_system: planned_flows.origin_system,
       origin_code: locations.code,
       origin_name: locations.name,
       destination_code: locations.code,
@@ -329,8 +330,13 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
       flows: options,
       dieselBases: await db.select().from(diesel_bases).orderBy(asc(diesel_bases.name)),
       usedSchedules: await db
-        .select({ schedule_key: quote_schedules.schedule_key, service: quote_schedules.service })
-        .from(quote_schedules),
+        .select({
+          quote_id: quote_line_items.quote_id,
+          schedule_key: quote_schedules.schedule_key,
+          service: quote_schedules.service,
+        })
+        .from(quote_schedules)
+        .innerJoin(quote_line_items, eq(quote_schedules.quote_line_item_id, quote_line_items.id)),
       opportunity,
     };
   },
