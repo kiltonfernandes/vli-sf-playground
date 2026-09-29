@@ -32,8 +32,8 @@ export const accountsGenerator: Generator = (f) => {
     .replace(/ e .*$/, "")
     .split(" ")[0];
   const employees = f.number.int({ min: 5, max: 20000 });
-  const revenue =
-    Math.round((employees * f.number.int({ min: 80_000, max: 600_000 })) / 1000) * 1000;
+  const revenue = f.number.int({ min: 100, max: 9999 });
+  const lifetimeValue = f.number.int({ min: 100, max: 9999 });
   return {
     name: `${nome} ${f.helpers.arrayElement(SETORES)} ${f.helpers.arrayElement(SUFIXOS)}`,
     // As Contas Faker deste projeto representam sempre a Conta de gestão.
@@ -46,7 +46,7 @@ export const accountsGenerator: Generator = (f) => {
     account_owner: f.person.fullName(),
     revenue,
     employees,
-    lifetime_value: Math.round(revenue * f.number.float({ min: 0.01, max: 0.3 })),
+    lifetime_value: lifetimeValue,
     health: f.helpers.arrayElement(SAUDE),
     customer_status: f.helpers.arrayElement(STATUS),
     risk_level: f.helpers.arrayElement(RISCOS),
