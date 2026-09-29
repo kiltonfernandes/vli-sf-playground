@@ -14,6 +14,22 @@ import { Route as AccountsIndexRouteImport } from './routes/accounts.index'
 import { Route as AccountsIdRouteImport } from './routes/accounts.$id'
 import { Route as ContactsIndexRouteImport } from './routes/contacts.index'
 import { Route as ContactsIdRouteImport } from './routes/contacts.$id'
+import { Route as DieselBasesIndexRouteImport } from './routes/diesel-bases.index'
+import { Route as DieselBasesIdRouteImport } from './routes/diesel-bases.$id'
+import { Route as LocationsIndexRouteImport } from './routes/locations.index'
+import { Route as LocationsIdRouteImport } from './routes/locations.$id'
+import { Route as MerchandiseIndexRouteImport } from './routes/merchandise.index'
+import { Route as MerchandiseIdRouteImport } from './routes/merchandise.$id'
+import { Route as OpportunitiesIndexRouteImport } from './routes/opportunities.index'
+import { Route as OpportunitiesIdRouteImport } from './routes/opportunities.$id'
+import { Route as PlannedFlowsIndexRouteImport } from './routes/planned-flows.index'
+import { Route as PlannedFlowsIdRouteImport } from './routes/planned-flows.$id'
+import { Route as QuoteLineItemsIndexRouteImport } from './routes/quote-line-items.index'
+import { Route as QuoteLineItemsIdRouteImport } from './routes/quote-line-items.$id'
+import { Route as QuoteSchedulesIndexRouteImport } from './routes/quote-schedules.index'
+import { Route as QuoteSchedulesIdRouteImport } from './routes/quote-schedules.$id'
+import { Route as QuotesIndexRouteImport } from './routes/quotes.index'
+import { Route as QuotesIdRouteImport } from './routes/quotes.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,50 +56,251 @@ const ContactsIdRoute = ContactsIdRouteImport.update({
   path: '/contacts/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DieselBasesIndexRoute = DieselBasesIndexRouteImport.update({
+  id: '/diesel-bases/',
+  path: '/diesel-bases/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DieselBasesIdRoute = DieselBasesIdRouteImport.update({
+  id: '/diesel-bases/$id',
+  path: '/diesel-bases/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LocationsIndexRoute = LocationsIndexRouteImport.update({
+  id: '/locations/',
+  path: '/locations/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LocationsIdRoute = LocationsIdRouteImport.update({
+  id: '/locations/$id',
+  path: '/locations/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MerchandiseIndexRoute = MerchandiseIndexRouteImport.update({
+  id: '/merchandise/',
+  path: '/merchandise/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MerchandiseIdRoute = MerchandiseIdRouteImport.update({
+  id: '/merchandise/$id',
+  path: '/merchandise/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OpportunitiesIndexRoute = OpportunitiesIndexRouteImport.update({
+  id: '/opportunities/',
+  path: '/opportunities/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OpportunitiesIdRoute = OpportunitiesIdRouteImport.update({
+  id: '/opportunities/$id',
+  path: '/opportunities/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlannedFlowsIndexRoute = PlannedFlowsIndexRouteImport.update({
+  id: '/planned-flows/',
+  path: '/planned-flows/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlannedFlowsIdRoute = PlannedFlowsIdRouteImport.update({
+  id: '/planned-flows/$id',
+  path: '/planned-flows/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuoteLineItemsIndexRoute = QuoteLineItemsIndexRouteImport.update({
+  id: '/quote-line-items/',
+  path: '/quote-line-items/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuoteLineItemsIdRoute = QuoteLineItemsIdRouteImport.update({
+  id: '/quote-line-items/$id',
+  path: '/quote-line-items/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuoteSchedulesIndexRoute = QuoteSchedulesIndexRouteImport.update({
+  id: '/quote-schedules/',
+  path: '/quote-schedules/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuoteSchedulesIdRoute = QuoteSchedulesIdRouteImport.update({
+  id: '/quote-schedules/$id',
+  path: '/quote-schedules/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuotesIndexRoute = QuotesIndexRouteImport.update({
+  id: '/quotes/',
+  path: '/quotes/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuotesIdRoute = QuotesIdRouteImport.update({
+  id: '/quotes/$id',
+  path: '/quotes/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts/$id': typeof AccountsIdRoute
   '/contacts/$id': typeof ContactsIdRoute
+  '/diesel-bases/$id': typeof DieselBasesIdRoute
+  '/locations/$id': typeof LocationsIdRoute
+  '/merchandise/$id': typeof MerchandiseIdRoute
+  '/opportunities/$id': typeof OpportunitiesIdRoute
+  '/planned-flows/$id': typeof PlannedFlowsIdRoute
+  '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
+  '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
+  '/quotes/$id': typeof QuotesIdRoute
   '/accounts/': typeof AccountsIndexRoute
   '/contacts/': typeof ContactsIndexRoute
+  '/diesel-bases/': typeof DieselBasesIndexRoute
+  '/locations/': typeof LocationsIndexRoute
+  '/merchandise/': typeof MerchandiseIndexRoute
+  '/opportunities/': typeof OpportunitiesIndexRoute
+  '/planned-flows/': typeof PlannedFlowsIndexRoute
+  '/quote-line-items/': typeof QuoteLineItemsIndexRoute
+  '/quote-schedules/': typeof QuoteSchedulesIndexRoute
+  '/quotes/': typeof QuotesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts/$id': typeof AccountsIdRoute
   '/contacts/$id': typeof ContactsIdRoute
+  '/diesel-bases/$id': typeof DieselBasesIdRoute
+  '/locations/$id': typeof LocationsIdRoute
+  '/merchandise/$id': typeof MerchandiseIdRoute
+  '/opportunities/$id': typeof OpportunitiesIdRoute
+  '/planned-flows/$id': typeof PlannedFlowsIdRoute
+  '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
+  '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
+  '/quotes/$id': typeof QuotesIdRoute
   '/accounts': typeof AccountsIndexRoute
   '/contacts': typeof ContactsIndexRoute
+  '/diesel-bases': typeof DieselBasesIndexRoute
+  '/locations': typeof LocationsIndexRoute
+  '/merchandise': typeof MerchandiseIndexRoute
+  '/opportunities': typeof OpportunitiesIndexRoute
+  '/planned-flows': typeof PlannedFlowsIndexRoute
+  '/quote-line-items': typeof QuoteLineItemsIndexRoute
+  '/quote-schedules': typeof QuoteSchedulesIndexRoute
+  '/quotes': typeof QuotesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accounts/$id': typeof AccountsIdRoute
   '/contacts/$id': typeof ContactsIdRoute
+  '/diesel-bases/$id': typeof DieselBasesIdRoute
+  '/locations/$id': typeof LocationsIdRoute
+  '/merchandise/$id': typeof MerchandiseIdRoute
+  '/opportunities/$id': typeof OpportunitiesIdRoute
+  '/planned-flows/$id': typeof PlannedFlowsIdRoute
+  '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
+  '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
+  '/quotes/$id': typeof QuotesIdRoute
   '/accounts/': typeof AccountsIndexRoute
   '/contacts/': typeof ContactsIndexRoute
+  '/diesel-bases/': typeof DieselBasesIndexRoute
+  '/locations/': typeof LocationsIndexRoute
+  '/merchandise/': typeof MerchandiseIndexRoute
+  '/opportunities/': typeof OpportunitiesIndexRoute
+  '/planned-flows/': typeof PlannedFlowsIndexRoute
+  '/quote-line-items/': typeof QuoteLineItemsIndexRoute
+  '/quote-schedules/': typeof QuoteSchedulesIndexRoute
+  '/quotes/': typeof QuotesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/accounts/$id' | '/contacts/$id' | '/accounts/' | '/contacts/'
+    | '/'
+    | '/accounts/$id'
+    | '/contacts/$id'
+    | '/diesel-bases/$id'
+    | '/locations/$id'
+    | '/merchandise/$id'
+    | '/opportunities/$id'
+    | '/planned-flows/$id'
+    | '/quote-line-items/$id'
+    | '/quote-schedules/$id'
+    | '/quotes/$id'
+    | '/accounts/'
+    | '/contacts/'
+    | '/diesel-bases/'
+    | '/locations/'
+    | '/merchandise/'
+    | '/opportunities/'
+    | '/planned-flows/'
+    | '/quote-line-items/'
+    | '/quote-schedules/'
+    | '/quotes/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/accounts/$id' | '/contacts/$id' | '/accounts' | '/contacts'
+  to:
+    | '/'
+    | '/accounts/$id'
+    | '/contacts/$id'
+    | '/diesel-bases/$id'
+    | '/locations/$id'
+    | '/merchandise/$id'
+    | '/opportunities/$id'
+    | '/planned-flows/$id'
+    | '/quote-line-items/$id'
+    | '/quote-schedules/$id'
+    | '/quotes/$id'
+    | '/accounts'
+    | '/contacts'
+    | '/diesel-bases'
+    | '/locations'
+    | '/merchandise'
+    | '/opportunities'
+    | '/planned-flows'
+    | '/quote-line-items'
+    | '/quote-schedules'
+    | '/quotes'
   id:
     | '__root__'
     | '/'
     | '/accounts/$id'
     | '/contacts/$id'
+    | '/diesel-bases/$id'
+    | '/locations/$id'
+    | '/merchandise/$id'
+    | '/opportunities/$id'
+    | '/planned-flows/$id'
+    | '/quote-line-items/$id'
+    | '/quote-schedules/$id'
+    | '/quotes/$id'
     | '/accounts/'
     | '/contacts/'
+    | '/diesel-bases/'
+    | '/locations/'
+    | '/merchandise/'
+    | '/opportunities/'
+    | '/planned-flows/'
+    | '/quote-line-items/'
+    | '/quote-schedules/'
+    | '/quotes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsIdRoute: typeof AccountsIdRoute
   ContactsIdRoute: typeof ContactsIdRoute
+  DieselBasesIdRoute: typeof DieselBasesIdRoute
+  LocationsIdRoute: typeof LocationsIdRoute
+  MerchandiseIdRoute: typeof MerchandiseIdRoute
+  OpportunitiesIdRoute: typeof OpportunitiesIdRoute
+  PlannedFlowsIdRoute: typeof PlannedFlowsIdRoute
+  QuoteLineItemsIdRoute: typeof QuoteLineItemsIdRoute
+  QuoteSchedulesIdRoute: typeof QuoteSchedulesIdRoute
+  QuotesIdRoute: typeof QuotesIdRoute
   AccountsIndexRoute: typeof AccountsIndexRoute
   ContactsIndexRoute: typeof ContactsIndexRoute
+  DieselBasesIndexRoute: typeof DieselBasesIndexRoute
+  LocationsIndexRoute: typeof LocationsIndexRoute
+  MerchandiseIndexRoute: typeof MerchandiseIndexRoute
+  OpportunitiesIndexRoute: typeof OpportunitiesIndexRoute
+  PlannedFlowsIndexRoute: typeof PlannedFlowsIndexRoute
+  QuoteLineItemsIndexRoute: typeof QuoteLineItemsIndexRoute
+  QuoteSchedulesIndexRoute: typeof QuoteSchedulesIndexRoute
+  QuotesIndexRoute: typeof QuotesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -123,6 +340,118 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ContactsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/diesel-bases/': {
+      id: '/diesel-bases/'
+      path: '/diesel-bases'
+      fullPath: '/diesel-bases/'
+      preLoaderRoute: typeof DieselBasesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/diesel-bases/$id': {
+      id: '/diesel-bases/$id'
+      path: '/diesel-bases/$id'
+      fullPath: '/diesel-bases/$id'
+      preLoaderRoute: typeof DieselBasesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/locations/': {
+      id: '/locations/'
+      path: '/locations'
+      fullPath: '/locations/'
+      preLoaderRoute: typeof LocationsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/locations/$id': {
+      id: '/locations/$id'
+      path: '/locations/$id'
+      fullPath: '/locations/$id'
+      preLoaderRoute: typeof LocationsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/merchandise/': {
+      id: '/merchandise/'
+      path: '/merchandise'
+      fullPath: '/merchandise/'
+      preLoaderRoute: typeof MerchandiseIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/merchandise/$id': {
+      id: '/merchandise/$id'
+      path: '/merchandise/$id'
+      fullPath: '/merchandise/$id'
+      preLoaderRoute: typeof MerchandiseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/opportunities/': {
+      id: '/opportunities/'
+      path: '/opportunities'
+      fullPath: '/opportunities/'
+      preLoaderRoute: typeof OpportunitiesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/opportunities/$id': {
+      id: '/opportunities/$id'
+      path: '/opportunities/$id'
+      fullPath: '/opportunities/$id'
+      preLoaderRoute: typeof OpportunitiesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/planned-flows/': {
+      id: '/planned-flows/'
+      path: '/planned-flows'
+      fullPath: '/planned-flows/'
+      preLoaderRoute: typeof PlannedFlowsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/planned-flows/$id': {
+      id: '/planned-flows/$id'
+      path: '/planned-flows/$id'
+      fullPath: '/planned-flows/$id'
+      preLoaderRoute: typeof PlannedFlowsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quote-line-items/': {
+      id: '/quote-line-items/'
+      path: '/quote-line-items'
+      fullPath: '/quote-line-items/'
+      preLoaderRoute: typeof QuoteLineItemsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quote-line-items/$id': {
+      id: '/quote-line-items/$id'
+      path: '/quote-line-items/$id'
+      fullPath: '/quote-line-items/$id'
+      preLoaderRoute: typeof QuoteLineItemsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quote-schedules/': {
+      id: '/quote-schedules/'
+      path: '/quote-schedules'
+      fullPath: '/quote-schedules/'
+      preLoaderRoute: typeof QuoteSchedulesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quote-schedules/$id': {
+      id: '/quote-schedules/$id'
+      path: '/quote-schedules/$id'
+      fullPath: '/quote-schedules/$id'
+      preLoaderRoute: typeof QuoteSchedulesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quotes/': {
+      id: '/quotes/'
+      path: '/quotes'
+      fullPath: '/quotes/'
+      preLoaderRoute: typeof QuotesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quotes/$id': {
+      id: '/quotes/$id'
+      path: '/quotes/$id'
+      fullPath: '/quotes/$id'
+      preLoaderRoute: typeof QuotesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -130,8 +459,24 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsIdRoute: AccountsIdRoute,
   ContactsIdRoute: ContactsIdRoute,
+  DieselBasesIdRoute: DieselBasesIdRoute,
+  LocationsIdRoute: LocationsIdRoute,
+  MerchandiseIdRoute: MerchandiseIdRoute,
+  OpportunitiesIdRoute: OpportunitiesIdRoute,
+  PlannedFlowsIdRoute: PlannedFlowsIdRoute,
+  QuoteLineItemsIdRoute: QuoteLineItemsIdRoute,
+  QuoteSchedulesIdRoute: QuoteSchedulesIdRoute,
+  QuotesIdRoute: QuotesIdRoute,
   AccountsIndexRoute: AccountsIndexRoute,
   ContactsIndexRoute: ContactsIndexRoute,
+  DieselBasesIndexRoute: DieselBasesIndexRoute,
+  LocationsIndexRoute: LocationsIndexRoute,
+  MerchandiseIndexRoute: MerchandiseIndexRoute,
+  OpportunitiesIndexRoute: OpportunitiesIndexRoute,
+  PlannedFlowsIndexRoute: PlannedFlowsIndexRoute,
+  QuoteLineItemsIndexRoute: QuoteLineItemsIndexRoute,
+  QuoteSchedulesIndexRoute: QuoteSchedulesIndexRoute,
+  QuotesIndexRoute: QuotesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

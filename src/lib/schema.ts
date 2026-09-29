@@ -40,12 +40,13 @@ export const contacts = sqliteTable(
   (t) => [index("idx_contacts_account_id").on(t.account_id)],
 );
 
-
 export const opportunities = sqliteTable(
   "opportunities",
   {
     id: text("id").primaryKey(),
-    account_id: text("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+    account_id: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     instrument_type: text("instrument_type").notNull().default("Contrato"),
     stage: text("stage").notNull().default("Prospecção"),
@@ -68,6 +69,144 @@ export const opportunities = sqliteTable(
   (t) => [index("idx_opportunities_account_id").on(t.account_id)],
 );
 
+// Catálogo fictício, reproduzível e relacionado, usado pelo fluxo ferroviário.
+export const locations = sqliteTable("locations", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  code: text("code").notNull(),
+  city: text("city").notNull(),
+  state: text("state").notNull(),
+  microregion: text("microregion").notNull(),
+  location_type: text("location_type").notNull(),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+export const merchandise = sqliteTable("merchandise", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  unit: text("unit").notNull(),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+export const diesel_bases = sqliteTable("diesel_bases", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  anp_base: integer("anp_base").notNull().default(0),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+export const planned_flows = sqliteTable(
+  "planned_flows",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    account_id: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    origin_id: text("origin_id")
+      .notNull()
+      .references(() => locations.id),
+    destination_id: text("destination_id")
+      .notNull()
+      .references(() => locations.id),
+    merchandise_id: text("merchandise_id")
+      .notNull()
+      .references(() => merchandise.id),
+    modal: text("modal").notNull().default("Ferroviário"),
+    origin_system: text("origin_system").notNull().default("FLOU"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_planned_flows_account_id").on(t.account_id)],
+);
+
+export const quotes = sqliteTable(
+  "quotes",
+  {
+    id: text("id").primaryKey(),
+    opportunity_id: text("opportunity_id")
+      .notNull()
+      .references(() => opportunities.id, { onDelete: "cascade" }),
+    quote_number: text("quote_number").notNull(),
+    name: text("name").notNull(),
+    record_type: text("record_type").notNull().default("VLI_General"),
+    status: text("status").notNull().default("Rascunho"),
+    is_synced: integer("is_synced").notNull().default(0),
+    seed: integer("seed").notNull(),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_quotes_opportunity_id").on(t.opportunity_id)],
+);
+export const quote_line_items = sqliteTable(
+  "quote_line_items",
+  {
+    id: text("id").primaryKey(),
+    quote_id: text("quote_id")
+      .notNull()
+      .references(() => quotes.id, { onDelete: "cascade" }),
+    planned_flow_id: text("planned_flow_id")
+      .notNull()
+      .references(() => planned_flows.id, { onDelete: "cascade" }),
+    service: text("service").notNull().default("FRETE"),
+    volume_total: real("volume_total").notNull().default(0),
+    revenue_total: real("revenue_total").notNull().default(0),
+    top_eligible: integer("top_eligible").notNull().default(0),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_quote_line_items_quote_id").on(t.quote_id)],
+);
+export const quote_schedules = sqliteTable(
+  "quote_schedules",
+  {
+    id: text("id").primaryKey(),
+    quote_line_item_id: text("quote_line_item_id")
+      .notNull()
+      .references(() => quote_line_items.id, { onDelete: "cascade" }),
+    schedule_key: text("schedule_key").notNull(),
+    year: integer("year").notNull(),
+    month: integer("month").notNull(),
+    frequency: text("frequency").notNull().default("Mensal"),
+    period_window: text("period_window").notNull().default("Mês"),
+    division: text("division").notNull().default("Todas"),
+    plaza: text("plaza").notNull().default("TODAS_PRACAS_NACIONAL"),
+    volume: integer("volume").notNull(),
+    tariff_cbs: real("tariff_cbs"),
+    tariff_net: real("tariff_net").notNull(),
+    diesel_base_id: text("diesel_base_id")
+      .notNull()
+      .references(() => diesel_bases.id),
+    diesel_base_date: text("diesel_base_date"),
+    service: text("service").notNull(),
+    accessory_cbs: real("accessory_cbs"),
+    accessory_cbs_pct: real("accessory_cbs_pct"),
+    accessory_net: real("accessory_net"),
+    accessory_net_pct: real("accessory_net_pct"),
+    tolerance_vli_volume: integer("tolerance_vli_volume"),
+    tolerance_client_volume: integer("tolerance_client_volume"),
+    tolerance_vli_tariff: integer("tolerance_vli_tariff"),
+    tolerance_client_tariff: integer("tolerance_client_tariff"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_quote_schedules_item_id").on(t.quote_line_item_id),
+    index("idx_quote_schedules_key").on(t.schedule_key),
+  ],
+);
+
 /** Registro: nome do objeto -> tabela. Adicione aqui cada novo objeto. */
-export const TABLES = { accounts, contacts, opportunities } as const;
+export const TABLES = {
+  accounts,
+  contacts,
+  opportunities,
+  locations,
+  merchandise,
+  diesel_bases,
+  planned_flows,
+  quotes,
+  quote_line_items,
+  quote_schedules,
+} as const;
 export type TableName = keyof typeof TABLES;

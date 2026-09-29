@@ -3,6 +3,13 @@ import { runGenerator, type Generator } from "./core";
 import { accountsGenerator } from "./accounts";
 import { contactsGenerator } from "./contacts";
 import { opportunitiesGenerator } from "./opportunities";
+import { quotesGenerator } from "./quotes";
+import { quoteLineItemsGenerator } from "./quote-line-items";
+import { quoteSchedulesGenerator } from "./quote-schedules";
+import { locationsGenerator } from "./locations";
+import { merchandiseGenerator } from "./merchandise";
+import { dieselBasesGenerator } from "./diesel-bases";
+import { plannedFlowsGenerator } from "./planned-flows";
 
 export { randomSeed } from "./core";
 export type { Generator } from "./core";
@@ -12,6 +19,13 @@ export const generators: Record<string, Generator> = {
   accounts: accountsGenerator,
   contacts: contactsGenerator,
   opportunities: opportunitiesGenerator,
+  quotes: quotesGenerator,
+  quote_line_items: quoteLineItemsGenerator,
+  quote_schedules: quoteSchedulesGenerator,
+  locations: locationsGenerator,
+  merchandise: merchandiseGenerator,
+  diesel_bases: dieselBasesGenerator,
+  planned_flows: plannedFlowsGenerator,
 };
 
 export function generateRecord(table: string, seed: number, fields: FieldDef[]) {

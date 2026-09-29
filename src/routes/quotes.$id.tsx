@@ -1,0 +1,560 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import {
+  completeQuote,
+  deleteRecord,
+  getQuoteFull,
+  listQuoteOptions,
+  saveRecord,
+  syncQuote,
+} from "@/lib/crud";
+import { SfShell } from "@/components/SfShell";
+import { SfRecordDialog, SfDeleteButton, type FieldDef } from "@/components/SfRecordDialog";
+import { fmtMoney } from "@/lib/format";
+
+const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
+export const Route = createFileRoute("/quotes/$id")({
+  head: () => ({ meta: [{ title: "Cotação | CRM" }] }),
+  component: QuotePage,
+});
+
+function QuotePage() {
+  const { id } = Route.useParams(),
+    qc = useQueryClient();
+  const [open, setOpen] = useState<Record<string, boolean>>({ items: true }),
+    [newItem, setNewItem] = useState(false),
+    [scheduleItem, setScheduleItem] = useState<any>(null),
+    [editItem, setEditItem] = useState<any>(null),
+    [editSchedule, setEditSchedule] = useState<any>(null),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
+  const { data, isLoading } = useQuery({
+    queryKey: ["quote-full", id],
+    queryFn: () => getQuoteFull({ data: { id } }) as Promise<any>,
+  });
+  const { data: options } = useQuery({
+    queryKey: ["quote-options", data?.quote?.opportunity_id],
+    enabled: !!data?.quote,
+    queryFn: () =>
+      listQuoteOptions({ data: { opportunityId: data!.quote.opportunity_id } }) as Promise<any>,
+  });
+  if (isLoading)
+    return (
+      <SfShell>
+        <div style={{ padding: 24 }}>Carregando Cotação…</div>
+      </SfShell>
+    );
+  if (!data?.quote)
+    return (
+      <SfShell>
+        <div style={{ padding: 24 }}>
+          Cotação não encontrada. <Link to="/quotes">Voltar às Cotações</Link>
+        </div>
+      </SfShell>
+    );
+  const q = data.quote,
+    items = data.items as any[];
+  const flowLabels = new Map(
+    (options?.flows ?? []).map((flow: any) => [
+      `${flow.route} · ${flow.merchandise} · ${flow.code}`,
+      flow.id,
+    ]),
+  );
+  const baseLabels = new Map((options?.dieselBases ?? []).map((base: any) => [base.name, base.id]));
+  const itemFields: FieldDef[] = [
+    {
+      name: "flow_label",
+      label: "Fluxo planejado",
+      type: "select",
+      options: [...flowLabels.keys()],
+      required: true,
+    },
+    { name: "service", label: "Serviço", type: "select", options: SERVICES, required: true },
+  ];
+  const scheduleFields: FieldDef[] = [
+    { name: "year", label: "Ano", type: "number", required: true },
+    { name: "month", label: "Mês (1–12)", type: "number", required: true },
+    {
+      name: "frequency",
+      label: "Periodicidade",
+      type: "select",
+      options: ["Mensal", "Anual"],
+      required: true,
+    },
+    {
+      name: "period_window",
+      label: "Período",
+      type: "select",
+      options: [
+        "Mês",
+        "1ª Dezena",
+        "2ª Dezena",
+        "3ª Dezena",
+        "1ª Quinzena",
+        "2ª Quinzena",
+        "1ª Semana",
+        "2ª Semana",
+        "3ª Semana",
+        "4ª Semana",
+        "5ª Semana",
+      ],
+      required: true,
+    },
+    { name: "division", label: "Divisão" },
+    { name: "plaza", label: "Praça", placeholder: "TODAS_PRACAS_NACIONAL" },
+    { name: "volume", label: "Volume inteiro", type: "number", required: true },
+    { name: "tariff_cbs", label: "Tarifa CBS (deixe vazio se usar líquida)", type: "number" },
+    { name: "tariff_net", label: "Tarifa líquida", type: "number" },
+    {
+      name: "diesel_label",
+      label: "Base de repasse diesel",
+      type: "select",
+      options: [...baseLabels.keys()],
+      required: true,
+    },
+    { name: "diesel_base_date", label: "Data base diesel (MM/AAAA)" },
+    { name: "service", label: "Serviço", type: "select", options: SERVICES, required: true },
+    { name: "accessory_cbs", label: "Tarifa acessória CBS", type: "number" },
+    { name: "accessory_cbs_pct", label: "Percentual acessório CBS", type: "number" },
+    { name: "accessory_net", label: "Tarifa acessória líquida", type: "number" },
+    { name: "accessory_net_pct", label: "Percentual acessório líquido", type: "number" },
+    { name: "tolerance_vli_tariff", label: "Tolerância tarifa VLI", type: "number" },
+    { name: "tolerance_client_tariff", label: "Tolerância tarifa Cliente", type: "number" },
+    { name: "tolerance_vli_volume", label: "Tolerância volume VLI", type: "number" },
+    { name: "tolerance_client_volume", label: "Tolerância volume Cliente", type: "number" },
+  ];
+  const refresh = async () => {
+    await qc.invalidateQueries({ queryKey: ["quote-full", id] });
+    await qc.invalidateQueries({ queryKey: ["quotes"] });
+    await qc.invalidateQueries({ queryKey: ["quote-items"] });
+    await qc.invalidateQueries({ queryKey: ["quote-schedules"] });
+  };
+  async function doAction(action: "complete" | "sync") {
+    setMessage("");
+    setBusy(true);
+    try {
+      if (action === "complete") await completeQuote({ data: { id } });
+      else await syncQuote({ data: { id } });
+      await refresh();
+      setMessage(
+        action === "complete"
+          ? "Cotação concluída. Agora pode sincronizar com a Oportunidade."
+          : "Cotação sincronizada com a Oportunidade.",
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Não foi possível concluir a ação.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  function Section({
+    id: sectionId,
+    title,
+    subtitle,
+    children,
+  }: {
+    id: string;
+    title: string;
+    subtitle: string;
+    children: React.ReactNode;
+  }) {
+    const expanded = !!open[sectionId];
+    return (
+      <section className="sf-card" style={{ overflow: "hidden" }}>
+        <button
+          onClick={() => setOpen((v) => ({ ...v, [sectionId]: !v[sectionId] }))}
+          aria-expanded={expanded}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: "#fff",
+            border: 0,
+            padding: "15px 18px",
+            textAlign: "left",
+            cursor: "pointer",
+            color: "#16325c",
+          }}
+        >
+          <span style={{ fontSize: 18, width: 16 }}>{expanded ? "⌄" : "›"}</span>
+          <strong>{title}</strong>
+          <span style={{ color: "#706e6b", fontSize: 12 }}>{subtitle}</span>
+        </button>
+        {expanded && <div style={{ borderTop: "1px solid #e5e5e5", padding: 16 }}>{children}</div>}
+      </section>
+    );
+  }
+  return (
+    <SfShell>
+      <div className="sf-page-header">
+        <div>
+          <div className="sf-ph-eyebrow">Cotação {q.quote_number}</div>
+          <h1 className="sf-ph-title">{q.name}</h1>
+          <div className="sf-ph-sub">
+            <Link
+              to="/opportunities/$id"
+              params={{ id: q.opportunity_id }}
+              style={{ color: "#0176d3" }}
+            >
+              {q.opportunity_name}
+            </Link>{" "}
+            · {q.account_name} · {q.instrument_type} · Ferroviário
+          </div>
+        </div>
+        <div className="sf-ph-actions">
+          <Link className="sf-btn" to="/quotes">
+            Voltar
+          </Link>
+          <SfDeleteButton table="quotes" id={id} redirectTo="/quotes" />
+        </div>
+      </div>
+      <div className="sf-highlights">
+        <Highlight label="Número" value={q.quote_number} />
+        <Highlight label="Tipo" value={q.record_type} />
+        <Highlight label="Status" value={q.is_synced ? "Sincronizada" : q.status} />
+        <Highlight label="Seed" value={String(q.seed)} />
+        <Highlight label="Itens" value={String(items.length)} />
+        <Highlight
+          label="Agendas"
+          value={String(items.reduce((n, item) => n + item.schedules.length, 0))}
+        />
+      </div>
+      <div style={{ padding: 20, display: "grid", gap: 14 }}>
+        <Section id="header" title="Detalhes da Cotação" subtitle="Cabeçalho e vínculo Salesforce">
+          <div className="sf-fields">
+            <Field label="Oportunidade" value={q.opportunity_name} />
+            <Field label="Conta de gestão" value={q.account_name} />
+            <Field label="Record Type" value={q.record_type} />
+            <Field label="Status" value={q.is_synced ? "Sincronizada" : q.status} />
+            <Field label="Seed de geração" value={String(q.seed)} />
+          </div>
+        </Section>
+        <Section
+          id="items"
+          title="Itens da Cotação"
+          subtitle={`${items.length} itens, agrupados por fluxo e serviço`}
+        >
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <button className="sf-btn sf-btn--brand" onClick={() => setNewItem(true)}>
+              + Adicionar Item
+            </button>
+          </div>
+          {!items.length && (
+            <p style={{ color: "#706e6b" }}>
+              Nenhum Item. Adicione um fluxo planejado para começar a montar a Cotação manualmente.
+            </p>
+          )}
+          <div style={{ display: "grid", gap: 10 }}>
+            {items.map((item) => (
+              <details key={item.id} className="sf-nested-accordion" open>
+                <summary>
+                  <span>›</span>
+                  <strong>
+                    {item.route} · {item.merchandise_name} · {item.service}
+                  </strong>
+                  <small>
+                    {item.schedules.length} agendas · {item.unit}
+                  </small>
+                  <Link
+                    to="/quote-line-items/$id"
+                    params={{ id: item.id }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Abrir registro
+                  </Link>
+                  <button
+                    className="sf-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setEditItem(item);
+                    }}
+                  >
+                    Editar
+                  </button>
+                </summary>
+                <div style={{ padding: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 10,
+                    }}
+                  >
+                    <span>{item.schedules.length} subitens de agenda</span>
+                    <button className="sf-btn sf-btn--brand" onClick={() => setScheduleItem(item)}>
+                      + Adicionar Agenda
+                    </button>
+                  </div>
+                  {item.schedules.length > 0 && (
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="sf-table">
+                        <thead>
+                          <tr>
+                            <th>Período</th>
+                            <th>Chave da agenda</th>
+                            <th>Volume</th>
+                            <th>Tarifa</th>
+                            <th>Serviço</th>
+                            <th>Acessório</th>
+                            <th>Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {item.schedules.map((row: any) => (
+                            <tr key={row.id}>
+                              <td>
+                                {String(row.month).padStart(2, "0")}/{row.year} ·{" "}
+                                {row.period_window}
+                              </td>
+                              <td>
+                                <Link
+                                  to="/quote-schedules/$id"
+                                  params={{ id: row.id }}
+                                  style={{ color: "#0176d3" }}
+                                >
+                                  {row.schedule_key}
+                                </Link>
+                              </td>
+                              <td>
+                                {row.volume.toLocaleString("pt-BR")} {item.unit}
+                              </td>
+                              <td>{fmtMoney(Number(row.tariff_cbs ?? row.tariff_net))}</td>
+                              <td>{row.service}</td>
+                              <td>
+                                {fmtMoney(Number(row.accessory_cbs ?? row.accessory_net))} ·{" "}
+                                {Number(row.accessory_cbs_pct ?? row.accessory_net_pct).toFixed(2)}%
+                              </td>
+                              <td>
+                                <button
+                                  className="sf-link"
+                                  onClick={() => setEditSchedule({ ...row, item })}
+                                >
+                                  Editar
+                                </button>{" "}
+                                ·{" "}
+                                <button
+                                  className="sf-link"
+                                  style={{ color: "#ba0517" }}
+                                  onClick={async () => {
+                                    if (confirm("Excluir esta Agenda?")) {
+                                      await deleteRecord({
+                                        data: { table: "quote_schedules", id: row.id },
+                                      });
+                                      await refresh();
+                                    }
+                                  }}
+                                >
+                                  Excluir
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </details>
+            ))}
+          </div>
+        </Section>
+        <Section
+          id="rules"
+          title="Regras e validações aplicadas"
+          subtitle="Ferroviário · Contrato e ACS"
+        >
+          <ul style={{ margin: 0, lineHeight: 1.8 }}>
+            <li>Fluxos pertencem à Conta da oportunidade e têm origem FLOU.</li>
+            <li>Volume é inteiro e positivo; CBS ou tarifa líquida, com uma delas preenchida.</li>
+            <li>
+              Cada grupo de agenda tem FRETE, Base Diesel e rateio de tarifa/percentual que fecha o
+              total e soma 100%.
+            </li>
+            <li>
+              Duplicidade é verificada por código de fluxo, ano/mês, divisão, praça e serviço,
+              inclusive entre cotações.
+            </li>
+            <li>ACS tem vigência inferior a 12 meses e não aceita tolerâncias nem Take or Pay.</li>
+            <li>Concluir e sincronizar libera o avanço da Oportunidade para Aprovação.</li>
+          </ul>
+        </Section>
+        <div
+          className="sf-card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: 14,
+            gap: 12,
+          }}
+        >
+          <div>
+            <strong>Etapas da Cotação</strong>
+            <div style={{ fontSize: 12, color: "#706e6b" }}>
+              Rascunho → Concluída → Sincronizada
+            </div>
+            {message && (
+              <div
+                role="status"
+                style={{
+                  color:
+                    message.includes("não") || message.includes("precisa") ? "#ba0517" : "#2e844a",
+                  marginTop: 6,
+                }}
+              >
+                {message}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="sf-btn"
+              disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
+              onClick={() => doAction("complete")}
+            >
+              {busy ? "Validando…" : "Validar e concluir"}
+            </button>
+            <button
+              className="sf-btn sf-btn--brand"
+              disabled={busy || q.status !== "Concluída" || !!q.is_synced}
+              onClick={() => doAction("sync")}
+            >
+              {busy ? "Sincronizando…" : "Sincronizar com Oportunidade"}
+            </button>
+          </div>
+        </div>
+      </div>
+      {newItem && (
+        <SfRecordDialog
+          title="Adicionar Item da Cotação"
+          table="quote_line_items"
+          fields={itemFields}
+          defaults={{ flow_label: "", service: "FRETE" }}
+          transform={(form) => {
+            const { flow_label, ...rest } = form;
+            return {
+              ...rest,
+              quote_id: id,
+              planned_flow_id: flowLabels.get(flow_label),
+              volume_total: 0,
+              revenue_total: 0,
+              top_eligible: 0,
+            };
+          }}
+          onClose={() => setNewItem(false)}
+          onSaved={refresh}
+        />
+      )}
+      {editItem && (
+        <SfRecordDialog
+          title="Editar Item da Cotação"
+          table="quote_line_items"
+          recordId={editItem.id}
+          fields={itemFields}
+          defaults={{
+            flow_label:
+              [...flowLabels.keys()].find(
+                (label) => flowLabels.get(label) === editItem.planned_flow_id,
+              ) ?? "",
+            service: editItem.service,
+          }}
+          transform={(form) => {
+            const { flow_label, ...rest } = form;
+            return {
+              ...rest,
+              quote_id: id,
+              planned_flow_id: flowLabels.get(flow_label),
+              volume_total: editItem.volume_total,
+              revenue_total: editItem.revenue_total,
+              top_eligible: editItem.top_eligible,
+            };
+          }}
+          onClose={() => setEditItem(null)}
+          onSaved={refresh}
+        />
+      )}
+      {(scheduleItem || editSchedule) && (
+        <SfRecordDialog
+          title={
+            editSchedule
+              ? "Editar Agenda"
+              : `Adicionar Agenda · ${scheduleItem.route} · ${scheduleItem.service}`
+          }
+          table="quote_schedules"
+          recordId={editSchedule?.id}
+          fields={scheduleFields}
+          defaults={
+            editSchedule
+              ? {
+                  ...editSchedule,
+                  item: undefined,
+                  diesel_label:
+                    editSchedule.diesel_base_name ??
+                    [...baseLabels.keys()].find(
+                      (label) => baseLabels.get(label) === editSchedule.diesel_base_id,
+                    ) ??
+                    "",
+                }
+              : {
+                  year: 2026,
+                  month: 10,
+                  frequency: "Mensal",
+                  period_window: "Mês",
+                  division: "Todas",
+                  plaza: "TODAS_PRACAS_NACIONAL",
+                  volume: 1000,
+                  tariff_cbs: options?.opportunity?.integration_tariff === "CBS" ? 400 : "",
+                  tariff_net: options?.opportunity?.integration_tariff === "CBS" ? 0 : 400,
+                  diesel_label: "ELDORADO",
+                  diesel_base_date: "10/2026",
+                  service: scheduleItem?.service ?? "FRETE",
+                  accessory_cbs: options?.opportunity?.integration_tariff === "CBS" ? 400 : "",
+                  accessory_cbs_pct: options?.opportunity?.integration_tariff === "CBS" ? 100 : "",
+                  accessory_net: options?.opportunity?.integration_tariff === "CBS" ? 0 : 400,
+                  accessory_net_pct: options?.opportunity?.integration_tariff === "CBS" ? 0 : 100,
+                  tolerance_vli_tariff: 0,
+                  tolerance_client_tariff: 0,
+                  tolerance_vli_volume: 0,
+                  tolerance_client_volume: 0,
+                }
+          }
+          transform={(form) => {
+            const { diesel_label, ...rest } = form;
+            const parentItem = editSchedule?.item ?? scheduleItem;
+            return {
+              ...rest,
+              quote_line_item_id: parentItem.id,
+              diesel_base_id: baseLabels.get(diesel_label),
+              schedule_key: "",
+            };
+          }}
+          onClose={() => {
+            setScheduleItem(null);
+            setEditSchedule(null);
+          }}
+          onSaved={refresh}
+        />
+      )}
+    </SfShell>
+  );
+}
+function Highlight({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="sf-highlight">
+      <div className="sf-highlight-label">{label}</div>
+      <div className="sf-highlight-value">{value}</div>
+    </div>
+  );
+}
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="sf-field">
+      <div className="sf-field-label">{label}</div>
+      <div className="sf-field-value">{value}</div>
+    </div>
+  );
+}

@@ -81,8 +81,46 @@ export function ensureSchema(): Promise<void> {
       created_at text NOT NULL,
       updated_at text NOT NULL
     )`);
-    await client.execute(`CREATE INDEX IF NOT EXISTS idx_opportunities_account_id ON opportunities(account_id)`);
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_opportunities_account_id ON opportunities(account_id)`,
+    );
 
+    await client.execute(
+      `CREATE TABLE IF NOT EXISTS locations (id text PRIMARY KEY, name text NOT NULL, code text NOT NULL, city text NOT NULL, state text NOT NULL, microregion text NOT NULL, location_type text NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,
+    );
+    await client.execute(
+      `CREATE TABLE IF NOT EXISTS merchandise (id text PRIMARY KEY, name text NOT NULL, unit text NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,
+    );
+    await client.execute(
+      `CREATE TABLE IF NOT EXISTS diesel_bases (id text PRIMARY KEY, name text NOT NULL, anp_base integer NOT NULL DEFAULT 0, created_at text NOT NULL, updated_at text NOT NULL)`,
+    );
+    await client.execute(
+      `CREATE TABLE IF NOT EXISTS planned_flows (id text PRIMARY KEY, code text NOT NULL, account_id text NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, origin_id text NOT NULL REFERENCES locations(id), destination_id text NOT NULL REFERENCES locations(id), merchandise_id text NOT NULL REFERENCES merchandise(id), modal text NOT NULL DEFAULT 'Ferroviário', origin_system text NOT NULL DEFAULT 'FLOU', created_at text NOT NULL, updated_at text NOT NULL)`,
+    );
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_planned_flows_account_id ON planned_flows(account_id)`,
+    );
+    await client.execute(
+      `CREATE TABLE IF NOT EXISTS quotes (id text PRIMARY KEY, opportunity_id text NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE, quote_number text NOT NULL, name text NOT NULL, record_type text NOT NULL DEFAULT 'VLI_General', status text NOT NULL DEFAULT 'Rascunho', is_synced integer NOT NULL DEFAULT 0, seed integer NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,
+    );
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_quotes_opportunity_id ON quotes(opportunity_id)`,
+    );
+    await client.execute(
+      `CREATE TABLE IF NOT EXISTS quote_line_items (id text PRIMARY KEY, quote_id text NOT NULL REFERENCES quotes(id) ON DELETE CASCADE, planned_flow_id text NOT NULL REFERENCES planned_flows(id) ON DELETE CASCADE, service text NOT NULL DEFAULT 'FRETE', volume_total real NOT NULL DEFAULT 0, revenue_total real NOT NULL DEFAULT 0, top_eligible integer NOT NULL DEFAULT 0, created_at text NOT NULL, updated_at text NOT NULL)`,
+    );
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_quote_line_items_quote_id ON quote_line_items(quote_id)`,
+    );
+    await client.execute(
+      `CREATE TABLE IF NOT EXISTS quote_schedules (id text PRIMARY KEY, quote_line_item_id text NOT NULL REFERENCES quote_line_items(id) ON DELETE CASCADE, schedule_key text NOT NULL, year integer NOT NULL, month integer NOT NULL, frequency text NOT NULL DEFAULT 'Mensal', period_window text NOT NULL DEFAULT 'Mês', division text NOT NULL DEFAULT 'Todas', plaza text NOT NULL DEFAULT 'TODAS_PRACAS_NACIONAL', volume integer NOT NULL, tariff_cbs real, tariff_net real NOT NULL, diesel_base_id text NOT NULL REFERENCES diesel_bases(id), diesel_base_date text, service text NOT NULL, accessory_cbs real, accessory_cbs_pct real, accessory_net real, accessory_net_pct real, tolerance_vli_volume integer, tolerance_client_volume integer, tolerance_vli_tariff integer, tolerance_client_tariff integer, created_at text NOT NULL, updated_at text NOT NULL)`,
+    );
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_quote_schedules_item_id ON quote_schedules(quote_line_item_id)`,
+    );
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_quote_schedules_key ON quote_schedules(schedule_key)`,
+    );
   })();
   return schemaReady;
 }
