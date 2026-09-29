@@ -6,6 +6,13 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v4.15.03 — Criação de Agendas em lote por intervalo
+
+- Adiciona **Criar em lote** aos grupos de Agenda do screenflow, com seleção de mês inicial e final dentro da vigência da Oportunidade.
+- Cria um grupo para cada mês disponível, copiando os dados do grupo de referência e montando automaticamente a Data Base Diesel com o dia de aplicação da Oportunidade.
+- Ignora chaves de Agenda já usadas na Cotação ou existentes no formulário e informa a quantidade criada e os meses ignorados.
+- Verificação: build de produção aprovado.
+
 ### v4.14.03 — Explicações reutilizáveis das regras de negócio
 
 - O checklist compartilhado de regras aceita explicações por regra, título e descrição, para que novas páginas e etapas reutilizem o mesmo comportamento.
@@ -249,7 +256,7 @@ As regras de negócio completas do processo futuro também devem ser mantidas aq
    - Selecione Cliente → Origem → Destino → Mercadoria → Modal, nessa ordem. O Cliente vem fixo da Conta de gestão; cada seleção filtra as opções válidas seguintes.
    - Na etapa **Agendas**, escolha o serviço principal do Item, informe uma seed do Faker e adicione quantos grupos de período precisar.
    - Em cada grupo, confira período dentro da vigência, divisão, praça, volume inteiro, tarifa conforme CBS/Líquida, Base Diesel e data base. Inclua serviços; FRETE é obrigatório e o rateio deve fechar tarifa e 100%.
-   - Use **Adicionar período** para outras agendas do mesmo Fluxo. O botão **Gerar com Faker** deriva dados repetíveis da seed informada e mantém o período dentro da vigência.
+   - Use **Adicionar período** para incluir uma Agenda manualmente. **Criar em lote** gera um grupo por mês no intervalo escolhido, dentro da vigência, copiando os dados do grupo selecionado; períodos já usados são ignorados. **Gerar com Faker** continua disponível para preencher um grupo com dados repetíveis da seed.
    - Na etapa **Revisão**, confira o resumo e escolha **Salvar Item e Agendas**. O sistema grava tudo em uma transação; se alguma regra falhar, o toast explica o motivo e não deixa um Item incompleto.
    - Para acrescentar agendas a um Item já existente, expanda-o e escolha **Adicionar Agenda**: o mesmo screenflow abre com o Fluxo fixado e associa os grupos ao Item.
 6. **Concluir e sincronizar**

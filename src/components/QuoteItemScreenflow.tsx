@@ -205,6 +205,9 @@ export function QuoteItemScreenflow({
   const [itemService, setItemService] = useState(initialService);
   const [tariffMode, setTariffMode] = useState(integrationTariff);
   const [seed, setSeed] = useState(790043);
+  const [batchTarget, setBatchTarget] = useState<number | null>(null);
+  const [batchStart, setBatchStart] = useState("");
+  const [batchEnd, setBatchEnd] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const startYear = Number(contractStart?.slice(0, 4) || new Date().getFullYear());
@@ -303,6 +306,70 @@ export function QuoteItemScreenflow({
         services: last.services.map((s) => ({ ...s })),
       },
     ]);
+  }
+  function openBatch(index: number) {
+    const group = groups[index];
+    setBatchTarget(index);
+    setBatchStart(`${group.year}-${String(group.month).padStart(2, "0")}`);
+    setBatchEnd(`${endYear}-${String(endMonth).padStart(2, "0")}`);
+    setError("");
+  }
+  function createBatch() {
+    if (batchTarget === null) return;
+    const startKey = Number(batchStart.replace("-", ""));
+    const endKey = Number(batchEnd.replace("-", ""));
+    if (!batchStart || !batchEnd || startKey > endKey) {
+      setError("Escolha um intervalo válido, com o início antes do fim.");
+      return;
+    }
+    const selectedPeriods = yearMonths.filter((period) => {
+      const key = period.year * 100 + period.month;
+      return key >= startKey && key <= endKey;
+    });
+    if (!selectedPeriods.length) {
+      setError("O intervalo precisa ficar dentro da vigência da Oportunidade.");
+      return;
+    }
+
+    const template = groups[batchTarget];
+    const usedKeys = new Set(usedSchedules.map((row) => row.schedule_key));
+    const existingKeys = new Set(
+      groups.map(
+        (group) =>
+          `${selectedFlow?.code}|${group.year}${String(group.month).padStart(2, "0")}|${group.division}|${group.plaza}`,
+      ),
+    );
+    const additions: AgendaGroup[] = [];
+    let skipped = 0;
+    for (const period of selectedPeriods) {
+      const key = `${selectedFlow?.code}|${period.year}${String(period.month).padStart(2, "0")}|${template.division}|${template.plaza}`;
+      if (usedKeys.has(key) || existingKeys.has(key)) {
+        skipped++;
+        continue;
+      }
+      existingKeys.add(key);
+      additions.push({
+        ...template,
+        year: period.year,
+        month: period.month,
+        diesel_base_date: applicationDate(applicationDay, period.month, period.year),
+        services: template.services.map((service) => ({ ...service })),
+      });
+    }
+    if (!additions.length) {
+      setError(
+        "Não há meses disponíveis nesse intervalo; as Agendas já existem ou estão fora da vigência.",
+      );
+      return;
+    }
+    setGroups((old) => [...old, ...additions]);
+    setBatchTarget(null);
+    setError("");
+    toast.success(`${additions.length} novo(s) grupo(s) de Agenda adicionado(s)`, {
+      description: skipped
+        ? `${skipped} mês(es) já tinham grupo no formulário ou Agenda nessa chave. A Data Base Diesel foi ajustada automaticamente.`
+        : `Períodos de ${batchStart} a ${batchEnd}; Data Base Diesel ajustada automaticamente.`,
+    });
   }
   function generateGroup(index: number) {
     const group = groups[index];
@@ -580,10 +647,81 @@ export function QuoteItemScreenflow({
                     }}
                   >
                     <b>Grupo de Agenda {index + 1}</b>
-                    <button className="sf-btn" type="button" onClick={() => generateGroup(index)}>
-                      Gerar com Faker
-                    </button>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      <button className="sf-btn" type="button" onClick={() => generateGroup(index)}>
+                        Gerar com Faker
+                      </button>
+                      <button className="sf-btn" type="button" onClick={() => openBatch(index)}>
+                        Criar em lote
+                      </button>
+                    </div>
                   </div>
+                  {batchTarget === index && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
+                        gap: 10,
+                        alignItems: "end",
+                        marginBottom: 12,
+                        padding: 12,
+                        border: "1px solid #c9c7c5",
+                        borderRadius: 4,
+                        background: "#f8f8f8",
+                      }}
+                    >
+                      <label style={labelStyle}>
+                        Mês inicial
+                        {select(
+                          batchStart,
+                          setBatchStart,
+                          yearMonths.map((period) => {
+                            const value = `${period.year}-${String(period.month).padStart(2, "0")}`;
+                            return {
+                              value,
+                              label: `${String(period.month).padStart(2, "0")}/${period.year}`,
+                            };
+                          }),
+                        )}
+                      </label>
+                      <label style={labelStyle}>
+                        Mês final
+                        {select(
+                          batchEnd,
+                          setBatchEnd,
+                          yearMonths.map((period) => {
+                            const value = `${period.year}-${String(period.month).padStart(2, "0")}`;
+                            return {
+                              value,
+                              label: `${String(period.month).padStart(2, "0")}/${period.year}`,
+                            };
+                          }),
+                        )}
+                      </label>
+                      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                        <button
+                          className="sf-btn sf-btn--brand"
+                          type="button"
+                          onClick={createBatch}
+                        >
+                          Criar períodos
+                        </button>
+                        <button
+                          className="sf-btn"
+                          type="button"
+                          onClick={() => setBatchTarget(null)}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                      <small style={{ gridColumn: "1 / -1", color: "#514f4d" }}>
+                        Adiciona um grupo por mês no intervalo, copiando os dados e o rateio deste
+                        grupo. Se o mês inicial já estiver representado no formulário, ele será
+                        mantido e os outros meses serão adicionados. Meses fora da vigência ou com
+                        Agenda nessa chave serão ignorados.
+                      </small>
+                    </div>
+                  )}
                   <div
                     style={{
                       display: "grid",
