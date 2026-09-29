@@ -10,6 +10,19 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v5.19.04 — Margem/Alçada: validação de preço e fluxo de aprovação
+
+- Adiciona **Validar preços** na Cotação: compara o preço praticado de cada Item (fluxo × serviço) com o **preço recomendado (Jetsons mock)** por período e mostra o comparativo com desvio em R$ e %, veredito da Cotação e situação por Item.
+- O **maior desvio entre os Itens governa a Cotação inteira**: até o limite de Gerente Geral dispensa aprovação; acima exige **Gerente Geral**; acima do limite da Diretoria exige **Diretoria**. Os limiares ficam em **Configurações** (padrão 5% e 7%).
+- Concluir a Cotação agora valida os preços no servidor: item sem preço no Jetsons bloqueia com ação para gerar os preços ausentes (Faker com a seed da Cotação); desvio acima do limite cria a solicitação de alçada automaticamente e bloqueia a conclusão. Sincronizar exige preço ok ou aprovado.
+- Opções de resolução quando o preço não está ok: **Aplicar preço recomendado** (reescreve as tarifas de todos os grupos mantendo o rateio em 100%), **Gerar preços recomendados ausentes** e **Enviar para aprovação**.
+- Nova aba **Aprovação** (segunda aba, depois de Início) com a fila de solicitações pendentes, aprovação/rejeição com comentário e histórico de decisões, no padrão de processo de aprovação do Salesforce.
+- **Configurações** ganha login como aprovador (Diretoria aprova qualquer alçada; Gerente Geral só alçadas de Gerente Geral) e edição dos limiares de alçada. O aprovador logado aparece no cabeçalho.
+- Novos objetos: **Aprovadores**, **Preços Recomendados** (Jetsons mock por fluxo, serviço e período) e **Aprovações de Cotação**, com listas, rotas de registro e geradores Faker. O gerador de Cotação passa a criar os preços recomendados dos itens gerados.
+- Checklists de regras da Cotação ganham **Preço validado contra o recomendado** e **Alçada aprovada quando exigida**, com tooltips explicando critério, efeito e como atender; a página de Aprovação tem seu próprio quadro de regras.
+- O Início mostra a contagem de aprovações pendentes; editar itens ou agendas marca o preço como desatualizado e cancela aprovações obsoletas.
+- Verificação: build de produção aprovado e E2E executando todo o fluxo (validação, bloqueio, permissões por nível, rejeição, aplicação do recomendado, aprovação, conclusão e sincronização).
+
 ### v4.18.04 — Convenção de nomes para commits em lote
 
 - Define o prefixo obrigatório com versão anterior e nova versão para os títulos dos commits de cada batch.
@@ -179,6 +192,8 @@ erDiagram
     LOCATIONS ||--o{ PLANNED_FLOWS : "origem e destino"
     MERCHANDISE ||--o{ PLANNED_FLOWS : "classifica"
     DIESEL_BASES ||--o{ QUOTE_SCHEDULES : "referência"
+    PLANNED_FLOWS ||--o{ RECOMMENDED_PRICES : "recomenda"
+    QUOTES ||--o{ QUOTE_APPROVALS : "exige alçada"
 ```
 
 | Objeto          | Tabela             | Relacionamento                                                                                | Página de lista     | Página do registro      |
@@ -193,6 +208,9 @@ erDiagram
 | Cotação         | `quotes`           | `opportunity_id` obrigatório → Oportunidade                                                   | `/quotes`           | `/quotes/$id`           |
 | Item da Cotação | `quote_line_items` | Cotação + Fluxo Planejado + Serviço                                                           | `/quote-line-items` | `/quote-line-items/$id` |
 | Agenda          | `quote_schedules`  | Item + período + tarifa + diesel + serviço e rateio                                           | `/quote-schedules`  | `/quote-schedules/$id`  |
+| Aprovador       | `approvers`        | Nível de alçada (Gerente Geral ou Diretoria); logável em Configurações                        | `/approvers`        | `/approvers/$id`        |
+| Preço Recomendado | `recommended_prices` | Fluxo Planejado + serviço + período; referência do Jetsons (mock) na validação de preço   | `/recommended-prices` | `/recommended-prices/$id` |
+| Aprovação       | `quote_approvals`  | Cotação com desvio acima do limite; decidida por um Aprovador logado                           | `/approvals`        | `/approvals/$id`        |
 
 ### Relações e efeitos
 
@@ -223,7 +241,7 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - Toda oportunidade nova começa em **Prospecção**.
 - O Path permite avançar de **Prospecção** para **Negociação**.
 - A alteração de estágio é validada no servidor para CRUD individual e em lote; não depende apenas do botão ou da interface.
-- De **Negociação** para **Aprovação**, o servidor exige que uma Cotação seja concluída e sincronizada.
+- De **Negociação** para **Aprovação**, o servidor exige que uma Cotação seja concluída e sincronizada, com preços validados (ok ou aprovados por alçada).
 - De **Aprovação** para **Formalização**, exige aprovação registrada. Como o objeto/fluxo de Aprovação ainda não existe, o avanço permanece bloqueado.
 - De **Formalização** para **Fechado**, exige a formalização via NetLex. Como a integração ainda não existe, o avanço permanece bloqueado.
 - A transição de **Aprovação** para **Negociação** é permitida para representar rejeição ou cancelamento de aprovação.
@@ -233,6 +251,7 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 
 - A lista relacionada de Cotações aparece na Oportunidade ferroviária de Contrato/ACS. Uma nova Cotação exige a Oportunidade em Negociação.
 - Status da Cotação: **Rascunho → Concluída → Sincronizada**. Há no máximo uma Cotação sincronizada por Oportunidade. Concluir valida toda a hierarquia; sincronizar replica o estado para a Oportunidade.
+- Preço e alçada: o botão **Validar preços** compara cada Item com o preço recomendado (Jetsons mock) por fluxo, serviço e período. O status de preço da Cotação é **Não validada → Ok / Pendente alçada → Aprovada / Rejeitada**; editar Itens ou Agendas volta o status para Não validada. Concluir exige preço ok ou aprovado; desvio acima do limite cria a solicitação de alçada e bloqueia a conclusão até a decisão. Sincronizar também exige preço ok ou aprovado.
 - Record Type usado no escopo atual: `VLI_General`. Tipos de Quote diferentes de Contrato/ACS não são oferecidos nesta entrega.
 - Um Fluxo Planejado elegível pertence à Conta da Oportunidade e é ferroviário. O catálogo cria os registros internos de origem necessários quando a conta ainda não tem Fluxo elegível; essa origem não aparece na jornada. Location e Mercadoria são referências ligadas ao registro do fluxo. A interface monta a rota a partir das siglas cadastradas.
 - Cada agenda deve ter ano entre 1900 e 4000, mês de 1 a 12, volume inteiro positivo, Base Diesel e serviço ferroviário permitido. Na etapa de Agendas, a pessoa escolhe CBS ou líquida para a Cotação; uma vez salva a primeira Agenda, essa escolha fica fixa. Não são aceitas duas tarifas positivas.
@@ -261,6 +280,11 @@ As regras de negócio completas do processo futuro também devem ser mantidas aq
   - A chave de duplicidade usa fluxo, período, divisão e praça; o mesmo serviço não pode repetir, inclusive em outras Cotações.
 - **ACS**
   - Vigência menor que 12 meses; tolerâncias e Take or Pay zerados.
+- **Preço e Alçada**
+  - Cada Item é comparado ao preço recomendado (Jetsons mock) por fluxo, serviço e período; o desvio percentual é o desconto praticado em relação ao recomendado.
+  - O maior desvio entre os Itens governa a Cotação: até o limite de Gerente Geral (padrão 5%) dispensa aprovação; acima exige alçada de Gerente Geral; acima do limite da Diretoria (padrão 7%) exige Diretoria. Os limiares são configuráveis em Configurações.
+  - Item sem preço no Jetsons bloqueia a validação; é possível gerar os preços ausentes com a seed da Cotação ou aplicar o preço recomendado em todos os grupos (rateio recalculado em 100%).
+  - Aprovação padrão Salesforce: a solicitação vai para a fila da aba Aprovação; o aprovador logado em Configurações decide com comentário. Diretoria aprova qualquer alçada; Gerente Geral aprova apenas alçadas de Gerente Geral. Rejeição bloqueia conclusão até os preços serem ajustados e revalidados.
 - **Avanço**
   - Concluir e sincronizar a Cotação habilita a Oportunidade para Aprovação.
 
@@ -287,10 +311,15 @@ As regras de negócio completas do processo futuro também devem ser mantidas aq
    - Use **Adicionar período** para incluir uma Agenda manualmente. **Criar em lote** gera um grupo por mês no intervalo escolhido, dentro da vigência, copiando os dados do grupo selecionado; períodos já usados são ignorados. **Gerar com Faker** continua disponível para preencher um grupo com dados repetíveis da seed.
    - Na etapa **Revisão**, confira o resumo e escolha **Salvar Item e Agendas**. O sistema grava tudo em uma transação; se alguma regra falhar, o toast explica o motivo e não deixa um Item incompleto.
    - Para acrescentar agendas a um Item já existente, expanda-o e escolha **Adicionar Agenda**: o mesmo screenflow abre com o Fluxo fixado e associa os grupos ao Item.
-6. **Concluir e sincronizar**
-   - Clique **Validar e concluir**. Se houver regra pendente, o toast identifica o problema; corrija os dados e tente novamente.
+6. **Validar preços e concluir**
+   - Clique **Validar preços**. O painel compara cada Item com o preço recomendado (Jetsons mock) e mostra o veredito com o desvio máximo e a alçada exigida, se houver.
+   - Se algum Item estiver sem preço recomendado, use **Gerar preços recomendados ausentes** (Faker com a seed da Cotação). Se o desvio passar do limite, aplique o **Aplicar preço recomendado** ou **Enviar para aprovação**.
+   - Clique **Validar e concluir**. Se houver regra pendente, o toast identifica o problema; corrija os dados e tente novamente. Desvio acima do limite envia a Cotação para a fila de Aprovação automaticamente.
+7. **Aprovar alçada (se exigida)**
+   - Em **Configurações**, logue como aprovador: Marina Duarte (Diretoria) aprova qualquer alçada; Ricardo Nunes e Fernanda Lopes (Gerente Geral) aprovam apenas alçadas de Gerente Geral.
+   - Abra a aba **Aprovação**, revise a Cotação, o desvio e a alçada exigida, e decida **Aprovar** ou **Rejeitar** com comentário. Aprovar libera a conclusão; rejeitar mantém os preços bloqueados até ajuste e revalidação.
    - Após concluir, clique **Sincronizar com Oportunidade**. O status passa para **Sincronizada**.
-7. **Onde o fluxo termina hoje**
+8. **Onde o fluxo termina hoje**
    - Volte à Oportunidade. Com a Cotação sincronizada, o Path permite avançar de **Negociação** para **Aprovação**.
    - Clique **Marcar etapa como concluída**; o estágio vira **Aprovação** e esse é o ponto final implementado atualmente.
    - **Aprovação é o ponto final implementado atualmente.** Formalização/NetLex, Contrato vigente e fechamento ainda não existem no playground; por isso o Path bloqueia **Aprovação → Formalização** e **Formalização → Fechado**.
@@ -301,6 +330,7 @@ Ao registrar novas regras ou corrigir o fluxo, manter a hierarquia de bullets e 
 
 - CRUD individual nos objetos do CRM.
 - CRUD em lote, incluindo criar, atualizar e excluir registros selecionados (até 500 registros por chamada de servidor).
+- Validação de preço da Cotação contra o preço recomendado (Jetsons mock), com comparativo por Item, aplicação do recomendado, limiares de alçada configuráveis e fila de aprovação com login de aprovador, aprovação/rejeição com comentário e histórico.
 - Listas relacionadas configuráveis; no detalhe da Conta, Contatos e Oportunidades mostram as primeiras três colunas e suportam operações individuais/em lote.
 - Criação em lote numa lista relacionada mantém todos os registros vinculados ao respectivo registro pai.
 - Abertura das listas relacionadas em tela cheia, reordenação e remoção da configuração da lista.
@@ -365,10 +395,8 @@ O push/merge em `main` aciona o deploy configurado para o projeto. Para produç�
 
 ## Ainda não implementado
 
-- Objeto Cotação e sincronização de cotação.
-- Objeto/fluxo de Aprovação e alçadas GA/GG/Diretoria.
 - Integração com NetLex e transbordo para Contrato.
-- Integração direta com Salesforce e Jetsons; o catálogo, as rotas e os preços desta versão são dados mockados locais.
+- Integração direta com Salesforce e Jetsons; o catálogo, as rotas e os preços recomendados desta versão são dados mockados locais, e a notificação de aprovação por e-mail não existe (a decisão acontece na aba Aprovação).
 - Porto, Rodoviário, Aditivo, outros Record Types de Cotação e upload CSV do gerador v6.2.
 - Partes contratuais granulares como registros e relacionamentos próprios.
 - Campos customizados persistidos criados pela interface. A personalização existente cobre exibição e ordem das colunas.

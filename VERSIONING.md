@@ -16,6 +16,7 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v5.19.04` — Add price validation against recommended prices (Jetsons mock), configurable approval thresholds (Gerente Geral/Diretoria), approver login in Settings, the Aprovação tab with a Salesforce-style approve/reject queue, and the Aprovadores/Preços Recomendados/Aprovações objects with Faker generators.
 - `v4.18.04` — Define a batch commit subject convention that includes previous and new versions.
 - `v4.18.03` — Increment app version to identify the Vercel preview deployment.
 - `v4.17.03` — Keep individual generated pipeline amounts between 3 and 4 digits and add shared responsive behavior for portrait, landscape, tablet, and mobile viewports.
