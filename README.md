@@ -6,6 +6,12 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v4.17.03 — Faixa de valores do pipeline e responsividade global
+
+- Limita valores monetários individuais gerados para Oportunidades e Contas a R$ 100–R$ 9.999; atualiza também os valores do factory reset. Totais e consolidados continuam sendo somas sem teto.
+- Adiciona base responsiva compartilhada para telas retrato/paisagem, tablets e celulares: navegação rolável, grades flexíveis, cabeçalhos e ações adaptáveis, tabelas com rolagem própria e modais ajustados à viewport.
+- Verificação: build de produção e revisão em larguras estreitas e orientação paisagem.
+
 ### v4.16.03 — Etapa Reajuste Ferro no screenflow da Cotação
 
 - Insere **Reajuste Ferro** entre a seleção do Fluxo e a montagem das Agendas, exibindo percentuais, vigência, dia de aplicação e data do primeiro reajuste configurados na Oportunidade.
