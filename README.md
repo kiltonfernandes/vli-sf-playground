@@ -10,6 +10,16 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v5.19.05 — Correções de UX: vigência configurável, header responsivo, aba Aprovação e ACS
+
+- **Vigência configurável onde é exigida**: a Cotação agora mostra a vigência da Oportunidade com edição inline (alerta "Definir vigência" quando ausente), e o screenflow do Item exibe um banner com os campos de início/fim quando a Oportunidade não tem vigência — salvar e continuar no mesmo fluxo, sem sair da tela. Valida início antes do fim e ACS inferior a 12 meses.
+- **Header responsivo**: o cabeçalho global mantém uma única linha em todas as larguras; a busca some em ≤1200px e o badge do aprovador logado some em ≤900px, sem quebrar o layout.
+- **Aba Aprovação exclusiva de aprovadores**: a aba só aparece na navegação quando há aprovador logado em Configurações.
+- **Aprovadores chumbados no sistema**: Marina Duarte (Diretoria), Ricardo Nunes e Fernanda Lopes (Gerente Geral) são recriados automaticamente no boot do servidor — sempre é possível assumir a visão de um aprovador.
+- **ACS sem reajuste**: no SF real o ACS não tem reajuste; o screenflow pula a etapa Reajuste Ferro para ACS (3 etapas: Fluxo → Agendas → Revisão) e a mantém para Contrato (4 etapas). O stepper reflete as etapas de cada instrumento.
+- `listQuoteOptions` passa a expor o `id` da Oportunidade, habilitando o quick fix de vigência a partir da Cotação.
+- Verificação: build de produção aprovado e E2E cobrindo quick fix de vigência, banner do screenflow, Contrato × ACS, re-seed de aprovadores e o caminho feliz de preços/concluir/sincronizar.
+
 ### v5.19.04 — Margem/Alçada: validação de preço e fluxo de aprovação
 
 - Adiciona **Validar preços** na Cotação: compara o preço praticado de cada Item (fluxo × serviço) com o **preço recomendado (Jetsons mock)** por período e mostra o comparativo com desvio em R$ e %, veredito da Cotação e situação por Item.
