@@ -202,6 +202,20 @@
 }
 .sf-gh-search {
   flex: 1;
+  min-width: 0;
+}
+.sf-gh-approver {
+  padding: 2px 8px;
+  border: 1px solid #b0e3c8;
+  border-radius: 12px;
+  color: #2e844a;
+  background: #f3fcf7;
+  font-size: 11px;
+  font-weight: 600;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sf-search-input {
   width: 100%;
@@ -375,9 +389,13 @@
   gap: 12px;
   padding: 0 16px 16px;
 }
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .sf-body {
     grid-template-columns: 1fr;
+  }
+  /* O campo de busca é decorativo; em telas médias ele abre espaço para o restante do header. */
+  .sf-gh-search {
+    display: none;
   }
 }
 
@@ -1466,20 +1484,16 @@ body[data-lab-accent] .sf-icon-btn:hover {
 
 @media (max-width: 900px) {
   .sf-global-header {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 10px;
     padding: 10px 12px;
   }
   .sf-gh-left {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
   }
-  .sf-gh-search {
-    order: 3;
-    flex: 1 0 100%;
-  }
-  .sf-gh-right {
-    margin-left: auto;
+  .sf-gh-approver {
+    display: none;
   }
   .sf-context-bar {
     padding-left: 8px;

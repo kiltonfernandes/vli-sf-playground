@@ -60,6 +60,8 @@ export function SfShell({ children }: { children: ReactNode }) {
     if (to === "/") return path === "/";
     return path === to || path.startsWith(to + "/");
   };
+  // A aba Aprovação é exclusiva do aprovador logado; sem login ela fica oculta.
+  const visibleTabs = currentApprover ? TABS : TABS.filter((t) => t.to !== "/approvals");
 
   return (
     <div className="sf-app">
@@ -77,7 +79,7 @@ export function SfShell({ children }: { children: ReactNode }) {
         <div className="sf-gh-right">
           {currentApprover && (
             <span
-              className="sf-gh-version"
+              className="sf-gh-approver"
               title={`Aprovador logado: ${currentApprover.name} (${currentApprover.level})`}
             >
               Aprovador: {currentApprover.name}
@@ -99,7 +101,7 @@ export function SfShell({ children }: { children: ReactNode }) {
           <span className="sf-app-name">Vendas</span>
         </div>
         <ul className="sf-nav-tabs">
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <li key={t.to} className={`sf-nav-tab ${isActive(t.to) ? "sf-nav-tab--active" : ""}`}>
               <Link to={t.to}>{t.label}</Link>
             </li>
