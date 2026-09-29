@@ -10,6 +10,8 @@ import { locationsGenerator } from "./locations";
 import { merchandiseGenerator } from "./merchandise";
 import { dieselBasesGenerator } from "./diesel-bases";
 import { plannedFlowsGenerator } from "./planned-flows";
+import { approversGenerator } from "./approvers";
+import { recommendedPricesGenerator } from "./recommended-prices";
 
 export { randomSeed } from "./core";
 export type { Generator } from "./core";
@@ -26,6 +28,8 @@ export const generators: Record<string, Generator> = {
   merchandise: merchandiseGenerator,
   diesel_bases: dieselBasesGenerator,
   planned_flows: plannedFlowsGenerator,
+  approvers: approversGenerator,
+  recommended_prices: recommendedPricesGenerator,
 };
 
 export function generateRecord(table: string, seed: number, fields: FieldDef[]) {

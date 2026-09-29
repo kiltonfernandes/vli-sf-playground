@@ -115,6 +115,13 @@ export function ensureSchema(): Promise<void> {
     const quoteColumns = await client.execute(`PRAGMA table_info(quotes)`);
     if (!quoteColumns.rows.some((row) => row.name === "tariff_mode"))
       await client.execute(`ALTER TABLE quotes ADD COLUMN tariff_mode text`);
+    for (const column of [
+      { name: "price_status", sql: `ALTER TABLE quotes ADD COLUMN price_status text NOT NULL DEFAULT 'Não validada'` },
+      { name: "max_discount_pct", sql: `ALTER TABLE quotes ADD COLUMN max_discount_pct real NOT NULL DEFAULT 0` },
+      { name: "alcada_level", sql: `ALTER TABLE quotes ADD COLUMN alcada_level text NOT NULL DEFAULT 'Sem alçada'` },
+    ])
+      if (!quoteColumns.rows.some((row) => row.name === column.name))
+        await client.execute(column.sql);
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_quotes_opportunity_id ON quotes(opportunity_id)`,
     );
@@ -133,6 +140,63 @@ export function ensureSchema(): Promise<void> {
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_quote_schedules_key ON quote_schedules(schedule_key)`,
     );
+    await client.execute(`CREATE TABLE IF NOT EXISTS approvers (
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      level text NOT NULL DEFAULT 'Gerente Geral',
+      email text,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )`);
+    await client.execute(`CREATE TABLE IF NOT EXISTS recommended_prices (
+      id text PRIMARY KEY,
+      planned_flow_id text NOT NULL REFERENCES planned_flows(id) ON DELETE CASCADE,
+      service text NOT NULL DEFAULT 'FRETE',
+      year integer NOT NULL,
+      month integer NOT NULL,
+      unit_price real NOT NULL,
+      source text NOT NULL DEFAULT 'Jetsons (mock)',
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )`);
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_recommended_prices_flow ON recommended_prices(planned_flow_id)`,
+    );
+    await client.execute(`CREATE TABLE IF NOT EXISTS quote_approvals (
+      id text PRIMARY KEY,
+      quote_id text NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+      alcada_level text NOT NULL,
+      status text NOT NULL DEFAULT 'Pendente',
+      max_discount_pct real NOT NULL DEFAULT 0,
+      requested_at text NOT NULL,
+      decided_at text,
+      decided_by text,
+      decided_by_name text,
+      decision_note text,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )`);
+    await client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_quote_approvals_quote_id ON quote_approvals(quote_id)`,
+    );
+    await client.execute(`CREATE TABLE IF NOT EXISTS app_settings (
+      key text PRIMARY KEY,
+      value text,
+      updated_at text NOT NULL
+    )`);
+    const now = new Date().toISOString();
+    await client.execute({
+      sql: `INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`,
+      args: ["alcada_gg_pct", "5", now],
+    });
+    await client.execute({
+      sql: `INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`,
+      args: ["alcada_diretoria_pct", "7", now],
+    });
+    await client.execute({
+      sql: `INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`,
+      args: ["current_approver_id", "", now],
+    });
   })();
   return schemaReady;
 }

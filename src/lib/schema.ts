@@ -135,6 +135,9 @@ export const quotes = sqliteTable(
     tariff_mode: text("tariff_mode"),
     status: text("status").notNull().default("Rascunho"),
     is_synced: integer("is_synced").notNull().default(0),
+    price_status: text("price_status").notNull().default("Não validada"),
+    max_discount_pct: real("max_discount_pct").notNull().default(0),
+    alcada_level: text("alcada_level").notNull().default("Sem alçada"),
     seed: integer("seed").notNull(),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
@@ -199,6 +202,64 @@ export const quote_schedules = sqliteTable(
   ],
 );
 
+/** Aprovadores de alçada: usuários que podem decidir desvios de preço. */
+export const approvers = sqliteTable("approvers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  level: text("level").notNull().default("Gerente Geral"),
+  email: text("email"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+/** Preço recomendado (mock do Jetsons) por Fluxo Planejado, serviço e período. */
+export const recommended_prices = sqliteTable(
+  "recommended_prices",
+  {
+    id: text("id").primaryKey(),
+    planned_flow_id: text("planned_flow_id")
+      .notNull()
+      .references(() => planned_flows.id, { onDelete: "cascade" }),
+    service: text("service").notNull().default("FRETE"),
+    year: integer("year").notNull(),
+    month: integer("month").notNull(),
+    unit_price: real("unit_price").notNull(),
+    source: text("source").notNull().default("Jetsons (mock)"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_recommended_prices_flow").on(t.planned_flow_id)],
+);
+
+/** Solicitação de alçada: uma cotação com desvio de preço acima do limite. */
+export const quote_approvals = sqliteTable(
+  "quote_approvals",
+  {
+    id: text("id").primaryKey(),
+    quote_id: text("quote_id")
+      .notNull()
+      .references(() => quotes.id, { onDelete: "cascade" }),
+    alcada_level: text("alcada_level").notNull(),
+    status: text("status").notNull().default("Pendente"),
+    max_discount_pct: real("max_discount_pct").notNull().default(0),
+    requested_at: text("requested_at").notNull(),
+    decided_at: text("decided_at"),
+    decided_by: text("decided_by"),
+    decided_by_name: text("decided_by_name"),
+    decision_note: text("decision_note"),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_quote_approvals_quote_id").on(t.quote_id)],
+);
+
+/** Configurações do playground em chave-valor (limiares de alçada, aprovador logado). */
+export const app_settings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+  updated_at: text("updated_at").notNull(),
+});
+
 /** Registro: nome do objeto -> tabela. Adicione aqui cada novo objeto. */
 export const TABLES = {
   accounts,
@@ -211,5 +272,9 @@ export const TABLES = {
   quotes,
   quote_line_items,
   quote_schedules,
+  approvers,
+  recommended_prices,
+  quote_approvals,
+  app_settings,
 } as const;
 export type TableName = keyof typeof TABLES;
