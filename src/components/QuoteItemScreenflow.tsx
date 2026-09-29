@@ -683,7 +683,21 @@ export function QuoteItemScreenflow({
                     </small>
                   </div>
                 </div>
-                <small style={{ display: "block", marginTop: 12 }}>
+                <button
+                    className="sf-business-rule-help"
+                    type="button"
+                    aria-label="Explicação da soma dos percentuais anuais"
+                    onClick={() =>
+                      toast("Regra: percentuais de reajuste anual", {
+                        description: "Quando a vigência do contrato ultrapassa 365 dias, os percentuais de Diesel, IGP-M e IPCA precisam totalizar 100%. Os valores são configurados na Oportunidade e conferidos antes de avançar.",
+                        duration: Infinity,
+                        action: { label: "Entendi", onClick: () => {} },
+                      })
+                    }
+                  >
+                    i
+                  </button>
+                  <small style={{ display: "block", marginTop: 12 }}>
                   Vigência: {contractStart || "—"} a {contractEnd || "—"} · {termDays} dias · Dia de
                   aplicação: {applicationDay}
                 </small>
@@ -700,6 +714,20 @@ export function QuoteItemScreenflow({
               </section>
               <section style={{ border: "1px solid #dddbda", borderRadius: 6, padding: 16 }}>
                 <h3 style={{ marginTop: 0 }}>Primeiro reajuste</h3>
+                <button
+                  className="sf-business-rule-help"
+                  type="button"
+                  aria-label="Explicação da data do primeiro reajuste"
+                  onClick={() =>
+                    toast("Regra: primeiro reajuste", {
+                      description: "A data do primeiro reajuste precisa estar dentro da vigência do contrato. Depois dela, as aplicações seguem o dia configurado na Oportunidade (1, 10 ou 20).",
+                      duration: Infinity,
+                      action: { label: "Entendi", onClick: () => {} },
+                    })
+                  }
+                >
+                  i
+                </button>
                 <p style={{ marginBottom: 4 }}>
                   Primeiro reajuste: {firstReadjustmentDate || "não informado"}. As aplicações
                   seguem o dia {applicationDay} de cada período.

@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { toast } from "sonner";
 
 export type BusinessRule = {
   label: string;
@@ -17,8 +17,6 @@ export function BusinessRulesChecklist({
   description?: string;
 }) {
   const completed = rules.filter((rule) => rule.passed).length;
-  const instanceId = useId();
-  const [openTooltip, setOpenTooltip] = useState<string | null>(null);
 
   return (
     <section className="sf-card sf-business-rules" aria-live="polite">
@@ -32,9 +30,8 @@ export function BusinessRulesChecklist({
         </span>
       </div>
       <ul className="sf-business-rules-list">
-        {rules.map((rule, index) => {
-          const tooltipId = `${instanceId}-business-rule-tip-${index}`;
-          return (
+        {rules.map((rule) => (
+
           <li
             className={rule.passed ? "is-passed" : "is-pending"}
             key={rule.label}
@@ -47,34 +44,29 @@ export function BusinessRulesChecklist({
               <span className="sf-business-rules-title">
                 <strong>{rule.label}</strong>
                 {rule.explanation && (
-                  <span className="sf-business-rule-help-wrap">
-                    <button
-                      className="sf-business-rule-help"
-                      type="button"
-                      aria-label={`Explicação da regra: ${rule.label}`}
-                      aria-describedby={tooltipId}
-                      aria-expanded={openTooltip === tooltipId}
-                      onClick={() =>
-                        setOpenTooltip((current) => (current === tooltipId ? null : tooltipId))
-                      }
-                    >
-                      i
-                    </button>
-                    <span
-                      className={`sf-business-rule-tooltip${openTooltip === tooltipId ? " is-open" : ""}`}
-                      id={tooltipId}
-                      role="tooltip"
-                    >
-                      {rule.explanation}
-                    </span>
-                  </span>
+                  <button
+                    className="sf-business-rule-help"
+                    type="button"
+                    aria-label={`Explicação da regra: ${rule.label}`}
+                    onClick={() =>
+                      toast(`Regra: ${rule.label}`, {
+                        description: rule.explanation,
+                        duration: Infinity,
+                        action: {
+                          label: "Entendi",
+                          onClick: () => {},
+                        },
+                      })
+                    }
+                  >
+                    i
+                  </button>
                 )}
               </span>
               {rule.detail && <small>{rule.detail}</small>}
             </span>
           </li>
-          );
-        })}
+        ))}
       </ul>
     </section>
   );
