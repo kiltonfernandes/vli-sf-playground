@@ -7,6 +7,7 @@ import {
   listAccountOptions,
   listOpportunityQuotes,
   saveRecord,
+  sendOpportunityToNetlex,
   deleteRecord,
   deleteRecordsBulk,
 } from "@/lib/crud";
@@ -53,6 +54,10 @@ function OpportunityRecordPage() {
   const [pathOpen, setPathOpen] = useState(true);
   const [pathBusy, setPathBusy] = useState(false);
   const [pathMessage, setPathMessage] = useState("");
+  const [netlexBusy, setNetlexBusy] = useState(false);
+  const [netlexModalOpen, setNetlexModalOpen] = useState(false);
+  const [sentContract, setSentContract] = useState<any | null>(null);
+  const [netlexError, setNetlexError] = useState("");
   const { data, isLoading } = useQuery({
     queryKey: ["opportunity-full", id],
     queryFn: () => getOpportunityFull({ data: { id } }),
@@ -94,6 +99,20 @@ function OpportunityRecordPage() {
   const hasSyncedQuote = quoteRows.some(
     (quote) => !!quote.is_synced && quote.status === "Sincronizada",
   );
+  const syncedQuote = quoteRows.find(
+    (quote) => !!quote.is_synced && quote.status === "Sincronizada",
+  );
+  const priceApproved =
+    !!syncedQuote && ["Ok", "Aprovada"].includes(String(syncedQuote.price_status));
+  const netlexContract = data.netlexContract ?? sentContract;
+  const canSendContract =
+    opportunity.stage === "Formalização" &&
+    opportunity.instrument_type === "Contrato" &&
+    !netlexContract &&
+    priceApproved &&
+    isOpportunityTermValid(opportunity) &&
+    !!opportunity.contracting_parties?.trim() &&
+    !!opportunity.vli_entity?.trim();
   const opportunityRules: BusinessRule[] = [
     {
       label: "Conta de gestão vinculada",
@@ -173,6 +192,29 @@ function OpportunityRecordPage() {
         : "Conclua e sincronize uma Cotação para liberar Aprovação.",
       explanation:
         "Para liberar o avanço de Negociação para Aprovação, pelo menos uma Cotação precisa passar pela validação, ser concluída e sincronizada com esta Oportunidade. A sincronização atualiza o estado que o Path usa para permitir a próxima etapa.",
+    },
+    {
+      label: "Preço aprovado para formalização",
+      passed: priceApproved,
+      detail: !syncedQuote
+        ? "Sincronize uma Cotação."
+        : priceApproved
+          ? syncedQuote.price_status === "Aprovada"
+            ? "Aprovação registrada."
+            : "Sem aprovação adicional necessária."
+          : "A Cotação ainda tem validação ou aprovação pendente.",
+      explanation:
+        "Uma Cotação sem alçada (Ok) ou aprovada pelo Perfil Aprovador pode avançar para Formalização. A aprovação concede a exceção de preço e não deve ser bloqueada pela validação do preço de mercado.",
+    },
+    {
+      label: "Partes contratuais preenchidas",
+      passed: !!opportunity.contracting_parties?.trim() && !!opportunity.vli_entity?.trim(),
+      detail:
+        opportunity.contracting_parties?.trim() && opportunity.vli_entity?.trim()
+          ? "Contratante e entidade VLI informadas."
+          : "Informe Contratante(s) e Entidade contratada VLI nos Detalhes.",
+      explanation:
+        "A minuta deve identificar a parte cliente que contrata e a empresa VLI prestadora. O devedor solidário é opcional.",
     },
   ];
   const fields: FieldDef[] = [
@@ -440,6 +482,25 @@ function OpportunityRecordPage() {
           <button className="sf-btn sf-btn--brand" onClick={() => setEditing(true)}>
             Editar
           </button>
+          {opportunity.stage === "Formalização" &&
+            opportunity.instrument_type === "Contrato" &&
+            !netlexContract && (
+              <button
+                className="sf-btn sf-btn--brand"
+                disabled={!canSendContract}
+                title={
+                  canSendContract
+                    ? "Enviar a Cotação aprovada e os dados contratuais ao NetLex simulado."
+                    : "Conclua a aprovação de preços, a vigência e o preenchimento das partes contratuais."
+                }
+                onClick={() => {
+                  setNetlexError("");
+                  setNetlexModalOpen(true);
+                }}
+              >
+                Enviar contrato ao NetLex
+              </button>
+            )}
           <SfDeleteButton table="opportunities" id={id} redirectTo="/opportunities" />
         </div>
       </div>
@@ -447,6 +508,7 @@ function OpportunityRecordPage() {
       <OpportunityPath
         stage={opportunity.stage}
         hasSyncedQuote={hasSyncedQuote}
+        priceApproved={priceApproved}
         rules={opportunityRules}
         opportunityId={id}
         accountName={account?.name ?? "—"}
@@ -461,7 +523,12 @@ function OpportunityRecordPage() {
         onAdvance={async () => {
           setPathBusy(true);
           setPathMessage("");
-          const nextStage = opportunity.stage === "Prospecção" ? "Negociação" : "Aprovação";
+          const nextStage =
+            opportunity.stage === "Prospecção"
+              ? "Negociação"
+              : opportunity.stage === "Negociação"
+                ? "Aprovação"
+                : "Formalização";
           try {
             await saveRecord({
               data: { table: "opportunities", recordId: id, data: { stage: nextStage } },
@@ -493,6 +560,43 @@ function OpportunityRecordPage() {
           value={opportunity.close_date ? fmtDate(opportunity.close_date) : "—"}
         />
       </div>
+      {netlexContract && (
+        <div
+          style={{
+            margin: "0 24px",
+            padding: "16px 20px",
+            border: "1px solid #9ec5eb",
+            borderLeft: "5px solid #0176d3",
+            borderRadius: 8,
+            background: "#f3f9ff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ color: "#5c5c5c", fontSize: 12, fontWeight: 700 }}>
+              CONTRATO NETLEX · SIMULAÇÃO
+            </div>
+            <div style={{ fontSize: 20, color: "#014486", fontWeight: 700, marginTop: 4 }}>
+              Nº {netlexContract.netlex_number}
+            </div>
+            <div style={{ color: "#444", fontSize: 13, marginTop: 3 }}>
+              {netlexContract.status}
+            </div>
+          </div>
+          <a
+            className="sf-btn sf-btn--brand"
+            href={`/netlex/contracts/${netlexContract.id}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Abrir contrato ↗
+          </a>
+        </div>
+      )}
 
       <div style={{ padding: 24 }}>
         <div
@@ -748,6 +852,159 @@ function OpportunityRecordPage() {
           }}
         />
       )}
+      {netlexModalOpen && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !netlexBusy)
+              setNetlexModalOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1200,
+            background: "rgba(0,0,0,.48)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="netlex-modal-title"
+            style={{
+              width: "min(560px, 100%)",
+              background: "white",
+              borderRadius: 12,
+              padding: 24,
+              boxShadow: "0 12px 48px rgba(0,0,0,.25)",
+              position: "relative",
+            }}
+          >
+            <button
+              type="button"
+              aria-label="Fechar"
+              disabled={netlexBusy}
+              onClick={() => setNetlexModalOpen(false)}
+              style={{
+                position: "absolute",
+                top: 12,
+                right: 12,
+                border: 0,
+                background: "transparent",
+                fontSize: 24,
+                cursor: netlexBusy ? "not-allowed" : "pointer",
+                color: "#555",
+              }}
+            >
+              ×
+            </button>
+            <h2 id="netlex-modal-title" style={{ margin: "0 28px 8px 0", fontSize: 20 }}>
+              Enviar contrato ao NetLex
+            </h2>
+            <p style={{ margin: "0 0 20px", color: "#5c5c5c", fontSize: 14 }}>
+              A Cotação aprovada e os dados contratuais serão reunidos em uma minuta demonstrativa.
+            </p>
+            {netlexBusy ? (
+              <div style={{ textAlign: "center", padding: "20px 8px" }} role="status">
+                <div className="netlex-upload-animation" aria-hidden="true">
+                  <span>📄</span>
+                  <span>↑</span>
+                  <span>⚖️</span>
+                </div>
+                <strong>Enviando documento…</strong>
+                <div style={{ color: "#5c5c5c", fontSize: 13, marginTop: 6 }}>
+                  Preparando condições comerciais, agendas e partes contratuais.
+                </div>
+              </div>
+            ) : netlexContract ? (
+              <div role="status" style={{ padding: 12, borderRadius: 8, background: "#f0f9f1" }}>
+                <strong>Contrato criado</strong>
+                <div style={{ margin: "6px 0 14px" }}>
+                  Nº {netlexContract.netlex_number} · {netlexContract.status}
+                </div>
+                <a
+                  className="sf-btn sf-btn--brand"
+                  href={`/netlex/contracts/${netlexContract.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Abrir contrato ↗
+                </a>
+              </div>
+            ) : (
+              <>
+                {netlexError && (
+                  <div role="alert" style={{ color: "#ba0517", marginBottom: 14 }}>
+                    {netlexError}
+                  </div>
+                )}
+                <div
+                  style={{
+                    padding: 12,
+                    background: "#f8f8f8",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    color: "#444",
+                  }}
+                >
+                  Cliente: <strong>{account?.name ?? "—"}</strong>
+                  <br />
+                  Vigência:{" "}
+                  <strong>
+                    {fmtDate(opportunity.contract_start)} a {fmtDate(opportunity.contract_end)}
+                  </strong>
+                  <br />
+                  Cotação: <strong>{syncedQuote?.quote_number ?? "—"}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+                  <button className="sf-btn" onClick={() => setNetlexModalOpen(false)}>
+                    Cancelar
+                  </button>
+                  <button
+                    className="sf-btn sf-btn--brand"
+                    disabled={!canSendContract}
+                    onClick={() => {
+                      void (async () => {
+                        setNetlexBusy(true);
+                        setNetlexError("");
+                        try {
+                          const [response] = await Promise.all([
+                            sendOpportunityToNetlex({ data: { opportunityId: id } }),
+                            new Promise((resolve) => window.setTimeout(resolve, 1400)),
+                          ]);
+                          setSentContract(response.contract);
+                          await Promise.all([
+                            qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
+                            qc.invalidateQueries({ queryKey: ["opportunities"] }),
+                          ]);
+                          toast.success("Contrato preparado no NetLex simulado", {
+                            description: `Número ${response.contract.netlex_number} · aguardando retorno.`,
+                          });
+                        } catch (error) {
+                          setNetlexError(
+                            error instanceof Error
+                              ? error.message
+                              : "Não foi possível preparar o contrato.",
+                          );
+                        } finally {
+                          setNetlexBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    Enviar minuta
+                  </button>
+                </div>
+              </>
+            )}
+            <div style={{ color: "#706e6b", fontSize: 11, marginTop: 16 }}>
+              Simulação local — nenhum documento é enviado ao NetLex real.
+            </div>
+          </section>
+        </div>
+      )}
     </SfShell>
   );
 }
@@ -755,6 +1012,7 @@ function OpportunityRecordPage() {
 function OpportunityPath({
   stage,
   hasSyncedQuote,
+  priceApproved,
   rules,
   accountName,
   instrument,
@@ -769,6 +1027,7 @@ function OpportunityPath({
 }: {
   stage: string;
   hasSyncedQuote: boolean;
+  priceApproved: boolean;
   rules: BusinessRule[];
   accountName: string;
   instrument: string;
@@ -782,7 +1041,10 @@ function OpportunityPath({
   onAdvance: () => void;
 }) {
   const activeIndex = Math.max(0, STAGES.indexOf(stage));
-  const canAdvance = stage === "Prospecção" || (stage === "Negociação" && hasSyncedQuote);
+  const canAdvance =
+    stage === "Prospecção" ||
+    (stage === "Negociação" && hasSyncedQuote) ||
+    (stage === "Aprovação" && hasSyncedQuote && priceApproved);
   return (
     <section className="sf-path-card" aria-label="Caminho da oportunidade">
       <button
@@ -818,7 +1080,11 @@ function OpportunityPath({
               disabled={!canAdvance || busy}
               onClick={onAdvance}
             >
-              {busy ? "Salvando…" : "✓  Marcar etapa como concluída"}
+              {busy
+                ? "Salvando…"
+                : stage === "Aprovação"
+                  ? "✓  Liberar para Formalização"
+                  : "✓  Marcar etapa como concluída"}
             </button>
           </div>
           <div className="sf-path-panels">

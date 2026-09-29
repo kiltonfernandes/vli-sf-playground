@@ -10,6 +10,15 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v5.19.07 — Aprovação simplificada e etapa de contrato NetLex
+
+- Amplia o Comparativo Jetsons para até 1280px; remove nomes e níveis de aprovadores e deixa apenas os perfis **Vendas** e **Aprovador**.
+- Uma Cotação com preço aprovado agora passa na validação da Oportunidade. A etapa Formalização exige cotação sincronizada, preço resolvido e nenhuma aprovação pendente.
+- Adiciona **Enviar contrato ao NetLex** na Oportunidade, animação de envio, número de contrato destacado e página de minuta em nova aba.
+- A minuta simulada reúne as partes, a vigência, o preço aprovado, tarifas e agendas, reajustes e tolerâncias de Take or Pay. Valida os dados da jornada e congela as condições após o envio.
+- O status fica em **Aguardando retorno da NetLex**. Nenhum arquivo é enviado a um NetLex real; campos jurídicos complementares e evolução de status permanecem fora desta simulação.
+- Verificação: build de produção aprovado; E2E local confirmou aprovação → Formalização → envio, número, abertura em nova aba e dados da minuta.
+
 ### v5.19.06 — Preços Jetsons por Agenda e avisos fecháveis
 
 - **Preço Jetsons de mercado**: recomendações determinísticas por mercadoria, trecho, serviço e período são geradas automaticamente na Cotação e exibidas ao lado do preço praticado.
@@ -208,6 +217,7 @@ erDiagram
     QUOTES ||--o{ QUOTE_LINE_ITEMS : "totaliza"
     PLANNED_FLOWS ||--o{ QUOTE_LINE_ITEMS : "identifica"
     QUOTE_LINE_ITEMS ||--o{ QUOTE_SCHEDULES : "agenda"
+    OPPORTUNITIES ||--o| NETLEX_CONTRACTS : "gera snapshot"
     LOCATIONS ||--o{ PLANNED_FLOWS : "origem e destino"
     MERCHANDISE ||--o{ PLANNED_FLOWS : "classifica"
     DIESEL_BASES ||--o{ QUOTE_SCHEDULES : "referência"
@@ -227,7 +237,8 @@ erDiagram
 | Cotação         | `quotes`           | `opportunity_id` obrigatório → Oportunidade                                                   | `/quotes`           | `/quotes/$id`           |
 | Item da Cotação | `quote_line_items` | Cotação + Fluxo Planejado + Serviço                                                           | `/quote-line-items` | `/quote-line-items/$id` |
 | Agenda          | `quote_schedules`  | Item + período + tarifa + diesel + serviço e rateio                                           | `/quote-schedules`  | `/quote-schedules/$id`  |
-| Aprovador       | `approvers`        | Nível de alçada (Gerente Geral ou Diretoria); logável em Configurações                        | `/approvers`        | `/approvers/$id`        |
+| Contrato NetLex | `netlex_contracts` | Snapshot único por Oportunidade; número, status inicial e dados comerciais                    | —                   | `/netlex/contracts/$id` |
+| Aprovadores (legado) | `approvers`   | Tabela antiga não usada pelo fluxo simulado atual                                              | `/approvers`        | `/approvers/$id`        |
 | Preço Recomendado | `recommended_prices` | Fluxo Planejado + serviço + período; referência do Jetsons (mock) na validação de preço   | `/recommended-prices` | `/recommended-prices/$id` |
 | Aprovação       | `quote_approvals`  | Cotação com desvio acima do limite; decidida por um Aprovador logado                           | `/approvals`        | `/approvals/$id`        |
 
@@ -240,6 +251,7 @@ erDiagram
 - O catálogo ferroviário é mockado no banco do playground. Uma Conta recebe Fluxos Planejados vinculados quando o pacote de cotação é gerado. A mesma seed produz códigos, número de Cotação, serviços, volumes, tarifas e rateios reproduzíveis.
 - A rota visível do fluxo usa `Location.code` para origem e destino, por exemplo `PPN → QPM`. O registro do Fluxo mantém as referências às cinco dimensões: Conta, origem, destino, Mercadoria e modal; a sigla da rota sozinha não identifica um fluxo.
 - Uma Cotação pertence a uma Oportunidade em Negociação. Ela pode conter vários Itens; cada Item representa uma combinação de fluxo e serviço; as Agendas guardam as linhas de período. Cada página tem sua própria rota, e a tela da Cotação permite expandir/recolher itens e agendas com chevrons.
+- Depois que uma Cotação aprovada é sincronizada e a Oportunidade chega à Formalização, o usuário pode gerar um snapshot de Contrato NetLex simulado. Cada Oportunidade pode gerar apenas um contrato nesta etapa.
 - A Cotação pode ser montada manualmente ou pelo gerador com seed. O gerador cria três fluxos da Conta, um Item por serviço e agendas mensais para cada grupo, incluindo FRETE e dois ou três serviços acessórios.
 - O catálogo usa siglas de Location, mercadorias e Base Diesel ELDORADO documentadas. Esses cadastros e as tarifas são dados fictícios do playground, não registros consultados em Salesforce.
 - Uma Oportunidade aponta para a Conta de gestão, que representa o nível superior. Contas granulares e demais partes contratuais ainda não têm objeto/relacionamento próprio no playground.
@@ -261,16 +273,25 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - O Path permite avançar de **Prospecção** para **Negociação**.
 - A alteração de estágio é validada no servidor para CRUD individual e em lote; não depende apenas do botão ou da interface.
 - De **Negociação** para **Aprovação**, o servidor exige que uma Cotação seja concluída e sincronizada, com preços validados (ok ou aprovados por alçada).
-- De **Aprovação** para **Formalização**, exige aprovação registrada. Como o objeto/fluxo de Aprovação ainda não existe, o avanço permanece bloqueado.
-- De **Formalização** para **Fechado**, exige a formalização via NetLex. Como a integração ainda não existe, o avanço permanece bloqueado.
+- De **Aprovação** para **Formalização**, exige Cotação sincronizada, preço `Ok` ou `Aprovada`, aprovação registrada quando necessária e nenhuma solicitação pendente.
+- Em **Formalização**, um Contrato pode ser enviado ao NetLex simulado quando as partes, vigência, Cotação e regras contratuais estiverem válidas.
+- De **Formalização** para **Fechado**, ainda exige retorno jurídico e contrato vigente, que não fazem parte desta etapa; o Path permanece bloqueado.
 - A transição de **Aprovação** para **Negociação** é permitida para representar rejeição ou cancelamento de aprovação.
 - A edição de outros campos da oportunidade não exige mudança de estágio.
+
+### Contrato simulado no NetLex
+
+- A ação aparece na Oportunidade do tipo **Contrato**, em **Formalização**, após a aprovação de preços e a sincronização da Cotação. O servidor também revalida os pré-requisitos antes de criar o snapshot.
+- O envio simulado valida partes cliente/VLI, vigência, agendas dentro da vigência, reajustes (quando a vigência excede 365 dias), estado de aprovação, tolerâncias e itens da Cotação.
+- O registro guarda Contratante(s), entidade VLI, devedor solidário opcional, vigência, regra de tarifa, reajustes, indicação de Take or Pay, trechos, serviços, períodos, volumes e tarifas aprovadas. A minuta distingue a tarifa total do grupo da parcela rateada para cada serviço.
+- O número NetLex e o status **Aguardando retorno da NetLex** ficam destacados na Oportunidade. O link abre a minuta em nova aba.
+- O documento é um snapshot demonstrativo, não tem validade jurídica e não chama a API externa. O fluxo real completa outros dados e questionários no NetLex; cancelamento/reenvio e retorno de status ainda não estão simulados. Após o envio, os dados que compõem a minuta ficam protegidos contra edição/exclusão.
 
 ### Cotação ferroviária: Contrato e ACS
 
 - A lista relacionada de Cotações aparece na Oportunidade ferroviária de Contrato/ACS. Uma nova Cotação exige a Oportunidade em Negociação.
 - Status da Cotação: **Rascunho → Concluída → Sincronizada**. Há no máximo uma Cotação sincronizada por Oportunidade. Concluir valida toda a hierarquia; sincronizar replica o estado para a Oportunidade.
-- Preço e alçada: o botão **Validar preços** compara cada Item com o preço recomendado (Jetsons mock) por fluxo, serviço e período. O status de preço da Cotação é **Não validada → Ok / Pendente alçada → Aprovada / Rejeitada**; editar Itens ou Agendas volta o status para Não validada. Concluir exige preço ok ou aprovado; desvio acima do limite cria a solicitação de alçada e bloqueia a conclusão até a decisão. Sincronizar também exige preço ok ou aprovado.
+- Preço e alçada: o botão **Validar preços** compara cada Agenda com o preço recomendado (Jetsons mock). A maior diferença governa a Cotação. Até 5% não exige aprovação; acima de 5% envia à fila do **Perfil Aprovador**; acima de 7% também recebe gravidade visual alta. Não há níveis nem nomes de aprovadores. Editar Itens ou Agendas invalida a aprovação anterior; Concluir e Sincronizar exigem preço `Ok` ou `Aprovada`.
 - Record Type usado no escopo atual: `VLI_General`. Tipos de Quote diferentes de Contrato/ACS não são oferecidos nesta entrega.
 - Um Fluxo Planejado elegível pertence à Conta da Oportunidade e é ferroviário. O catálogo cria os registros internos de origem necessários quando a conta ainda não tem Fluxo elegível; essa origem não aparece na jornada. Location e Mercadoria são referências ligadas ao registro do fluxo. A interface monta a rota a partir das siglas cadastradas.
 - Cada agenda deve ter ano entre 1900 e 4000, mês de 1 a 12, volume inteiro positivo, Base Diesel e serviço ferroviário permitido. Na etapa de Agendas, a pessoa escolhe CBS ou líquida para a Cotação; uma vez salva a primeira Agenda, essa escolha fica fixa. Não são aceitas duas tarifas positivas.
@@ -280,7 +301,7 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - Vigência inicial/final da Oportunidade deve cobrir as agendas. ACS exige vigência inferior a 12 meses e rejeita qualquer tolerância positiva; assim, ACS não cria Take or Pay. Em Contrato, as quatro tolerâncias, quando usadas, devem ser inteiras de 0 a 100 e preenchidas em conjunto.
 - Dados Faker são mockados e reproduzíveis por seed. O gerador não consulta Jetsons, não calcula recomendação real de preço e não representa sincronização com Salesforce.
 
-As regras de negócio completas do processo futuro também devem ser mantidas aqui quando Cotação, Aprovação e integração NetLex forem implementadas. Regras ainda não executadas pelo app devem ser marcadas como pendentes, sem serem descritas como validações ativas.
+As regras de negócio já simuladas para Cotação, Aprovação e criação do snapshot de Contrato NetLex estão descritas nesta página. Questionário jurídico, envio real, assinatura e retorno de status continuam pendentes; não devem ser descritos como validações ativas.
 
 #### Regras em níveis
 
@@ -301,9 +322,9 @@ As regras de negócio completas do processo futuro também devem ser mantidas aq
   - Vigência menor que 12 meses; tolerâncias e Take or Pay zerados.
 - **Preço e Alçada**
   - Cada Item é comparado ao preço recomendado (Jetsons mock) por fluxo, serviço e período; o desvio percentual é o desconto praticado em relação ao recomendado.
-  - O maior desvio entre os Itens governa a Cotação: até o limite de Gerente Geral (padrão 5%) dispensa aprovação; acima exige alçada de Gerente Geral; acima do limite da Diretoria (padrão 7%) exige Diretoria. Os limiares são configuráveis em Configurações.
+  - A maior diferença entre as Agendas governa a Cotação: até o limite configurado (padrão 5%) não exige aprovação; acima entra na fila. O limite alto (padrão 7%) é somente uma indicação visual de gravidade.
   - Item sem preço no Jetsons bloqueia a validação; é possível gerar os preços ausentes com a seed da Cotação ou aplicar o preço recomendado em todos os grupos (rateio recalculado em 100%).
-  - Aprovação padrão Salesforce: a solicitação vai para a fila da aba Aprovação; o aprovador logado em Configurações decide com comentário. Diretoria aprova qualquer alçada; Gerente Geral aprova apenas alçadas de Gerente Geral. Rejeição bloqueia conclusão até os preços serem ajustados e revalidados.
+  - A solicitação vai para a fila da aba Aprovação; somente o **Perfil Aprovador** decide. O Perfil Vendas prepara as Cotações. Não existem aprovadores individuais ou níveis hierárquicos nesta simulação.
 - **Avanço**
   - Concluir e sincronizar a Cotação habilita a Oportunidade para Aprovação.
 
@@ -331,17 +352,18 @@ As regras de negócio completas do processo futuro também devem ser mantidas aq
    - Na etapa **Revisão**, confira o resumo e escolha **Salvar Item e Agendas**. O sistema grava tudo em uma transação; se alguma regra falhar, o toast explica o motivo e não deixa um Item incompleto.
    - Para acrescentar agendas a um Item já existente, expanda-o e escolha **Adicionar Agenda**: o mesmo screenflow abre com o Fluxo fixado e associa os grupos ao Item.
 6. **Validar preços e concluir**
-   - Clique **Validar preços**. O painel compara cada Item com o preço recomendado (Jetsons mock) e mostra o veredito com o desvio máximo e a alçada exigida, se houver.
+   - Clique **Validar preços**. O painel compara cada Agenda com o preço recomendado (Jetsons mock) e mostra o veredito, o maior desvio e a situação visual.
    - Se algum Item estiver sem preço recomendado, use **Gerar preços recomendados ausentes** (Faker com a seed da Cotação). Se o desvio passar do limite, aplique o **Aplicar preço recomendado** ou **Enviar para aprovação**.
    - Clique **Validar e concluir**. Se houver regra pendente, o toast identifica o problema; corrija os dados e tente novamente. Desvio acima do limite envia a Cotação para a fila de Aprovação automaticamente.
-7. **Aprovar alçada (se exigida)**
-   - Em **Configurações**, logue como aprovador: Marina Duarte (Diretoria) aprova qualquer alçada; Ricardo Nunes e Fernanda Lopes (Gerente Geral) aprovam apenas alçadas de Gerente Geral.
-   - Abra a aba **Aprovação**, revise a Cotação, o desvio e a alçada exigida, e decida **Aprovar** ou **Rejeitar** com comentário. Aprovar libera a conclusão; rejeitar mantém os preços bloqueados até ajuste e revalidação.
+7. **Decidir aprovação (se exigida)**
+   - Em **Configurações**, alterne para **Perfil Aprovador**.
+   - Abra a aba **Aprovação**, revise a Cotação e o desvio, e decida **Aprovar** ou **Rejeitar**. Aprovar libera a Cotação para seguir; rejeitar mantém os preços bloqueados até ajuste e revalidação.
    - Após concluir, clique **Sincronizar com Oportunidade**. O status passa para **Sincronizada**.
-8. **Onde o fluxo termina hoje**
-   - Volte à Oportunidade. Com a Cotação sincronizada, o Path permite avançar de **Negociação** para **Aprovação**.
-   - Clique **Marcar etapa como concluída**; o estágio vira **Aprovação** e esse é o ponto final implementado atualmente.
-   - **Aprovação é o ponto final implementado atualmente.** Formalização/NetLex, Contrato vigente e fechamento ainda não existem no playground; por isso o Path bloqueia **Aprovação → Formalização** e **Formalização → Fechado**.
+8. **Criar o Contrato NetLex simulado**
+   - Volte à Oportunidade. Com a Cotação sincronizada e preços resolvidos, o Path permite avançar de **Negociação → Aprovação → Formalização**.
+   - Preencha **Contratante(s)** e **Entidade VLI** se ainda estiverem vazias e clique **Enviar contrato ao NetLex**.
+   - A modal mostra o envio simulado. Depois, o número e status inicial aparecem em destaque; clique no link para abrir a minuta em nova aba.
+   - **A jornada termina em “Aguardando retorno da NetLex”.** Envio real, questionário jurídico, assinatura, retorno de status e fechamento ainda não existem no Playground.
 
 Ao registrar novas regras ou corrigir o fluxo, manter a hierarquia de bullets e subtópicos e indicar o que está ativo, o que está pendente e em que etapa aparece cada validação.
 
@@ -349,7 +371,8 @@ Ao registrar novas regras ou corrigir o fluxo, manter a hierarquia de bullets e 
 
 - CRUD individual nos objetos do CRM.
 - CRUD em lote, incluindo criar, atualizar e excluir registros selecionados (até 500 registros por chamada de servidor).
-- Validação de preço da Cotação contra o preço recomendado (Jetsons mock), com comparativo por Item, aplicação do recomendado, limiares de alçada configuráveis e fila de aprovação com login de aprovador, aprovação/rejeição com comentário e histórico.
+- Validação de preço por Agenda contra o preço recomendado (Jetsons mock), com comparação, edição e preço recomendado; aprovação simplificada por perfil Vendas/Aprovador, sem nomes nem hierarquia.
+- Criação de contrato simulado a partir da Oportunidade formalizada, com snapshot dos dados comerciais aprovados e página de minuta em nova aba.
 - Listas relacionadas configuráveis; no detalhe da Conta, Contatos e Oportunidades mostram as primeiras três colunas e suportam operações individuais/em lote.
 - Criação em lote numa lista relacionada mantém todos os registros vinculados ao respectivo registro pai.
 - Abertura das listas relacionadas em tela cheia, reordenação e remoção da configuração da lista.
@@ -414,7 +437,7 @@ O push/merge em `main` aciona o deploy configurado para o projeto. Para produç�
 
 ## Ainda não implementado
 
-- Integração com NetLex e transbordo para Contrato.
+- Integração externa com NetLex, questionário jurídico, assinatura, retorno de status e fechamento do contrato. O atual fluxo cria apenas um snapshot demonstrativo com status inicial.
 - Integração direta com Salesforce e Jetsons; o catálogo, as rotas e os preços recomendados desta versão são dados mockados locais, e a notificação de aprovação por e-mail não existe (a decisão acontece na aba Aprovação).
 - Porto, Rodoviário, Aditivo, outros Record Types de Cotação e upload CSV do gerador v6.2.
 - Partes contratuais granulares como registros e relacionamentos próprios.

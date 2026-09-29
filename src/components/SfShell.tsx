@@ -6,9 +6,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   getAppSettings,
-  listApprovers,
   resetPlaygroundData,
-  setCurrentApprover,
+  setActiveProfile,
   updateAlcadaThresholds,
 } from "@/lib/crud";
 
@@ -25,7 +24,6 @@ const TABS: Array<{ label: string; to: string }> = [
   { label: "Locations", to: "/locations" },
   { label: "Mercadorias", to: "/merchandise" },
   { label: "Bases Diesel", to: "/diesel-bases" },
-  { label: "Aprovadores", to: "/approvers" },
   { label: "Preços Recomendados", to: "/recommended-prices" },
 ];
 
@@ -41,13 +39,8 @@ export function SfShell({ children }: { children: ReactNode }) {
     queryKey: ["app-settings"],
     queryFn: () => getAppSettings() as Promise<any>,
   });
-  const { data: approvers = [] } = useQuery({
-    queryKey: ["approvers"],
-    enabled: settingsOpen,
-    queryFn: () => listApprovers() as Promise<any[]>,
-  });
-  const currentApproverId = settings?.currentApprover?.id ?? "";
-  const currentApprover = settings?.currentApprover ?? null;
+  const activeProfile = settings?.activeProfile ?? "sales";
+  const isApprover = activeProfile === "approver";
   const thresholds = settings?.thresholds;
   useEffect(() => {
     if (thresholds) {
@@ -60,8 +53,8 @@ export function SfShell({ children }: { children: ReactNode }) {
     if (to === "/") return path === "/";
     return path === to || path.startsWith(to + "/");
   };
-  // A aba Aprovação é exclusiva do aprovador logado; sem login ela fica oculta.
-  const visibleTabs = currentApprover ? TABS : TABS.filter((t) => t.to !== "/approvals");
+  // A fila fica disponível apenas no perfil simulado de Aprovador.
+  const visibleTabs = isApprover ? TABS : TABS.filter((t) => t.to !== "/approvals");
 
   return (
     <div className="sf-app">
@@ -77,14 +70,9 @@ export function SfShell({ children }: { children: ReactNode }) {
           <input className="sf-search-input" placeholder="Pesquisar" />
         </div>
         <div className="sf-gh-right">
-          {currentApprover && (
-            <span
-              className="sf-gh-approver"
-              title={`Aprovador logado: ${currentApprover.name} (${currentApprover.level})`}
-            >
-              Aprovador: {currentApprover.name}
-            </span>
-          )}
+          <span className="sf-gh-approver" title="Perfil ativo da simulação">
+            Perfil: {isApprover ? "Aprovador" : "Vendas"}
+          </span>
           <button className="sf-btn" onClick={() => setSettingsOpen(true)}>
             Configurações
           </button>
@@ -98,7 +86,7 @@ export function SfShell({ children }: { children: ReactNode }) {
       <nav className="sf-context-bar">
         <div className="sf-app-launcher">
           <span className="sf-grid-icon"></span>
-          <span className="sf-app-name">Vendas</span>
+          <span className="sf-app-name">{isApprover ? "Aprovador" : "Vendas"}</span>
         </div>
         <ul className="sf-nav-tabs">
           {visibleTabs.map((t) => (
@@ -128,57 +116,48 @@ export function SfShell({ children }: { children: ReactNode }) {
             <div className="sf-modal-body">
               <p>Gerencie os dados de demonstração do app.</p>
               <div style={{ marginTop: 20 }}>
-                <strong>Aprovador logado</strong>
+                <strong>Perfil de acesso</strong>
                 <p style={{ fontSize: 12, color: "#706e6b", margin: "4px 0 8px" }}>
-                  Logue como um aprovador para decidir alçadas de Cotação na aba Aprovação. A
-                  Diretoria aprova qualquer nível; o Gerente Geral aprova apenas alçadas de
-                  Gerente Geral.
+                  Esta é uma simulação com dois perfis: Vendas prepara as Cotações; Aprovador pode
+                  aprovar ou rejeitar qualquer solicitação pendente. Não há usuários ou níveis.
                 </p>
                 <select
                   className="sf-input"
-                  value={currentApproverId}
+                  value={activeProfile}
                   disabled={resetBusy}
                   style={{ width: "100%", padding: 8 }}
                   onChange={async (event) => {
+                    const profile = event.target.value;
                     try {
-                      await setCurrentApprover({ data: { id: event.target.value } });
+                      await setActiveProfile({ data: { profile } });
                       await qc.invalidateQueries({ queryKey: ["app-settings"] });
+                      await qc.invalidateQueries({ queryKey: ["approvals"] });
                       toast.success(
-                        event.target.value
-                          ? "Aprovador alterado com sucesso."
-                          : "Você saiu do modo aprovador.",
+                        profile === "approver"
+                          ? "Perfil Aprovador ativado."
+                          : "Perfil Vendas ativado.",
                       );
                     } catch (error) {
-                      toast.error("Não foi possível trocar o aprovador", {
+                      toast.error("Não foi possível trocar o perfil", {
                         description: error instanceof Error ? error.message : undefined,
                       });
                     }
                   }}
                 >
-                  <option value="">— Usuário padrão (sem poder de aprovação) —</option>
-                  {approvers.map((approver: any) => (
-                    <option key={approver.id} value={approver.id}>
-                      {approver.name} · {approver.level}
-                    </option>
-                  ))}
+                  <option value="sales">Perfil Vendas</option>
+                  <option value="approver">Perfil Aprovador</option>
                 </select>
-                {!approvers.length && (
-                  <p style={{ fontSize: 12, color: "#ba0517", marginTop: 6 }}>
-                    Nenhum aprovador cadastrado. Gere aprovadores na aba Aprovadores ou faça o
-                    factory reset.
-                  </p>
-                )}
               </div>
               <div style={{ marginTop: 20 }}>
-                <strong>Limiares de alçada</strong>
+                <strong>Limites de preço</strong>
                 <p style={{ fontSize: 12, color: "#706e6b", margin: "4px 0 8px" }}>
-                  Desvio de preço até o limite de Gerente Geral dispensa aprovação; acima dele
-                  exige Gerente Geral; acima do limite da Diretoria exige Diretoria. O maior desvio
-                  entre os Itens governa a Cotação inteira.
+                  Até o primeiro limite não é necessária aprovação. Acima dele, qualquer solicitação
+                  pode ser decidida pelo Perfil Aprovador. O segundo limite apenas marca gravidade
+                  alta; não cria outro nível de aprovador.
                 </p>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <label style={{ fontSize: 12 }}>
-                    Gerente Geral (%)
+                    Sem aprovação até (%)
                     <input
                       className="sf-input"
                       type="number"
@@ -190,7 +169,7 @@ export function SfShell({ children }: { children: ReactNode }) {
                     />
                   </label>
                   <label style={{ fontSize: 12 }}>
-                    Diretoria (%)
+                    Gravidade alta acima de (%)
                     <input
                       className="sf-input"
                       type="number"
@@ -210,9 +189,9 @@ export function SfShell({ children }: { children: ReactNode }) {
                           data: { gg: Number(ggPct), dir: Number(dirPct) },
                         });
                         await qc.invalidateQueries({ queryKey: ["app-settings"] });
-                        toast.success("Limiares de alçada atualizados.");
+                        toast.success("Limites de preço atualizados.");
                       } catch (error) {
-                        toast.error("Não foi possível atualizar os limiares", {
+                        toast.error("Não foi possível atualizar os limites", {
                           description: error instanceof Error ? error.message : undefined,
                         });
                       }

@@ -36,6 +36,7 @@ import { Route as QuotesIndexRouteImport } from './routes/quotes.index'
 import { Route as QuotesIdRouteImport } from './routes/quotes.$id'
 import { Route as RecommendedPricesIndexRouteImport } from './routes/recommended-prices.index'
 import { Route as RecommendedPricesIdRouteImport } from './routes/recommended-prices.$id'
+import { Route as NetlexContractsIdRouteImport } from './routes/netlex.contracts.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -172,6 +173,11 @@ const RecommendedPricesIdRoute = RecommendedPricesIdRouteImport.update({
   path: '/recommended-prices/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NetlexContractsIdRoute = NetlexContractsIdRouteImport.update({
+  id: '/netlex/contracts/$id',
+  path: '/netlex/contracts/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -201,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/quote-schedules/': typeof QuoteSchedulesIndexRoute
   '/quotes/': typeof QuotesIndexRoute
   '/recommended-prices/': typeof RecommendedPricesIndexRoute
+  '/netlex/contracts/$id': typeof NetlexContractsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -230,6 +237,7 @@ export interface FileRoutesByTo {
   '/quote-schedules': typeof QuoteSchedulesIndexRoute
   '/quotes': typeof QuotesIndexRoute
   '/recommended-prices': typeof RecommendedPricesIndexRoute
+  '/netlex/contracts/$id': typeof NetlexContractsIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -260,6 +268,7 @@ export interface FileRoutesById {
   '/quote-schedules/': typeof QuoteSchedulesIndexRoute
   '/quotes/': typeof QuotesIndexRoute
   '/recommended-prices/': typeof RecommendedPricesIndexRoute
+  '/netlex/contracts/$id': typeof NetlexContractsIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -291,6 +300,7 @@ export interface FileRouteTypes {
     | '/quote-schedules/'
     | '/quotes/'
     | '/recommended-prices/'
+    | '/netlex/contracts/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -320,6 +330,7 @@ export interface FileRouteTypes {
     | '/quote-schedules'
     | '/quotes'
     | '/recommended-prices'
+    | '/netlex/contracts/$id'
   id:
     | '__root__'
     | '/'
@@ -349,6 +360,7 @@ export interface FileRouteTypes {
     | '/quote-schedules/'
     | '/quotes/'
     | '/recommended-prices/'
+    | '/netlex/contracts/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -379,6 +391,7 @@ export interface RootRouteChildren {
   QuoteSchedulesIndexRoute: typeof QuoteSchedulesIndexRoute
   QuotesIndexRoute: typeof QuotesIndexRoute
   RecommendedPricesIndexRoute: typeof RecommendedPricesIndexRoute
+  NetlexContractsIdRoute: typeof NetlexContractsIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -572,6 +585,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RecommendedPricesIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/netlex/contracts/$id': {
+      id: '/netlex/contracts/$id'
+      path: '/netlex/contracts/$id'
+      fullPath: '/netlex/contracts/$id'
+      preLoaderRoute: typeof NetlexContractsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -603,6 +623,7 @@ const rootRouteChildren: RootRouteChildren = {
   QuoteSchedulesIndexRoute: QuoteSchedulesIndexRoute,
   QuotesIndexRoute: QuotesIndexRoute,
   RecommendedPricesIndexRoute: RecommendedPricesIndexRoute,
+  NetlexContractsIdRoute: NetlexContractsIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

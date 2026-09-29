@@ -53,7 +53,8 @@ function ApprovalsPage() {
   });
   const pending = data?.pending ?? [];
   const decided = data?.decided ?? [];
-  const approver = data?.currentApprover ?? null;
+  const activeProfile = data?.activeProfile ?? "sales";
+  const isApprover = activeProfile === "approver";
   const thresholds = data?.thresholds ?? { gg: 5, dir: 7 };
 
   async function decide(decision: "Aprovada" | "Rejeitada") {
@@ -65,8 +66,8 @@ function ApprovalsPage() {
       });
       toast.success(
         decision === "Aprovada"
-          ? `Alçada aprovada por ${approver?.name ?? ""}. A Cotação pode ser concluída.`
-          : "Alçada rejeitada. Ajuste os preços da Cotação e valide novamente.",
+          ? "Solicitação aprovada. A Cotação pode seguir para conclusão."
+          : "Solicitação rejeitada. Ajuste os preços e valide novamente.",
       );
       setDeciding(null);
       setNote("");
@@ -84,31 +85,18 @@ function ApprovalsPage() {
 
   const rules = [
     {
-      label: "Aprovador logado",
-      passed: !!approver,
-      detail: approver ? `${approver.name} · ${approver.level}` : "Nenhum aprovador logado",
+      label: "Perfil de acesso",
+      passed: isApprover,
+      detail: isApprover ? "Perfil Aprovador ativo" : "Ative o Perfil Aprovador em Configurações",
       explanation:
-        "Para decidir alçadas, logue como aprovador em Configurações. Aprovar ou rejeitar é registrado com o nome do aprovador, a data e o comentário, imitando o processo padrão do Salesforce.",
+        "Este playground é uma simulação sem usuários individuais: o Perfil Vendas prepara Cotações e o Perfil Aprovador pode decidir qualquer solicitação pendente.",
     },
     {
-      label: "Nível do aprovador cobre as pendências",
-      passed:
-        !!approver &&
-        pending.every(
-          (row: any) => approver.level === "Diretoria" || approver.level === row.alcada_level,
-        ),
-      detail: pending.length
-        ? `${pending.filter((row: any) => approver && (approver.level === "Diretoria" || approver.level === row.alcada_level)).length} de ${pending.length} pendências podem ser decididas`
-        : "Sem pendências no momento",
-      explanation:
-        "A Diretoria pode decidir qualquer alçada. O Gerente Geral decide apenas solicitações de Gerente Geral — pendências de Diretoria continuam bloqueadas para ele.",
-    },
-    {
-      label: "Limiares de alçada configurados",
+      label: "Limites de preço configurados",
       passed: thresholds.gg > 0 && thresholds.dir > thresholds.gg,
-      detail: `Sem alçada até ${thresholds.gg}% · Gerente Geral até ${thresholds.dir}% · Diretoria acima`,
+      detail: `Sem aprovação até ${thresholds.gg}% · gravidade alta acima de ${thresholds.dir}%`,
       explanation:
-        "O desvio de preço é medido por Item contra o preço recomendado (Jetsons). Até o limite configurado a Cotação dispensa aprovação; acima dele a Cotação inteira fica na fila com a alçada do maior desvio. Ajuste os valores em Configurações.",
+        "Acima do primeiro limite, a Cotação inteira entra na fila. O segundo limite só diferencia a gravidade visual; não restringe o Perfil Aprovador.",
     },
   ];
 
@@ -116,32 +104,27 @@ function ApprovalsPage() {
     <SfShell>
       <div className="sf-page-header">
         <div>
-          <div className="sf-ph-eyebrow">Alçadas de Cotação</div>
+          <div className="sf-ph-eyebrow">Solicitações de aprovação</div>
           <h1 className="sf-ph-title">Aprovação</h1>
           <div className="sf-ph-sub">
-            Fila de cotações com desvio de preço acima do limite, no fluxo padrão de aprovação.
+            Fila de Cotações que precisam de uma decisão do Perfil Aprovador.
           </div>
         </div>
       </div>
       <div style={{ padding: "0 24px 32px", display: "grid", gap: 16 }}>
-        {approver ? (
+        {isApprover ? (
           <div
             className="sf-card"
             style={{ padding: 14, display: "flex", gap: 10, alignItems: "center" }}
           >
-            <span style={{ color: "#2e844a", fontWeight: 600 }}>✓ Aprovador logado</span>
-            <span>
-              {approver.name} · {approver.level}
-            </span>
+            <span style={{ color: "#2e844a", fontWeight: 600 }}>✓ Perfil Aprovador ativo</span>
             <span style={{ color: "#706e6b", fontSize: 12 }}>
-              Logue como outro aprovador em Configurações.
+              Este perfil pode aprovar ou rejeitar qualquer solicitação pendente.
             </span>
           </div>
         ) : (
           <div className="sf-card" style={{ padding: 14, color: "#ba0517" }}>
-            ⚠ Você não está logado como aprovador. Abra <strong>Configurações</strong> e escolha um
-            aprovador para decidir alçadas. A Diretoria aprova qualquer nível; o Gerente Geral
-            aprova apenas alçadas de Gerente Geral.
+            ⚠ Ative o <strong>Perfil Aprovador</strong> em Configurações para decidir solicitações.
           </div>
         )}
 
@@ -175,7 +158,6 @@ function ApprovalsPage() {
                 <th>Cotação</th>
                 <th>Conta</th>
                 <th>Oportunidade</th>
-                <th>Alçada exigida</th>
                 <th>Desvio máx.</th>
                 <th>Solicitada em</th>
                 <th>Ações</th>
@@ -195,7 +177,6 @@ function ApprovalsPage() {
                       {row.opportunity_name}
                     </Link>
                   </td>
-                  <td>{row.alcada_level}</td>
                   <td>{Number(row.max_discount_pct).toFixed(2)}%</td>
                   <td>{fmtDate(row.requested_at)}</td>
                   <td>
@@ -205,7 +186,7 @@ function ApprovalsPage() {
                       title={
                         row.can_decide
                           ? "Aprova a alçada e libera a Cotação para conclusão"
-                          : `Requer aprovador ${row.alcada_level === "Diretoria" ? "da Diretoria" : "de Gerente Geral ou Diretoria"}`
+                          : "Ative o Perfil Aprovador em Configurações para decidir"
                       }
                       onClick={() => {
                         setDeciding({ ...row, action: "Aprovada" });
@@ -220,7 +201,7 @@ function ApprovalsPage() {
                       title={
                         row.can_decide
                           ? "Rejeita a alçada; os preços precisam ser ajustados"
-                          : `Requer aprovador ${row.alcada_level === "Diretoria" ? "da Diretoria" : "de Gerente Geral ou Diretoria"}`
+                          : "Ative o Perfil Aprovador em Configurações para decidir"
                       }
                       onClick={() => {
                         setDeciding({ ...row, action: "Rejeitada" });
@@ -234,7 +215,7 @@ function ApprovalsPage() {
               ))}
               {!pending.length && (
                 <tr>
-                  <td colSpan={7} style={{ color: "#706e6b" }}>
+                  <td colSpan={6} style={{ color: "#706e6b" }}>
                     Nenhuma solicitação pendente. Cotações com desvio acima de {thresholds.gg}%
                     aparecem aqui automaticamente ao concluir.
                   </td>
@@ -252,10 +233,9 @@ function ApprovalsPage() {
             <thead>
               <tr>
                 <th>Cotação</th>
-                <th>Alçada</th>
                 <th>Desvio máx.</th>
                 <th>Status</th>
-                <th>Decidida por</th>
+                <th>Perfil</th>
                 <th>Em</th>
                 <th>Comentário</th>
               </tr>
@@ -268,19 +248,18 @@ function ApprovalsPage() {
                       {row.quote_number}
                     </Link>
                   </td>
-                  <td>{row.alcada_level}</td>
                   <td>{Number(row.max_discount_pct).toFixed(2)}%</td>
                   <td>
                     <StatusBadge status={row.status} />
                   </td>
-                  <td>{row.decided_by_name ?? "—"}</td>
+                  <td>{row.decided_by_name ?? "Perfil Aprovador"}</td>
                   <td>{fmtDate(row.decided_at)}</td>
                   <td>{row.decision_note ?? "—"}</td>
                 </tr>
               ))}
               {!decided.length && (
                 <tr>
-                  <td colSpan={7} style={{ color: "#706e6b" }}>
+                  <td colSpan={6} style={{ color: "#706e6b" }}>
                     Nenhuma decisão registrada ainda.
                   </td>
                 </tr>
@@ -290,8 +269,8 @@ function ApprovalsPage() {
         </div>
 
         <BusinessRulesChecklist
-          title="Regras da aprovação de alçada"
-          description="Como a fila de Aprovação funciona neste playground."
+          title="Regras da aprovação"
+          description="Como o Perfil Aprovador decide nesta simulação."
           rules={rules}
         />
       </div>
@@ -306,21 +285,20 @@ function ApprovalsPage() {
             style={{ maxWidth: 480 }}
           >
             <div className="sf-modal-header">
-              <h2>{deciding.action === "Aprovada" ? "Aprovar alçada" : "Rejeitar alçada"}</h2>
+              <h2>{deciding.action === "Aprovada" ? "Aprovar Cotação" : "Rejeitar Cotação"}</h2>
               <button className="sf-btn" disabled={busy} onClick={() => setDeciding(null)}>
                 Fechar
               </button>
             </div>
             <div className="sf-modal-body">
               <p>
-                Cotação <strong>{deciding.quote_number}</strong> · {deciding.account_name} · alçada{" "}
-                <strong>{deciding.alcada_level}</strong> · desvio máx.{" "}
+                Cotação <strong>{deciding.quote_number}</strong> · {deciding.account_name} · desvio máx.{" "}
                 <strong>{Number(deciding.max_discount_pct).toFixed(2)}%</strong>
               </p>
               <p style={{ fontSize: 12, color: "#706e6b" }}>
                 {deciding.action === "Aprovada"
-                  ? "Aprovar libera a Cotação para conclusão e sincronização, mantendo os preços negociados."
-                  : "Rejeitar mantém a Cotação bloqueada; os preços devem ser ajustados e revalidados."}
+                  ? "A aprovação libera a Cotação para conclusão e sincronização, mantendo os preços negociados."
+                  : "A rejeição mantém a Cotação bloqueada; os preços devem ser ajustados e revalidados."}
               </p>
               <label style={{ fontSize: 12, display: "grid", gap: 4, marginTop: 8 }}>
                 Comentário (opcional)

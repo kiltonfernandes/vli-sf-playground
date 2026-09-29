@@ -16,6 +16,7 @@ import {
   recommended_prices,
   quote_approvals,
   app_settings,
+  netlex_contracts,
   TABLES,
   type TableName,
 } from "./schema";
@@ -147,7 +148,9 @@ export const getAccountFull = createServerFn({ method: "GET" }).handler(async ({
   return { account: account ?? null, contacts: contactRows, opportunities: opportunityRows };
 });
 
-export const getOpportunityFull = createServerFn({ method: "GET" }).handler(
+export const getOpportunityFull = createServerFn({ method: "GET" })
+  .inputValidator((data: { id: string }) => data)
+  .handler(
   async ({ data: input }) => {
     await ensureSchema();
     const { id } = input as { id: string };
@@ -163,7 +166,279 @@ export const getOpportunityFull = createServerFn({ method: "GET" }).handler(
       })
       .from(accounts)
       .where(eq(accounts.id, opportunity.account_id));
-    return { opportunity, account: account ?? null };
+    const [contract] = await db
+      .select()
+      .from(netlex_contracts)
+      .where(eq(netlex_contracts.opportunity_id, id));
+    return {
+      opportunity,
+      account: account ?? null,
+      netlexContract: contract
+        ? { ...contract, document: parseContractDocument(contract.document_json) }
+        : null,
+    };
+  },
+);
+
+function parseContractDocument(raw: string): Record<string, any> {
+  try {
+    return JSON.parse(raw) as Record<string, any>;
+  } catch {
+    return {};
+  }
+}
+
+/** Snapshot da cotação aprovada para a etapa simulada de envio ao NetLex. */
+export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
+  .inputValidator((data: { opportunityId: string }) => data)
+  .handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { opportunityId } = input as { opportunityId: string };
+    const [existing] = await db
+      .select()
+      .from(netlex_contracts)
+      .where(eq(netlex_contracts.opportunity_id, opportunityId));
+    if (existing)
+      return {
+        ok: true,
+        created: false,
+        contract: {
+          ...existing,
+          document: parseContractDocument(existing.document_json),
+        },
+      };
+
+    const [opportunity] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, opportunityId));
+    if (!opportunity) throw new Error("Oportunidade não encontrada.");
+    if (opportunity.stage !== "Formalização")
+      throw new Error("Avance a Oportunidade para Formalização antes de enviar o contrato.");
+    if (opportunity.instrument_type !== "Contrato")
+      throw new Error("O envio ao NetLex está disponível somente para oportunidades de Contrato.");
+    if (!opportunity.contract_start || !opportunity.contract_end)
+      throw new Error("Preencha o início e o fim da vigência do contrato.");
+    const termStart = Date.parse(`${opportunity.contract_start}T00:00:00Z`);
+    const termEnd = Date.parse(`${opportunity.contract_end}T00:00:00Z`);
+    if (!Number.isFinite(termStart) || !Number.isFinite(termEnd) || termEnd < termStart)
+      throw new Error("A vigência do contrato está inválida.");
+    if (![1, 10, 20].includes(Number(opportunity.application_day)))
+      throw new Error("Defina o dia de aplicação do reajuste como 1, 10 ou 20.");
+    if (termEnd - termStart > 365 * 86400000) {
+      const readjustmentTotal =
+        Number(opportunity.diesel_pct) +
+        Number(opportunity.igpm_pct) +
+        Number(opportunity.ipca_pct);
+      const firstReadjustment = opportunity.first_readjustment_date
+        ? Date.parse(`${opportunity.first_readjustment_date}T00:00:00Z`)
+        : Number.NaN;
+      if (
+        Math.abs(readjustmentTotal - 100) > 0.001 ||
+        !Number.isFinite(firstReadjustment) ||
+        firstReadjustment < termStart ||
+        firstReadjustment > termEnd
+      )
+        throw new Error(
+          "Contratos com mais de 365 dias precisam de reajustes totalizando 100% e data do primeiro reajuste dentro da vigência.",
+        );
+    }
+    if (!opportunity.contracting_parties?.trim() || !opportunity.vli_entity?.trim())
+      throw new Error("Preencha a parte contratante e a entidade contratada VLI.");
+
+    const syncedQuotes = await db
+      .select()
+      .from(quotes)
+      .where(eq(quotes.opportunity_id, opportunityId));
+    const quote = syncedQuotes.find(
+      (row) => row.is_synced && row.status === "Sincronizada",
+    );
+    if (!quote) throw new Error("Conclua e sincronize uma Cotação antes de enviar o contrato.");
+    if (!["Ok", "Aprovada"].includes(quote.price_status))
+      throw new Error("Valide e aprove os preços da Cotação antes de enviar o contrato.");
+    const approvals = await db
+      .select()
+      .from(quote_approvals)
+      .where(eq(quote_approvals.quote_id, quote.id));
+    if (approvals.some((approval) => approval.status === "Pendente"))
+      throw new Error("Há uma aprovação de preço pendente para esta Cotação.");
+    if (
+      quote.price_status === "Aprovada" &&
+      !approvals.some((approval) => approval.status === "Aprovada")
+    )
+      throw new Error("A aprovação precisa estar registrada na fila antes de enviar o contrato.");
+
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, opportunity.account_id));
+    if (!account) throw new Error("A Conta de gestão da Oportunidade não foi encontrada.");
+    const items = await db
+      .select()
+      .from(quote_line_items)
+      .where(eq(quote_line_items.quote_id, quote.id));
+    if (!items.length) throw new Error("A Cotação sincronizada não possui Itens.");
+
+    const contractItems = await Promise.all(
+      items.map(async (item) => {
+        const [flow] = await db
+          .select()
+          .from(planned_flows)
+          .where(eq(planned_flows.id, item.planned_flow_id));
+        if (!flow) throw new Error("Um Fluxo Planejado da Cotação não foi encontrado.");
+        const [[origin], [destination], [product], schedules] = await Promise.all([
+          db.select().from(locations).where(eq(locations.id, flow.origin_id)),
+          db.select().from(locations).where(eq(locations.id, flow.destination_id)),
+          db.select().from(merchandise).where(eq(merchandise.id, flow.merchandise_id)),
+          db
+            .select()
+            .from(quote_schedules)
+            .where(eq(quote_schedules.quote_line_item_id, item.id))
+            .orderBy(asc(quote_schedules.year), asc(quote_schedules.month)),
+        ]);
+        return {
+          service: item.service,
+          flowCode: flow.code,
+          modal: flow.modal,
+          merchandise: product?.name ?? "—",
+          unit: product?.unit ?? "—",
+          origin: origin?.name ?? "—",
+          destination: destination?.name ?? "—",
+          schedules: schedules.map((schedule) => ({
+            year: schedule.year,
+            month: schedule.month,
+            period: `${schedule.year}-${String(schedule.month).padStart(2, "0")}`,
+            frequency: schedule.frequency,
+            periodWindow: schedule.period_window,
+            plaza: schedule.plaza,
+            division: schedule.division,
+            volume: schedule.volume,
+            tariffNet: Number(schedule.tariff_net),
+            tariffCbs: schedule.tariff_cbs === null ? null : Number(schedule.tariff_cbs),
+            accessoryNet: schedule.accessory_net === null ? null : Number(schedule.accessory_net),
+            accessoryCbs: schedule.accessory_cbs === null ? null : Number(schedule.accessory_cbs),
+            dieselBaseDate: schedule.diesel_base_date,
+            tolerance: {
+              vliVolume: schedule.tolerance_vli_volume,
+              clientVolume: schedule.tolerance_client_volume,
+              vliTariff: schedule.tolerance_vli_tariff,
+              clientTariff: schedule.tolerance_client_tariff,
+            },
+          })),
+        };
+      }),
+    );
+    if (contractItems.some((item) => !item.schedules.length))
+      throw new Error("Cada Item da Cotação precisa ter ao menos uma Agenda.");
+    const termStartMonth = Number(
+      opportunity.contract_start.slice(0, 4) + opportunity.contract_start.slice(5, 7),
+    );
+    const termEndMonth = Number(
+      opportunity.contract_end.slice(0, 4) + opportunity.contract_end.slice(5, 7),
+    );
+    if (
+      contractItems.some((item) =>
+        item.schedules.some(
+          (schedule) =>
+            schedule.year * 100 + schedule.month < termStartMonth ||
+            schedule.year * 100 + schedule.month > termEndMonth,
+        ),
+      )
+    )
+      throw new Error("Todas as Agendas precisam estar dentro da vigência do contrato.");
+    const hasTakeOrPayTolerance = contractItems.some((item) =>
+      item.schedules.some((schedule) =>
+        [
+          schedule.tolerance.vliVolume,
+          schedule.tolerance.clientVolume,
+          schedule.tolerance.vliTariff,
+          schedule.tolerance.clientTariff,
+        ].some((value) => Number(value) > 0),
+      ),
+    );
+    if (opportunity.take_or_pay && !hasTakeOrPayTolerance)
+      throw new Error("Take or Pay está marcado, mas as Agendas não possuem tolerâncias configuradas.");
+
+    const now = new Date().toISOString();
+    const currentContracts = await db
+      .select({ netlex_number: netlex_contracts.netlex_number })
+      .from(netlex_contracts);
+    const netlexNumber = String(
+      Math.max(18000, ...currentContracts.map((row) => Number(row.netlex_number) || 0)) + 1,
+    );
+    const contractId = crypto.randomUUID();
+    const title = `Contrato de transporte · ${account.name}`;
+    const document = {
+      simulation: true,
+      notice:
+        "Documento demonstrativo do Playground. A integração externa e a validade jurídica dependem do NetLex.",
+      title,
+      netlexNumber,
+      status: "Aguardando retorno da NetLex",
+      createdAt: now,
+      parties: {
+        customerAccount: account.name,
+        contractingParties: opportunity.contracting_parties
+          .split(/[,;\n]/)
+          .map((party) => party.trim())
+          .filter(Boolean),
+        contractedEntity: opportunity.vli_entity,
+        jointDebtor: opportunity.joint_debtor || null,
+      },
+      opportunity: {
+        id: opportunity.id,
+        name: opportunity.name,
+        instrumentType: opportunity.instrument_type,
+        segment: opportunity.segment,
+      },
+      term: {
+        start: opportunity.contract_start,
+        end: opportunity.contract_end,
+        applicationDay: opportunity.application_day,
+      },
+      commercialConditions: {
+        quoteNumber: quote.quote_number,
+        quoteName: quote.name,
+        quoteStatus: quote.status,
+        priceApproval: quote.price_status,
+        tariffBasis: opportunity.integration_tariff,
+        currency: "BRL",
+      },
+      readjustment: {
+        dieselPct: Number(opportunity.diesel_pct),
+        igpmPct: Number(opportunity.igpm_pct),
+        ipcaPct: Number(opportunity.ipca_pct),
+        firstReadjustmentDate: opportunity.first_readjustment_date,
+      },
+      takeOrPay: {
+        enabled: !!opportunity.take_or_pay || hasTakeOrPayTolerance,
+      },
+      items: contractItems,
+      manualCompletionNote:
+        "Condições jurídicas complementares e questionário do NetLex não cobertos pelo Playground.",
+    };
+    const contract = {
+      id: contractId,
+      opportunity_id: opportunityId,
+      netlex_number: netlexNumber,
+      title,
+      status: "Aguardando retorno da NetLex",
+      document_json: JSON.stringify(document),
+      created_at: now,
+      updated_at: now,
+    };
+    await db.insert(netlex_contracts).values(contract);
+    return { ok: true, created: true, contract: { ...contract, document } };
+  },
+);
+
+export const getNetlexContractFull = createServerFn({ method: "GET" })
+  .inputValidator((data: { id: string }) => data)
+  .handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id } = input as { id: string };
+    const [contract] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, id));
+    if (!contract) return null;
+    return { contract, document: parseContractDocument(contract.document_json) };
   },
 );
 
@@ -1010,7 +1285,7 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
   if (priceCheck.price_status === "Pendente alçada") {
     await upsertOpenApproval(id, priceCheck);
     throw new Error(
-      `Desvio de preço de ${priceCheck.max_discount_pct.toFixed(2)}% exige alçada ${priceCheck.alcada_level}. A solicitação foi enviada para a fila de Aprovação.`,
+      `Desvio de preço de ${priceCheck.max_discount_pct.toFixed(2)}% exige aprovação. A solicitação foi enviada para a fila.`,
     );
   }
   await db
@@ -1372,7 +1647,29 @@ async function validateOpportunityStage(
     return;
   }
   if (current.stage === "Aprovação" && nextStage === "Formalização") {
-    throw new Error("Antes de formalizar, registre a aprovação da oportunidade.");
+    const quoteRows = await db
+      .select()
+      .from(quotes)
+      .where(eq(quotes.opportunity_id, recordId));
+    const syncedQuote = quoteRows.find(
+      (row) => row.is_synced && row.status === "Sincronizada",
+    );
+    if (!syncedQuote)
+      throw new Error("Conclua e sincronize uma Cotação antes de formalizar.");
+    if (!["Ok", "Aprovada"].includes(syncedQuote.price_status))
+      throw new Error("A aprovação de preço precisa estar resolvida antes de formalizar.");
+    const approvals = await db
+      .select()
+      .from(quote_approvals)
+      .where(eq(quote_approvals.quote_id, syncedQuote.id));
+    if (approvals.some((approval) => approval.status === "Pendente"))
+      throw new Error("Há uma aprovação de preço pendente para esta Cotação.");
+    if (
+      syncedQuote.price_status === "Aprovada" &&
+      !approvals.some((approval) => approval.status === "Aprovada")
+    )
+      throw new Error("A decisão de aprovação da Cotação ainda não foi registrada.");
+    return;
   }
   if (current.stage === "Formalização" && nextStage === "Fechado") {
     throw new Error("O fechamento depende da formalização via NetLex.");
@@ -1625,6 +1922,53 @@ async function validateQuoteSchedule(
 }
 
 /** Insert ou update genérico, usado pelo SfRecordDialog. */
+async function assertOpportunityContractUnchanged(
+  recordId: string | null | undefined,
+  data: Record<string, unknown>,
+) {
+  if (!recordId) return;
+  const [sentContract] = await db
+    .select({ id: netlex_contracts.id })
+    .from(netlex_contracts)
+    .where(eq(netlex_contracts.opportunity_id, recordId));
+  if (!sentContract) return;
+  const [currentOpportunity] = await db
+    .select()
+    .from(opportunities)
+    .where(eq(opportunities.id, recordId));
+  const lockedFields = [
+    "account_id",
+    "name",
+    "instrument_type",
+    "stage",
+    "segment",
+    "amount",
+    "contract_start",
+    "contract_end",
+    "first_readjustment_date",
+    "application_day",
+    "diesel_pct",
+    "igpm_pct",
+    "ipca_pct",
+    "contracting_parties",
+    "vli_entity",
+    "joint_debtor",
+    "integration_tariff",
+    "take_or_pay",
+  ];
+  if (
+    currentOpportunity &&
+    lockedFields.some(
+      (field) =>
+        Object.prototype.hasOwnProperty.call(data, field) &&
+        String(data[field] ?? "") !== String((currentOpportunity as any)[field] ?? ""),
+    )
+  )
+    throw new Error(
+      "A minuta já foi enviada. Para mudar condições do contrato, cancele a integração no NetLex e reinicie o fluxo.",
+    );
+}
+
 export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ data: input }) => {
   await ensureSchema();
   const { table, recordId, data } = input as SaveInput;
@@ -1634,6 +1978,7 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
     if (!recordId && data.application_day === undefined) data.application_day = 10;
     if (data.application_day !== undefined) data.application_day = Number(data.application_day);
     await validateOpportunityStage(recordId, data);
+    await assertOpportunityContractUnchanged(recordId, data);
   }
   if (table === "quotes") {
     const opportunityId = String(data.opportunity_id ?? "");
@@ -2007,6 +2352,7 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
             if (recordData.application_day !== undefined)
               recordData.application_day = Number(recordData.application_day);
             await validateOpportunityStage(recordId, recordData);
+            await assertOpportunityContractUnchanged(recordId, recordData);
           }
           if (table === "quotes") {
             const [opp] = await db
@@ -2052,6 +2398,19 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
   },
 );
 
+async function assertQuoteNotContracted(quoteId: string) {
+  if (!quoteId) return;
+  const [contract] = await db
+    .select({ id: netlex_contracts.id })
+    .from(netlex_contracts)
+    .innerJoin(quotes, eq(netlex_contracts.opportunity_id, quotes.opportunity_id))
+    .where(eq(quotes.id, quoteId));
+  if (contract)
+    throw new Error(
+      "Esta Cotação faz parte de um contrato enviado ao NetLex e não pode ser alterada ou excluída.",
+    );
+}
+
 /** Deletes up to 100 selected records with one server call. */
 export const deleteRecordsBulk = createServerFn({ method: "POST" }).handler(
   async ({ data: input }) => {
@@ -2063,6 +2422,30 @@ export const deleteRecordsBulk = createServerFn({ method: "POST" }).handler(
     if (uniqueIds.length === 0 || uniqueIds.length > 500) {
       throw new Error("A operação deve conter entre 1 e 100 registros.");
     }
+    if (table === "opportunities") {
+      const protectedRows = await db
+        .select({ id: netlex_contracts.id })
+        .from(netlex_contracts)
+        .where(inArray(netlex_contracts.opportunity_id, uniqueIds));
+      if (protectedRows.length)
+        throw new Error("Não é possível excluir uma Oportunidade com contrato enviado ao NetLex.");
+    }
+    if (table === "accounts") {
+      const protectedRows = await db
+        .select({ id: netlex_contracts.id })
+        .from(netlex_contracts)
+        .innerJoin(opportunities, eq(netlex_contracts.opportunity_id, opportunities.id))
+        .where(inArray(opportunities.account_id, uniqueIds));
+      if (protectedRows.length)
+        throw new Error("A Conta possui contrato enviado ao NetLex e não pode ser excluída.");
+    }
+    if (table === "quotes")
+      for (const id of uniqueIds) await assertQuoteNotContracted(id);
+    if (table === "quote_line_items" || table === "quote_schedules")
+      for (const id of uniqueIds) {
+        const quoteId = await quoteIdForRecord(table, id, undefined);
+        await assertQuoteNotContracted(quoteId);
+      }
     if (table === "accounts") {
       await db.delete(opportunities).where(inArray(opportunities.account_id, uniqueIds));
       await db.delete(contacts).where(inArray(contacts.account_id, uniqueIds));
@@ -2078,10 +2461,29 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
   const { table, id } = input as { table: TableName; id: string };
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
+  if (table === "opportunities") {
+    const [protectedRow] = await db
+      .select({ id: netlex_contracts.id })
+      .from(netlex_contracts)
+      .where(eq(netlex_contracts.opportunity_id, id));
+    if (protectedRow)
+      throw new Error("Não é possível excluir uma Oportunidade com contrato enviado ao NetLex.");
+  }
+  if (table === "accounts") {
+    const [protectedRow] = await db
+      .select({ id: netlex_contracts.id })
+      .from(netlex_contracts)
+      .innerJoin(opportunities, eq(netlex_contracts.opportunity_id, opportunities.id))
+      .where(eq(opportunities.account_id, id));
+    if (protectedRow)
+      throw new Error("A Conta possui contrato enviado ao NetLex e não pode ser excluída.");
+  }
+  if (table === "quotes") await assertQuoteNotContracted(id);
   const staleQuoteId =
     table === "quote_line_items" || table === "quote_schedules"
       ? await quoteIdForRecord(table, id, undefined)
       : "";
+  await assertQuoteNotContracted(staleQuoteId);
   if (table === "accounts") {
     await db
       .delete(opportunities)
@@ -2116,6 +2518,14 @@ export const updateOpportunityTerm = createServerFn({ method: "POST" }).handler(
       throw new Error("O início da vigência precisa ser antes ou igual ao fim.");
     const [opportunity] = await db.select().from(opportunities).where(eq(opportunities.id, id));
     if (!opportunity) throw new Error("Oportunidade não encontrada.");
+    const [sentContract] = await db
+      .select({ id: netlex_contracts.id })
+      .from(netlex_contracts)
+      .where(eq(netlex_contracts.opportunity_id, id));
+    if (sentContract)
+      throw new Error(
+        "A minuta já foi enviada. Cancele a integração no NetLex antes de mudar a vigência.",
+      );
     if (opportunity.instrument_type === "ACS") {
       const limit = new Date(start);
       limit.setUTCMonth(limit.getUTCMonth() + 12);
@@ -2140,6 +2550,7 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
     const { mode } = input as { mode: "clear" | "factory" };
     if (mode !== "clear" && mode !== "factory") throw new Error("Modo de reset inválido.");
 
+    await db.delete(netlex_contracts);
     // Delete in reverse registration order so dependent objects are removed first.
     for (const table of Object.values(TABLES).reverse() as any[]) {
       await db.delete(table);
@@ -2149,6 +2560,7 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
       { key: "alcada_gg_pct", value: "5", updated_at: resetNow },
       { key: "alcada_diretoria_pct", value: "7", updated_at: resetNow },
       { key: "current_approver_id", value: "", updated_at: resetNow },
+      { key: "active_profile", value: "sales", updated_at: resetNow },
     ]);
 
     if (mode === "factory") {
@@ -2224,32 +2636,6 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
           updated_at: now,
         },
       ]);
-      await db.insert(approvers).values([
-        {
-          id: crypto.randomUUID(),
-          name: "Marina Duarte",
-          level: "Diretoria",
-          email: "marina.duarte@example.com",
-          created_at: now,
-          updated_at: now,
-        },
-        {
-          id: crypto.randomUUID(),
-          name: "Ricardo Nunes",
-          level: "Gerente Geral",
-          email: "ricardo.nunes@example.com",
-          created_at: now,
-          updated_at: now,
-        },
-        {
-          id: crypto.randomUUID(),
-          name: "Fernanda Lopes",
-          level: "Gerente Geral",
-          email: "fernanda.lopes@example.com",
-          created_at: now,
-          updated_at: now,
-        },
-      ]);
     }
 
     return { ok: true, mode };
@@ -2258,19 +2644,23 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
 
 // ===== Margem/Alçada: validação de preço contra o recomendado (Jetsons mock) =====
 
-/** Lê limiares configurados e o aprovador logado. */
+/** Lê os limites de preço e o perfil simulado atualmente ativo. */
 async function readAppSettings() {
   const rows = await db.select().from(app_settings);
   const map = new Map(rows.map((row) => [row.key, row.value]));
   const gg = Number(map.get("alcada_gg_pct") ?? 5);
   const dir = Number(map.get("alcada_diretoria_pct") ?? 7);
-  const approverId = map.get("current_approver_id") ?? "";
-  const [approver] = approverId
-    ? await db.select().from(approvers).where(eq(approvers.id, approverId))
-    : [];
+  const savedProfile = map.get("active_profile");
+  const legacyApproverId = map.get("current_approver_id") ?? "";
+  const activeProfile =
+    savedProfile === "approver" || (!savedProfile && legacyApproverId) ? "approver" : "sales";
   return {
     thresholds: { gg, dir },
-    currentApprover: approver ?? null,
+    activeProfile,
+    currentApprover:
+      activeProfile === "approver"
+        ? { id: "profile-approver", name: "Perfil Aprovador", level: "Aprovador" }
+        : null,
   };
 }
 
@@ -2441,15 +2831,11 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
     )
     .filter((value) => value > 0);
   const maxDiscount = discounts.length ? Math.max(...discounts) : 0;
-  const exceedsDir = scheduleRows.some(
-    (schedule) =>
-      schedule.deviation_pct !== null && -schedule.deviation_pct > thresholds.dir,
-  );
   const exceedsGg = scheduleRows.some(
     (schedule) =>
       schedule.deviation_pct !== null && -schedule.deviation_pct > thresholds.gg,
   );
-  const alcadaLevel = exceedsDir ? "Diretoria" : exceedsGg ? "Gerente Geral" : "Sem alçada";
+  const alcadaLevel = exceedsGg ? "Perfil Aprovador" : "Sem alçada";
   const anyMissing = rows.some((row) => row.missing);
   const approved = quote.price_status === "Aprovada";
   const priceStatus = approved
@@ -2718,43 +3104,47 @@ export const updateScheduleTariff = createServerFn({ method: "POST" }).handler(
   },
 );
 
-/** Lista aprovadores cadastrados. */
-export const listApprovers = createServerFn({ method: "GET" }).handler(async () => {
-  await ensureSchema();
-  return db.select().from(approvers).orderBy(asc(approvers.name));
-});
-
-/** Limiares de alçada e aprovador logado. */
+/** Limites de preço e perfil simulado ativo. */
 export const getAppSettings = createServerFn({ method: "GET" }).handler(async () => {
   await ensureSchema();
   const settings = await readAppSettings();
   return {
     thresholds: settings.thresholds,
-    currentApprover: settings.currentApprover,
+    activeProfile: settings.activeProfile,
   };
 });
 
-/** Loga (ou desloga) o aprovador atual do playground. */
-export const setCurrentApprover = createServerFn({ method: "POST" }).handler(
+/** Alterna entre os dois perfis da simulação: Vendas e Aprovador. */
+export const setActiveProfile = createServerFn({ method: "POST" }).handler(
   async ({ data: input }) => {
     await ensureSchema();
-    const { id } = input as { id: string };
-    if (id) {
-      const [approver] = await db.select().from(approvers).where(eq(approvers.id, id));
-      if (!approver) throw new Error("Aprovador não encontrado.");
-    }
+    const { profile } = input as { profile: string };
+    if (profile !== "sales" && profile !== "approver")
+      throw new Error("Escolha o perfil Vendas ou Aprovador.");
+    const now = new Date().toISOString();
     await db
       .insert(app_settings)
-      .values({ key: "current_approver_id", value: id, updated_at: new Date().toISOString() })
+      .values({ key: "active_profile", value: profile, updated_at: now })
       .onConflictDoUpdate({
         target: app_settings.key,
-        set: { value: id, updated_at: new Date().toISOString() },
+        set: { value: profile, updated_at: now },
       });
-    return { ok: true };
+    await db
+      .insert(app_settings)
+      .values({
+        key: "current_approver_id",
+        value: "",
+        updated_at: now,
+      })
+      .onConflictDoUpdate({
+        target: app_settings.key,
+        set: { value: "", updated_at: now },
+      });
+    return { ok: true, activeProfile: profile };
   },
 );
 
-/** Atualiza os limiares de alçada (percentuais sem alçada e Diretoria). */
+/** Atualiza o limite sem aprovação e o limite visual de gravidade alta. */
 export const updateAlcadaThresholds = createServerFn({ method: "POST" }).handler(
   async ({ data: input }) => {
     await ensureSchema();
@@ -2769,7 +3159,9 @@ export const updateAlcadaThresholds = createServerFn({ method: "POST" }).handler
       ggValue >= dirValue ||
       dirValue > 100
     )
-      throw new Error("Os limiares precisam ser positivos, com Gerente Geral abaixo da Diretoria.");
+      throw new Error(
+        "Os limites precisam ser positivos; o limite de gravidade alta deve ser maior que o limite sem aprovação.",
+      );
     const now = new Date().toISOString();
     for (const [key, value] of [
       ["alcada_gg_pct", String(ggValue)],
@@ -2831,10 +3223,9 @@ async function approvalRows(where: any): Promise<ApprovalSummary[]> {
     .limit(100);
   return rows.map((row) => ({
     ...row,
-    can_decide:
-      !!currentApprover &&
-      (row.status !== "Pendente" ||
-        (currentApprover.level === "Diretoria" ? true : currentApprover.level === row.alcada_level)),
+    alcada_level: row.alcada_level === "Sem alçada" ? "Sem aprovação" : "Perfil Aprovador",
+    decided_by_name: row.decided_by_name ? "Perfil Aprovador" : null,
+    can_decide: !!currentApprover && row.status === "Pendente",
   }));
 }
 
@@ -2846,7 +3237,12 @@ export const listApprovals = createServerFn({ method: "GET" }).handler(async () 
   const decided = await approvalRows(
     inArray(quote_approvals.status, ["Aprovada", "Rejeitada", "Cancelada"]),
   );
-  return { pending, decided, currentApprover: settings.currentApprover, thresholds: settings.thresholds };
+  return {
+    pending,
+    decided,
+    activeProfile: settings.activeProfile,
+    thresholds: settings.thresholds,
+  };
 });
 
 /** Detalhe de uma solicitação de alçada. */
@@ -2876,11 +3272,6 @@ export const decideQuoteApproval = createServerFn({ method: "POST" }).handler(
     const { currentApprover } = await readAppSettings();
     if (!currentApprover)
       throw new Error("Logue como aprovador em Configurações para decidir alçadas.");
-    if (
-      approval.alcada_level === "Diretoria" &&
-      currentApprover.level !== "Diretoria"
-    )
-      throw new Error("Esta alçada exige um aprovador da Diretoria.");
     const now = new Date().toISOString();
     await db
       .update(quote_approvals)
@@ -2897,7 +3288,7 @@ export const decideQuoteApproval = createServerFn({ method: "POST" }).handler(
       .update(quotes)
       .set({ price_status: decision, updated_at: now })
       .where(eq(quotes.id, approval.quote_id));
-    return { ok: true, decision, decided_by: currentApprover.name };
+    return { ok: true, decision, decided_by: "Perfil Aprovador" };
   },
 );
 

@@ -162,7 +162,7 @@ function QuotePage() {
     try {
       const response = await submitQuoteForApproval({ data: { id } });
       toast.success("Preços enviados para aprovação", {
-        description: `A fila de Aprovação aguarda um aprovador ${response.alcada_level}.`,
+        description: "A fila de Aprovação aguarda o Perfil Aprovador.",
       });
       await refresh();
       await qc.invalidateQueries({ queryKey: ["approvals"] });
@@ -325,7 +325,12 @@ function QuotePage() {
                                     {item.schedules.length} agendas · praticado{" "}
                                     {fmtMoney(itemPracticedTotal(item, tariffMode))} ·{" "}
                                     <SituationChip
-                                      situation={itemSituation(item, tariffMode, thresholds)}
+                                      situation={itemSituation(
+                                        item,
+                                        tariffMode,
+                                        thresholds,
+                                        q.price_status === "Aprovada",
+                                      )}
                                       thresholds={thresholds}
                                     />
                                   </small>
@@ -387,7 +392,11 @@ function QuotePage() {
                                               jetsons && jetsons > 0
                                                 ? ((practiced - jetsons) / jetsons) * 100
                                                 : null;
-                                            const situation = priceSituation(deviation, thresholds);
+                                            const situation = priceSituation(
+                                              deviation,
+                                              thresholds,
+                                              q.price_status === "Aprovada",
+                                            );
                                             return (
                                               <tr key={row.id} style={situationRowStyle(situation)}>
                                                 <td>
@@ -963,28 +972,28 @@ function getQuoteBusinessRules(
         ]
       : []),
     {
-      label: "Preço validado contra o recomendado",
+      label: "Preço validado ou aprovado",
       passed: ["Ok", "Aprovada"].includes(String(quote.price_status ?? "")),
       detail: ["Ok", "Aprovada"].includes(String(quote.price_status ?? ""))
-        ? `Desvio máximo de ${Number(quote.max_discount_pct ?? 0).toFixed(2)}%${quote.price_status === "Ok" ? " — sem alçada" : " — alçada liberada"}.`
+        ? `Desvio máximo de ${Number(quote.max_discount_pct ?? 0).toFixed(2)}%${quote.price_status === "Ok" ? " — sem aprovação" : " — aprovação concedida"}.`
         : "Use Validar preços para comparar cada Item com o preço recomendado do Jetsons.",
       explanation:
         "No ferroviário a margem é avaliada por competitividade de preço: cada Item é comparado ao preço recomendado (Jetsons). O desvio percentual é o maior desconto praticado em relação ao recomendado. Use o botão Validar preços para ver o comparativo por Item e o veredito da Cotação.",
     },
     {
-      label: "Alçada aprovada quando exigida",
+      label: "Aprovação registrada quando necessária",
       passed:
         quote.price_status === "Ok" ||
         (quote.alcada_level !== "Sem alçada" && quote.price_status === "Aprovada") ||
         (quote.alcada_level === "Sem alçada" && ["Ok", "Aprovada"].includes(String(quote.price_status ?? ""))),
       detail:
         quote.price_status === "Aprovada"
-          ? `Alçada ${quote.alcada_level} aprovada; a Cotação pode ser concluída.`
+          ? "Solicitação aprovada; a Cotação pode seguir para conclusão."
           : quote.price_status === "Pendente alçada"
-            ? `Desvio de ${Number(quote.max_discount_pct ?? 0).toFixed(2)}% exige alçada ${quote.alcada_level}.`
-            : "Sem alçada exigida ou ainda não avaliada.",
+            ? `Desvio de ${Number(quote.max_discount_pct ?? 0).toFixed(2)}% exige aprovação do Perfil Aprovador.`
+            : "Sem aprovação necessária ou ainda não avaliada.",
       explanation:
-        "Desvios até o limite de Gerente Geral dispensam aprovação. Acima disso, a Cotação inteira fica pendente de alçada do maior desvio entre os Itens: entre os dois limiares exige Gerente Geral e acima do maior limiar exige Diretoria. A solicitação vai para a fila da aba Aprovação, onde um aprovador logado decide aprovar ou rejeitar; a rejeição bloqueia a conclusão até os preços serem ajustados e revalidados.",
+        "Desvios até o limite configurado dispensam aprovação. Acima dele, a Cotação inteira fica pendente com base na pior Agenda. O Perfil Aprovador pode aprovar ou rejeitar qualquer solicitação; ao aprovar, os preços atuais passam na validação e a Cotação pode seguir.",
     },
     {
       label: "Cotação concluída e sincronizada",
@@ -1171,10 +1180,15 @@ function PriceStatusBadge({ quote }: { quote: any }) {
   );
 }
 
-type PriceSituation = "ok" | "gg" | "dir" | null;
+type PriceSituation = "ok" | "gg" | "dir" | "approved" | null;
 
-/** Classifica o desvio: verde sem alçada, amarelo Gerente Geral, vermelho Diretoria. */
-function priceSituation(deviation: number | null, thresholds: { gg: number; dir: number }): PriceSituation {
+/** Classifica a situação do preço; uma decisão aprovada cobre todas as Agendas. */
+function priceSituation(
+  deviation: number | null,
+  thresholds: { gg: number; dir: number },
+  approved = false,
+): PriceSituation {
+  if (approved) return "approved";
   if (deviation === null) return null;
   const discount = Math.max(0, -deviation);
   if (discount > thresholds.dir) return "dir";
@@ -1182,18 +1196,23 @@ function priceSituation(deviation: number | null, thresholds: { gg: number; dir:
   return "ok";
 }
 
-function deviationColor(deviation: number | null, thresholds: { gg: number; dir: number }) {
-  const situation = priceSituation(deviation, thresholds);
+function deviationColor(
+  deviation: number | null,
+  thresholds: { gg: number; dir: number },
+  approved = false,
+) {
+  const situation = priceSituation(deviation, thresholds, approved);
   if (situation === "dir") return "#ba0517";
   if (situation === "gg") return "#fe9339";
-  if (situation === "ok") return "#2e844a";
+  if (situation === "ok" || situation === "approved") return "#2e844a";
   return "#706e6b";
 }
 
 function situationRowStyle(situation: PriceSituation) {
   if (situation === "dir") return { background: "#fdeef0" };
   if (situation === "gg") return { background: "#fef7e3" };
-  if (situation === "ok") return { background: "#f0f9f1" };
+  if (situation === "ok" || situation === "approved")
+    return { background: "#f0f9f1" };
   return undefined;
 }
 
@@ -1207,9 +1226,10 @@ function SituationChip({
   if (!situation)
     return <span style={{ color: "#706e6b", fontSize: 12 }}>sem preço Jetsons</span>;
   const config = {
-    ok: { bg: "#f0f9f1", color: "#2e844a", label: "✅ Ok · sem alçada" },
-    gg: { bg: "#fef7e3", color: "#9c6700", label: `⚠️ Alçada Gerente Geral (> ${thresholds.gg}%)` },
-    dir: { bg: "#fdeef0", color: "#ba0517", label: `⛔ Alçada Diretoria (> ${thresholds.dir}%)` },
+    ok: { bg: "#f0f9f1", color: "#2e844a", label: "✅ Ok · sem aprovação" },
+    gg: { bg: "#fef7e3", color: "#9c6700", label: `⚠️ Requer aprovação (> ${thresholds.gg}%)` },
+    dir: { bg: "#fdeef0", color: "#ba0517", label: `⛔ Gravidade alta (> ${thresholds.dir}%)` },
+    approved: { bg: "#f0f9f1", color: "#2e844a", label: "✅ Aprovada" },
   }[situation];
   return (
     <span
@@ -1324,7 +1344,9 @@ function itemSituation(
   item: any,
   tariffMode: string,
   thresholds: { gg: number; dir: number },
+  approved = false,
 ): PriceSituation {
+  if (approved) return "approved";
   let worst: PriceSituation = null;
   for (const row of item.schedules ?? []) {
     const jetsons = row.recommended_unit;
@@ -1419,20 +1441,21 @@ function PricePanel({
   const [busy, setBusy] = useState(false);
   const thresholds = result.thresholds ?? { gg: 5, dir: 7 };
   const schedules = (result.schedules ?? []) as any[];
-  const ok = result.price_status === "Ok" || result.price_status === "Aprovada";
+  const approved = result.price_status === "Aprovada";
+  const ok = result.price_status === "Ok" || approved;
   const byItem = new Map<string, any[]>();
   for (const row of schedules)
     byItem.set(row.item_id, [...(byItem.get(row.item_id) ?? []), row]);
 
   const verdict = ok
     ? result.price_status === "Aprovada"
-      ? `✅ Preços aprovados por alçada ${result.alcada_level} — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%. A Cotação pode ser concluída.`
-      : `✅ Preços ok — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%, dentro do limite de ${thresholds.gg}%. Sem alçada.`
+      ? `✅ Preços aprovados — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%. A Cotação pode seguir.`
+      : `✅ Preços ok — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%, dentro do limite de ${thresholds.gg}%. Sem aprovação.`
     : result.price_status === "Não validada"
       ? "⚠️ Sem preços para comparar. Adicione Itens e Agendas à Cotação."
       : result.price_status === "Rejeitada"
         ? "⛔ Alçada rejeitada — ajuste os preços e valide novamente para concluir."
-        : `⚠️ Desvio de ${Number(result.max_discount_pct).toFixed(2)}% acima do limite de ${thresholds.gg}%. Exige alçada ${result.alcada_level}.`;
+        : `⚠️ Desvio de ${Number(result.max_discount_pct).toFixed(2)}% acima do limite de ${thresholds.gg}%. Exige aprovação do Perfil Aprovador.`;
 
   const verdictColor = ok
     ? "#2e844a"
@@ -1470,12 +1493,12 @@ function PricePanel({
   return (
     <div className="sf-modal-backdrop" onClick={() => !busy && onClose()}>
       <section
-        className="sf-modal"
+        className="sf-modal sf-modal--wide"
         role="dialog"
         aria-modal="true"
         aria-labelledby="price-panel-title"
         onClick={(event) => event.stopPropagation()}
-        style={{ maxWidth: 980 }}
+        style={{ maxWidth: 1280 }}
       >
         <div className="sf-modal-header">
           <h2 id="price-panel-title">Comparativo de preços · Jetsons</h2>
@@ -1500,14 +1523,15 @@ function PricePanel({
           <p style={{ fontSize: 12, color: "#706e6b" }}>
             Modalidade de tarifa: {result.tariff_mode}. O Jetsons (mock de mercado) mantém o preço
             recomendado por produto + trecho + serviço + período. Linhas verdes dispensam alçada
-            (desvio até {thresholds.gg}%), amarelas exigem Gerente Geral (até {thresholds.dir}%) e
-            vermelhas exigem Diretoria (acima). O maior desvio entre as Agendas governa a Cotação
-            inteira. Edite o preço praticado direto na linha e saia do campo para salvar.
+            (desvio até {thresholds.gg}%), amarelas indicam aprovação necessária e vermelhas
+            gravidade alta (acima de {thresholds.dir}%). Qualquer solicitação pode ser decidida pelo
+            Perfil Aprovador. Uma aprovação cobre todas as Agendas da Cotação. Edite o preço
+            praticado direto na linha e saia do campo para salvar.
           </p>
           {(result.rows ?? []).map((row: any) => {
             const groupRows = byItem.get(row.item_id) ?? [];
             const situation = groupRows.reduce<PriceSituation>((worst, entry) => {
-              const entrySituation = priceSituation(entry.deviation_pct, thresholds);
+              const entrySituation = priceSituation(entry.deviation_pct, thresholds, approved);
               if (entrySituation === "dir" || worst === "dir") return "dir";
               if (entrySituation === "gg" || worst === "gg") return "gg";
               return entrySituation ?? worst;
@@ -1560,7 +1584,7 @@ function PricePanel({
                     <tbody>
                       {groupRows.map((entry: any) => {
                         const deviation = entry.deviation_pct;
-                        const entrySituation = priceSituation(deviation, thresholds);
+                        const entrySituation = priceSituation(deviation, thresholds, approved);
                         return (
                           <tr
                             key={entry.schedule_id}
@@ -1594,7 +1618,7 @@ function PricePanel({
                             </td>
                             <td
                               style={{
-                                color: deviationColor(deviation, thresholds),
+                                color: deviationColor(deviation, thresholds, approved),
                                 fontWeight: 600,
                               }}
                             >

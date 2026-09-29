@@ -1,4 +1,11 @@
-import { sqliteTable, text, real, integer, index } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  real,
+  integer,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),
@@ -69,6 +76,27 @@ export const opportunities = sqliteTable(
     updated_at: text("updated_at").notNull(),
   },
   (t) => [index("idx_opportunities_account_id").on(t.account_id)],
+);
+
+/** Snapshot da minuta enviada ao NetLex simulado pelo Playground. */
+export const netlex_contracts = sqliteTable(
+  "netlex_contracts",
+  {
+    id: text("id").primaryKey(),
+    opportunity_id: text("opportunity_id")
+      .notNull()
+      .references(() => opportunities.id, { onDelete: "cascade" }),
+    netlex_number: text("netlex_number").notNull(),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("Aguardando retorno da NetLex"),
+    document_json: text("document_json").notNull(),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_netlex_contracts_opportunity_id").on(t.opportunity_id),
+    uniqueIndex("idx_netlex_contracts_number").on(t.netlex_number),
+  ],
 );
 
 // Catálogo fictício, reproduzível e relacionado, usado pelo fluxo ferroviário.
@@ -202,11 +230,11 @@ export const quote_schedules = sqliteTable(
   ],
 );
 
-/** Aprovadores de alçada: usuários que podem decidir desvios de preço. */
+/** Legacy storage; approval access is now controlled by the simulated profile. */
 export const approvers = sqliteTable("approvers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  level: text("level").notNull().default("Gerente Geral"),
+  level: text("level").notNull().default("Aprovador"),
   email: text("email"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),

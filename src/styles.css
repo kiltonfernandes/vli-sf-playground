@@ -1459,6 +1459,9 @@ body[data-lab-accent] .sf-icon-btn:hover {
   width: min(560px, calc(100vw - 24px));
   max-height: min(90dvh, 900px);
 }
+.sf-modal--wide {
+  width: min(1280px, calc(100vw - 16px));
+}
 .sf-modal-backdrop {
   padding: 12px;
 }
@@ -1631,5 +1634,209 @@ body[data-lab-accent] .sf-icon-btn:hover {
   .sf-modal-backdrop {
     align-items: flex-start;
     overflow-y: auto;
+  }
+}
+
+.netlex-upload-animation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 0 auto 16px;
+  color: #0176d3;
+  font-size: 30px;
+}
+.netlex-upload-animation span:first-child {
+  animation: netlex-document-float 1.1s ease-in-out infinite;
+}
+.netlex-upload-animation span:nth-child(2) {
+  animation: netlex-arrow-rise 0.8s ease-in-out infinite alternate;
+}
+.netlex-upload-animation span:last-child {
+  animation: netlex-badge-pulse 1.1s ease-in-out infinite;
+}
+@keyframes netlex-document-float {
+  0%,
+  100% {
+    transform: translateY(4px);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+@keyframes netlex-arrow-rise {
+  from {
+    transform: translateY(5px);
+    opacity: 0.55;
+  }
+  to {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+@keyframes netlex-badge-pulse {
+  0%,
+  100% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+.sf-netlex-notice {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 18px;
+  padding: 12px 16px;
+  border: 1px solid #f2cc60;
+  border-radius: 8px;
+  background: #fff7e6;
+  color: #5c4000;
+  font-size: 13px;
+}
+.sf-netlex-document {
+  overflow: hidden;
+  border: 1px solid #d8dde6;
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(24, 24, 24, 0.08);
+}
+.sf-netlex-document-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 26px 30px;
+  border-bottom: 1px solid #e5e5e5;
+  background: #f8fbff;
+}
+.sf-netlex-document-header h2 {
+  margin: 6px 0 8px;
+  color: #181818;
+  font-size: 22px;
+}
+.sf-netlex-document-eyebrow {
+  color: #5c5c5c;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sf-netlex-document-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #5c5c5c;
+  font-size: 13px;
+}
+.sf-netlex-stamp {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  border: 1px solid #f2cc60;
+  border-radius: 4px;
+  color: #775500;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  transform: rotate(2deg);
+}
+.sf-netlex-clause {
+  padding: 22px 30px;
+  border-bottom: 1px solid #e5e5e5;
+}
+.sf-netlex-clause h3 {
+  margin: 0 0 13px;
+  color: #181818;
+  font-size: 16px;
+}
+.sf-netlex-clause p {
+  margin: 0;
+  color: #444;
+  line-height: 1.65;
+}
+.sf-netlex-parties,
+.sf-netlex-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px 22px;
+  margin: 0;
+}
+.sf-netlex-parties dt,
+.sf-netlex-facts span {
+  display: block;
+  margin-bottom: 4px;
+  color: #706e6b;
+  font-size: 12px;
+}
+.sf-netlex-parties dd,
+.sf-netlex-facts strong {
+  display: block;
+  margin: 0;
+  color: #181818;
+  font-size: 14px;
+  font-weight: 600;
+}
+.sf-netlex-table-wrap {
+  overflow: auto;
+  margin-top: 14px;
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+}
+.sf-netlex-table {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.sf-netlex-table--compact {
+  min-width: 650px;
+}
+.sf-netlex-table th,
+.sf-netlex-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #e5e5e5;
+  text-align: left;
+  white-space: nowrap;
+}
+.sf-netlex-table th {
+  background: #f3f3f3;
+  color: #444;
+  font-weight: 700;
+}
+.sf-netlex-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.sf-netlex-empty {
+  margin-top: 14px !important;
+  color: #706e6b !important;
+}
+.sf-netlex-signature {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 30px;
+  background: #fbfbfb;
+}
+.sf-netlex-signature strong {
+  display: block;
+  margin-top: 6px;
+}
+.sf-netlex-signature p {
+  margin: 5px 0 0;
+  color: #706e6b;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .sf-netlex-document-header,
+  .sf-netlex-clause,
+  .sf-netlex-signature {
+    padding: 18px 16px;
+  }
+  .sf-netlex-document-header,
+  .sf-netlex-signature {
+    flex-direction: column;
   }
 }

@@ -6,7 +6,7 @@ import { decideQuoteApproval, getApprovalFull } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 
 export const Route = createFileRoute("/approvals/$id")({
-  head: () => ({ meta: [{ title: "Alçada | CRM" }] }),
+  head: () => ({ meta: [{ title: "Solicitação de aprovação | CRM" }] }),
   component: ApprovalDetailPage,
 });
 
@@ -31,7 +31,9 @@ function ApprovalDetailPage() {
       await decideQuoteApproval({
         data: { id, decision, note: note || undefined },
       });
-      toast.success(decision === "Aprovada" ? "Alçada aprovada." : "Alçada rejeitada.");
+      toast.success(
+        decision === "Aprovada" ? "Solicitação aprovada." : "Solicitação rejeitada.",
+      );
       await qc.invalidateQueries({ queryKey: ["approval-full", id] });
       await qc.invalidateQueries({ queryKey: ["approvals"] });
       await qc.invalidateQueries({ queryKey: ["home-dashboard"] });
@@ -63,10 +65,10 @@ function ApprovalDetailPage() {
     <SfShell>
       <div className="sf-page-header">
         <div>
-          <div className="sf-ph-eyebrow">Alçadas de Cotação</div>
+          <div className="sf-ph-eyebrow">Solicitação de aprovação</div>
           <h1 className="sf-ph-title">{approval.quote_number}</h1>
           <div className="sf-ph-sub">
-            Solicitação de alçada {approval.alcada_level} · status {approval.status}
+            Perfil Aprovador · status {approval.status}
           </div>
         </div>
       </div>
@@ -83,7 +85,7 @@ function ApprovalDetailPage() {
               {approval.opportunity_name}
             </Link>
           </Row>
-          <Row label="Alçada exigida">{approval.alcada_level}</Row>
+          <Row label="Perfil">{approval.alcada_level}</Row>
           <Row label="Desvio máximo">{Number(approval.max_discount_pct).toFixed(2)}%</Row>
           <Row label="Solicitada em">{fmtDate(approval.requested_at)}</Row>
           <Row label="Status">{approval.status}</Row>
@@ -97,11 +99,11 @@ function ApprovalDetailPage() {
         </div>
         {approval.status === "Pendente" && (
           <div className="sf-card" style={{ padding: 16 }}>
-            <strong>Decidir alçada</strong>
+            <strong>Registrar decisão</strong>
             <p style={{ fontSize: 12, color: "#706e6b" }}>
               {approval.can_decide
                 ? "Aprovar libera a Cotação para conclusão; rejeitar mantém os preços bloqueados."
-                : "Logue em Configurações como aprovador do nível exigido para decidir esta solicitação."}
+                : "Ative o Perfil Aprovador em Configurações para decidir esta solicitação."}
             </p>
             <label style={{ fontSize: 12, display: "grid", gap: 4, margin: "10px 0" }}>
               Comentário (opcional)

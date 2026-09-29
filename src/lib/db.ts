@@ -86,6 +86,16 @@ export function ensureSchema(): Promise<void> {
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_opportunities_account_id ON opportunities(account_id)`,
     );
+    await client.execute(`CREATE TABLE IF NOT EXISTS netlex_contracts (
+      id text PRIMARY KEY,
+      opportunity_id text NOT NULL UNIQUE REFERENCES opportunities(id) ON DELETE CASCADE,
+      netlex_number text NOT NULL UNIQUE,
+      title text NOT NULL,
+      status text NOT NULL DEFAULT 'Aguardando retorno da NetLex',
+      document_json text NOT NULL,
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    )`);
     const opportunityColumns = await client.execute(`PRAGMA table_info(opportunities)`);
     if (!opportunityColumns.rows.some((row) => row.name === "application_day"))
       await client.execute(
@@ -143,7 +153,7 @@ export function ensureSchema(): Promise<void> {
     await client.execute(`CREATE TABLE IF NOT EXISTS approvers (
       id text PRIMARY KEY,
       name text NOT NULL,
-      level text NOT NULL DEFAULT 'Gerente Geral',
+      level text NOT NULL DEFAULT 'Aprovador',
       email text,
       created_at text NOT NULL,
       updated_at text NOT NULL
@@ -197,22 +207,10 @@ export function ensureSchema(): Promise<void> {
       sql: `INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`,
       args: ["current_approver_id", "", now],
     });
-    // Aprovadores chumbados no sistema: sempre disponíveis para assumir a visão de alçada.
-    const defaultApprovers: Array<[string, string, string]> = [
-      ["Marina Duarte", "Diretoria", "marina.duarte@example.com"],
-      ["Ricardo Nunes", "Gerente Geral", "ricardo.nunes@example.com"],
-      ["Fernanda Lopes", "Gerente Geral", "fernanda.lopes@example.com"],
-    ];
-    const existing = await client.execute(`SELECT email FROM approvers`);
-    const existingEmails = new Set(existing.rows.map((row) => String(row.email)));
-    for (const [name, level, email] of defaultApprovers) {
-      if (!existingEmails.has(email)) {
-        await client.execute({
-          sql: `INSERT INTO approvers (id, name, level, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-          args: [crypto.randomUUID(), name, level, email, now, now],
-        });
-      }
-    }
+    await client.execute({
+      sql: `INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`,
+      args: ["active_profile", "sales", now],
+    });
   })();
   return schemaReady;
 }
