@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { saveRecord, deleteRecord } from "@/lib/crud";
 import { generators, generateRecord, randomSeed } from "@/lib/generators";
+import { toast } from "sonner";
 
 export type FieldDef = {
   name: string;
@@ -57,7 +58,9 @@ export function SfRecordDialog({
       await saveRecord({ data: { table, recordId: recordId ?? null, data: payload } });
     } catch (e) {
       setSaving(false);
-      setErr(e instanceof Error ? e.message : "Erro ao salvar o registro.");
+      const message = e instanceof Error ? e.message : "Erro ao salvar o registro.";
+      setErr(message);
+      toast.error("Não foi possível salvar o registro", { description: message });
       return;
     }
     setSaving(false);

@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   getOpportunityFull,
   listAccountOptions,
@@ -275,6 +276,46 @@ function OpportunityRecordPage() {
     },
   ];
   const selectedTab = quoteDefinitions.length ? activeTab : "details";
+  const openQuoteForm = (mode: "single" | "bulk") => {
+    const open = () => (mode === "single" ? setEditingQuote(true) : setBulkQuoteRows([]));
+    if (opportunity.stage === "Negociação") {
+      open();
+      return;
+    }
+    if (opportunity.stage !== "Prospecção") {
+      toast.error("Cotação indisponível nesta etapa", {
+        description: "A oportunidade precisa estar em Negociação para criar ou editar cotações.",
+      });
+      return;
+    }
+    toast("Avance a oportunidade para criar a Cotação", {
+      description: "A criação de Cotações exige uma oportunidade em Negociação.",
+      action: {
+        label: "Avançar e continuar",
+        onClick: () => {
+          void (async () => {
+            try {
+              await saveRecord({
+                data: { table: "opportunities", recordId: id, data: { stage: "Negociação" } },
+              });
+              await Promise.all([
+                qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
+                qc.invalidateQueries({ queryKey: ["opportunities"] }),
+                qc.invalidateQueries({ queryKey: ["account-full", opportunity.account_id] }),
+              ]);
+              toast.success("Oportunidade avançada para Negociação");
+              setPathMessage("Etapa atualizada para Negociação.");
+              open();
+            } catch (error) {
+              toast.error("Não foi possível avançar a oportunidade", {
+                description: error instanceof Error ? error.message : "Tente novamente.",
+              });
+            }
+          })();
+        },
+      },
+    });
+  };
 
   return (
     <SfShell>
@@ -403,13 +444,12 @@ function OpportunityRecordPage() {
               >
                 <span>Cotações ({quoteRows.length})</span>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="sf-btn" onClick={() => setBulkQuoteRows([])}>
+                  <button className="sf-btn" onClick={() => openQuoteForm("bulk")}>
                     Criar em lote
                   </button>
                   <button
                     className="sf-btn sf-btn--brand"
-                    onClick={() => setEditingQuote(true)}
-                    disabled={opportunity.stage !== "Negociação"}
+                    onClick={() => openQuoteForm("single")}
                   >
                     Nova Cotação
                   </button>
@@ -447,11 +487,6 @@ function OpportunityRecordPage() {
                   },
                 ]}
               />
-              {opportunity.stage !== "Negociação" && (
-                <p style={{ padding: "0 16px 12px", color: "#706e6b", fontSize: 13 }}>
-                  Para criar cotação, avance a Oportunidade para Negociação.
-                </p>
-              )}
             </div>
           </section>
         )}

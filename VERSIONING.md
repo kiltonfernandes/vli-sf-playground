@@ -12,6 +12,8 @@ Use the three numeric segments as follows. Increment only the segment that match
 
 ## Version history
 
+- `v3.09.03` — Let users advance an Opportunity from Prospecting to Negotiation from the Quote actions, then open the requested individual or bulk form; document a regression review before each deployment.
+- `v3.08.03` — Show toast notifications for individual and bulk record save errors, including Quote validation failures.
 - `v3.07.03` — Add a dedicated Quotes tab as the first tab on eligible Opportunity records, with a full list and individual/bulk CRUD.
 - `v3.06.03` — Add the rail Quote, Quote Line Item, and Quote Schedule records and pages, seeded related data, accordion editing, and Contract/ACS validation.
 - `v2.06.03` — Refine the Opportunity Path key fields panel with a functional Edit action.

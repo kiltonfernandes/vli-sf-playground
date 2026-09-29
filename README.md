@@ -6,6 +6,43 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v3.09.03 — Corrigir criação de Cotações e regressão antes do deploy
+
+- Nova Cotação e Criar em lote agora explicam por toast que a oportunidade precisa estar em Negociação; em Prospecção, a ação “Avançar e continuar” muda a etapa e abre o formulário escolhido.
+- Erros do servidor ao salvar registros individuais ou em lote são apresentados por toast e continuam visíveis no formulário.
+- Adota uma revisão de regressão antes de cada publicação: conferir o recurso alterado, as regras no servidor e os fluxos adjacentes de leitura, criação, edição e exclusão; para Cotações, conferir aba, Path, vínculo à Oportunidade e criação individual/em lote, incluindo o avanço de etapa.
+- Conferência desta publicação: build de produção, revisão do avanço Prospecção → Negociação e do bloqueio para outras etapas. O smoke test com registros reais do banco de produção depende da sessão do app.
+
+### Regras e validações aplicadas
+
+**Ferroviário · Contrato e ACS**
+
+- **Fluxos planejados**
+  - Pertencem à Conta vinculada à Oportunidade.
+  - Têm origem FLOU.
+- **Itens da Cotação**
+  - Volume é inteiro e positivo.
+  - CBS ou tarifa líquida deve estar preenchida; uma delas é obrigatória.
+- **Agendas**
+  - Cada grupo tem FRETE e Base Diesel.
+  - O rateio de tarifas/percentuais deve fechar o total e somar 100%.
+  - A duplicidade é verificada pelo código de fluxo, ano/mês, divisão, praça e serviço, inclusive entre Cotações.
+- **ACS**
+  - A vigência é inferior a 12 meses.
+  - Não aceita tolerâncias nem Take or Pay.
+- **Etapa da Oportunidade**
+  - Concluir e sincronizar a Cotação libera o avanço para Aprovação.
+- **Criação de Cotação**
+  - A Oportunidade deve ser Ferroviária, de Contrato ou ACS, e estar em Negociação.
+  - Em Prospecção, as ações de criação oferecem avançar para Negociação e continuar no formulário escolhido.
+
+Ao documentar regras futuras, seguir essa hierarquia de bullet points, itens, subitens e detalhes aninhados; registrar explicitamente quais validações já estão implementadas e quais ainda estão pendentes.
+
+### v3.08.03 — Toast para erros ao salvar Cotações
+
+- Adiciona um toaster global no app e mostra notificações toast quando o salvamento individual ou em lote falha.
+- Erros de regra de negócio, como criar Cotação fora da etapa Negociação, aparecem em destaque sem perder a mensagem detalhada no formulário.
+
 ### v3.07.03 — Aba de Cotações na Oportunidade
 
 - Adiciona a aba **Cotações** antes de **Detalhes** nas Oportunidades ferroviárias de Contrato/ACS.

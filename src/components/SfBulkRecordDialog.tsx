@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { saveRecordsBulk } from "@/lib/crud";
 import { generateRecord, randomSeed } from "@/lib/generators";
+import { toast } from "sonner";
 import type { FieldDef } from "./SfRecordDialog";
 
 type Props = {
@@ -58,7 +59,9 @@ export function SfBulkRecordDialog({ table, fields, defaults, rows = [], transfo
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Não foi possível concluir a operação.");
+      const message = e instanceof Error ? e.message : "Não foi possível concluir a operação.";
+      setError(message);
+      toast.error("Não foi possível salvar os registros", { description: message });
     } finally {
       setBusy(false);
     }
