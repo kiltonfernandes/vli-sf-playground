@@ -21,6 +21,7 @@ import {
 } from "./schema";
 import { asc as ascending } from "drizzle-orm";
 import { seededFaker } from "./generators/core";
+import { jetsonsUnitPrice, type JetsonsEndpoint } from "./jetsons";
 
 type SaveInput = {
   table: TableName;
@@ -285,7 +286,31 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
       };
     }),
   );
-  return { quote, items: fullItems };
+  const flowIds = [...new Set(items.map((item) => item.planned_flow_id))];
+  const priceRows = flowIds.length
+    ? await db
+        .select()
+        .from(recommended_prices)
+        .where(inArray(recommended_prices.planned_flow_id, flowIds))
+    : [];
+  const priceMap = new Map(
+    priceRows.map((price) => [
+      `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`,
+      Number(price.unit_price),
+    ]),
+  );
+  const { thresholds } = await readAppSettings();
+  const itemsWithPrices = fullItems.map((item) => ({
+    ...item,
+    schedules: item.schedules.map((schedule) => ({
+      ...schedule,
+      recommended_unit:
+        priceMap.get(
+          `${item.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`,
+        ) ?? null,
+    })),
+  }));
+  return { quote, items: itemsWithPrices, thresholds };
 });
 
 export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
@@ -1128,6 +1153,10 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
     const bases = await db.select().from(diesel_bases).where(eq(diesel_bases.name, "ELDORADO"));
     const f = seededFaker(seed);
     const now = new Date().toISOString();
+    const locationRows = await db.select().from(locations);
+    const locationById = new Map(locationRows.map((location) => [location.id, location]));
+    const merchRows = await db.select().from(merchandise);
+    const merchById = new Map(merchRows.map((entry) => [entry.id, entry]));
     const quoteId = crypto.randomUUID();
     const quoteNum = `COT-${String(f.number.int({ min: 100000, max: 999999 }))}`;
     await db.transaction(async (tx) => {
@@ -1145,6 +1174,11 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
         updated_at: now,
       });
       for (const flow of eligibleFlows.slice(0, 3)) {
+        const originLoc = locationById.get(flow.origin_id);
+        const destinationLoc = locationById.get(flow.destination_id);
+        const merchName = merchById.get(flow.merchandise_id)?.name ?? "";
+        if (!originLoc || !destinationLoc)
+          throw new Error("Fluxo sem origem/destino cadastrados.");
         const start = opp.contract_start
           ? new Date(`${opp.contract_start}T00:00:00Z`)
           : new Date(Date.UTC(2027 + (seed % 3), seed % 12, 1));
@@ -1169,12 +1203,10 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
             updated_at: now,
           });
         }
-        const flowSchedules = await tx
-          .select({ schedule_key: quote_schedules.schedule_key })
-          .from(quote_schedules)
-          .innerJoin(quote_line_items, eq(quote_schedules.quote_line_item_id, quote_line_items.id))
-          .where(eq(quote_line_items.planned_flow_id, flow.id));
-        const used = new Set(flowSchedules.map((row) => row.schedule_key));
+        // schedule_key identifica agendas dentro da Cotação, não do Fluxo
+        // globalmente: cotações alternativas da mesma Oportunidade precisam
+        // poder reutilizar o mesmo período e praça.
+        const used = new Set<string>();
         let made = 0,
           offset = 0;
         while (made < scheduleCount && offset < 36) {
@@ -1203,12 +1235,35 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
           used.add(key);
           made++;
           const volume = f.number.int({ min: 1000, max: 9000 });
-          const tariffCents = f.number.int({ min: 18000, max: 52000 });
-          const shares = partitionInteger(tariffCents, serviceNames.length, f);
-          const percentages = partitionInteger(10000, serviceNames.length, f);
           const useCbs = opp.integration_tariff === "CBS";
+          // Preço de mercado do Jetsons por serviço; o preço praticado oscila em
+          // torno dele (desconto de até 13% ou ágio de até 6%) para simular
+          // cenários de competitividade e alçada.
+          const marketRows = serviceNames.map((service) => {
+            const recommended = jetsonsUnitPrice({
+              origin: originLoc,
+              destination: destinationLoc,
+              merchandise: merchName,
+              service,
+              year,
+              month,
+            });
+            const practiced = Math.max(
+              1,
+              Number(
+                (recommended * (1 + f.number.float({ min: -0.13, max: 0.06 }))).toFixed(2),
+              ),
+            );
+            return { service, practiced };
+          });
+          const tariffCents = marketRows.reduce(
+            (sum, row) => sum + Math.round(row.practiced * 100),
+            0,
+          );
           for (let index = 0; index < serviceNames.length; index++) {
             const service = serviceNames[index];
+            const shareCents = Math.round(marketRows[index].practiced * 100);
+            const sharePct = Number(((shareCents / tariffCents) * 100).toFixed(2));
             await tx.insert(quote_schedules).values({
               id: crypto.randomUUID(),
               quote_line_item_id: itemIds.get(service)!,
@@ -1225,10 +1280,10 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
               diesel_base_id: bases[0].id,
               diesel_base_date: `${String(opp.application_day ?? 10).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
               service,
-              accessory_cbs: useCbs ? shares[index] / 100 : null,
-              accessory_cbs_pct: useCbs ? percentages[index] / 100 : null,
-              accessory_net: useCbs ? null : shares[index] / 100,
-              accessory_net_pct: useCbs ? null : percentages[index] / 100,
+              accessory_cbs: useCbs ? shareCents / 100 : null,
+              accessory_cbs_pct: useCbs ? sharePct : null,
+              accessory_net: useCbs ? null : shareCents / 100,
+              accessory_net_pct: useCbs ? null : sharePct,
               tolerance_vli_volume: null,
               tolerance_client_volume: null,
               tolerance_vli_tariff: null,
@@ -1244,7 +1299,7 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
           );
       }
     });
-    await ensureRecommendedPricesForQuote(quoteId, seed);
+    await ensureRecommendedPricesForQuote(quoteId);
     return {
       id: quoteId,
       quote_number: quoteNum,
@@ -1920,6 +1975,8 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
           updated_at: now,
         } as typeof quote_schedules.$inferInsert);
     });
+    // O Jetsons (mock) cadastra preço de mercado para as novas Agendas.
+    await ensureRecommendedPricesForQuote(request.quoteId);
     await markQuotePricesStale(request.quoteId);
     return { itemId, scheduleCount: rowsToInsert.length };
   },
@@ -2226,11 +2283,34 @@ type PriceComparison = {
   thresholds: { gg: number; dir: number };
   approved: boolean;
   open_approval: boolean;
+  /** Detalhe de cada Agenda da Cotação para o comparativo visual por linha. */
+  schedules: Array<{
+    schedule_id: string;
+    item_id: string;
+    flow_code: string;
+    route: string;
+    merchandise: string;
+    unit: string;
+    service: string;
+    year: number;
+    month: number;
+    period_window: string;
+    division: string;
+    plaza: string;
+    volume: number;
+    practiced_unit: number;
+    recommended_unit: number | null;
+    deviation_pct: number | null;
+  }>;
   rows: Array<{
     item_id: string;
     service: string;
     flow_code: string;
     route: string;
+    origin_name: string;
+    destination_name: string;
+    merchandise: string;
+    unit: string;
     volume_total: number;
     practiced_total: number;
     recommended_total: number | null;
@@ -2264,6 +2344,11 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
     ? await db.select().from(locations).where(inArray(locations.id, locationIds))
     : [];
   const locationById = new Map(locationRows.map((location) => [location.id, location]));
+  const merchIds = [...new Set(flows.map((flow) => flow.merchandise_id))];
+  const merchRows = merchIds.length
+    ? await db.select().from(merchandise).where(inArray(merchandise.id, merchIds))
+    : [];
+  const merchById = new Map(merchRows.map((entry) => [entry.id, entry]));
   const prices = flowIds.length
     ? await db
         .select()
@@ -2277,6 +2362,7 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
     ]),
   );
   const rows: PriceComparison["rows"] = [];
+  const scheduleRows: PriceComparison["schedules"] = [];
   for (const item of items) {
     const schedules = await db
       .select()
@@ -2284,6 +2370,8 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
       .where(eq(quote_schedules.quote_line_item_id, item.id))
       .orderBy(asc(quote_schedules.year), asc(quote_schedules.month));
     const flow = flowById.get(item.planned_flow_id);
+    const origin = locationById.get(flow?.origin_id ?? "");
+    const destination = locationById.get(flow?.destination_id ?? "");
     let practiced = 0,
       recommended = 0,
       found = 0,
@@ -2304,14 +2392,37 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
         recommended += price.unit_price * schedule.volume;
         found++;
       } else missingPeriods.push(`${String(schedule.month).padStart(2, "0")}/${schedule.year}`);
+      scheduleRows.push({
+        schedule_id: schedule.id,
+        item_id: item.id,
+        flow_code: flow?.code ?? "?",
+        route: `${origin?.code ?? "?"} → ${destination?.code ?? "?"}`,
+        merchandise: merchById.get(flow?.merchandise_id ?? "")?.name ?? "?",
+        unit: merchById.get(flow?.merchandise_id ?? "")?.unit ?? "",
+        service: schedule.service,
+        year: schedule.year,
+        month: schedule.month,
+        period_window: schedule.period_window,
+        division: schedule.division,
+        plaza: schedule.plaza,
+        volume: schedule.volume,
+        practiced_unit: unit,
+        recommended_unit: price ? Number(price.unit_price) : null,
+        deviation_pct:
+          price && Number(price.unit_price) > 0
+            ? ((unit - Number(price.unit_price)) / Number(price.unit_price)) * 100
+            : null,
+      });
     }
-    const origin = locationById.get(flow?.origin_id ?? "");
-    const destination = locationById.get(flow?.destination_id ?? "");
     rows.push({
       item_id: item.id,
       service: item.service,
       flow_code: flow?.code ?? "?",
       route: `${origin?.code ?? "?"} → ${destination?.code ?? "?"}`,
+      origin_name: origin?.name ?? "?",
+      destination_name: destination?.name ?? "?",
+      merchandise: merchById.get(flow?.merchandise_id ?? "")?.name ?? "?",
+      unit: merchById.get(flow?.merchandise_id ?? "")?.unit ?? "",
       volume_total: volumeTotal,
       practiced_total: practiced,
       recommended_total: found > 0 ? recommended : null,
@@ -2321,15 +2432,22 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
     });
   }
   const { thresholds } = await readAppSettings();
-  const discounts = rows
-    .map((row) => (row.deviation_pct === null ? 0 : Math.max(0, -row.deviation_pct)))
+  // A cotação é governada pela pior Agenda individual, não pela média ponderada
+  // do Item. Caso contrário, um desconto acima da alçada em uma linha poderia
+  // ser diluído pelas demais Agendas do mesmo Item.
+  const discounts = scheduleRows
+    .map((schedule) =>
+      schedule.deviation_pct === null ? 0 : Math.max(0, -schedule.deviation_pct),
+    )
     .filter((value) => value > 0);
   const maxDiscount = discounts.length ? Math.max(...discounts) : 0;
-  const exceedsDir = rows.some(
-    (row) => row.deviation_pct !== null && -row.deviation_pct > thresholds.dir,
+  const exceedsDir = scheduleRows.some(
+    (schedule) =>
+      schedule.deviation_pct !== null && -schedule.deviation_pct > thresholds.dir,
   );
-  const exceedsGg = rows.some(
-    (row) => row.deviation_pct !== null && -row.deviation_pct > thresholds.gg,
+  const exceedsGg = scheduleRows.some(
+    (schedule) =>
+      schedule.deviation_pct !== null && -schedule.deviation_pct > thresholds.gg,
   );
   const alcadaLevel = exceedsDir ? "Diretoria" : exceedsGg ? "Gerente Geral" : "Sem alçada";
   const anyMissing = rows.some((row) => row.missing);
@@ -2366,6 +2484,7 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
     open_approval:
       openApprovals.some((approval) => approval.status === "Pendente") &&
       priceStatus === "Pendente alçada",
+    schedules: scheduleRows,
     rows,
   };
 }
@@ -2406,6 +2525,9 @@ export const validateQuotePrices = createServerFn({ method: "POST" }).handler(
   async ({ data: input }) => {
     await ensureSchema();
     const { id } = input as { id: string };
+    // O Jetsons (mock) sempre tem preço de mercado para os trechos da Cotação:
+    // gerar os ausentes antes de comparar.
+    await ensureRecommendedPricesForQuote(id);
     const result = await computeQuotePriceComparison(id);
     if (result.price_status === "Ok")
       await db
@@ -2463,66 +2585,7 @@ export const generateMissingRecommendedPrices = createServerFn({ method: "POST" 
   async ({ data: input }) => {
     await ensureSchema();
     const { id } = input as { id: string };
-    const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
-    if (!quote) throw new Error("Cotação não encontrada.");
-    const f = seededFaker(Number(quote.seed) + 7);
-    const items = await db
-      .select()
-      .from(quote_line_items)
-      .where(eq(quote_line_items.quote_id, id));
-    const [opp] = await db
-      .select()
-      .from(opportunities)
-      .where(eq(opportunities.id, quote.opportunity_id));
-    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
-    const prices = await db
-      .select()
-      .from(recommended_prices)
-      .where(
-        items.length
-          ? inArray(recommended_prices.planned_flow_id, items.map((item) => item.planned_flow_id))
-          : eq(recommended_prices.planned_flow_id, ""),
-      );
-    const priceMap = new Map(
-      prices.map((price) => [
-        `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`,
-        price,
-      ]),
-    );
-    const now = new Date().toISOString();
-    let created = 0;
-    for (const item of items) {
-      const schedules = await db
-        .select()
-        .from(quote_schedules)
-        .where(eq(quote_schedules.quote_line_item_id, item.id));
-      for (const schedule of schedules) {
-        const key = `${item.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`;
-        if (priceMap.has(key)) continue;
-        const practicedUnit = Number(
-          useCbs
-            ? (schedule.accessory_cbs ?? schedule.tariff_cbs ?? 0)
-            : (schedule.accessory_net ?? schedule.tariff_net ?? 0),
-        );
-        // Desvio semeado entre -12% e +5% para simular cenários de alçada.
-        const delta = f.number.float({ min: -0.12, max: 0.05 });
-        const unitPrice = Number((practicedUnit * (1 + delta)).toFixed(2));
-        if (unitPrice <= 0) continue;
-        await db.insert(recommended_prices).values({
-          id: crypto.randomUUID(),
-          planned_flow_id: item.planned_flow_id,
-          service: schedule.service,
-          year: schedule.year,
-          month: schedule.month,
-          unit_price: unitPrice,
-          source: "Jetsons (mock)",
-          created_at: now,
-          updated_at: now,
-        });
-        priceMap.set(key, { unit_price: unitPrice } as never);
-        created++;
-      }
-    }
+    const created = await ensureRecommendedPricesForQuote(id);
     return { ok: true, created };
   },
 );
@@ -2536,6 +2599,7 @@ export const applyRecommendedPrices = createServerFn({ method: "POST" }).handler
     if (!quote) throw new Error("Cotação não encontrada.");
     if (quote.status !== "Rascunho" || quote.is_synced)
       throw new Error("Só é possível aplicar preços em uma Cotação em Rascunho.");
+    await ensureRecommendedPricesForQuote(id);
     const result = await computeQuotePriceComparison(id);
     if (result.rows.some((row) => row.missing))
       throw new Error("Gere os preços recomendados ausentes antes de aplicar.");
@@ -2608,6 +2672,49 @@ export const applyRecommendedPrices = createServerFn({ method: "POST" }).handler
     await markQuotePricesStale(id);
     const fresh = await computeQuotePriceComparison(id);
     return { ok: true, result: fresh };
+  },
+);
+
+/** Edita o preço praticado de uma Agenda e devolve o comparativo atualizado. */
+export const updateScheduleTariff = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { scheduleId, unitPrice } = input as { scheduleId: string; unitPrice: number };
+    const [schedule] = await db
+      .select()
+      .from(quote_schedules)
+      .where(eq(quote_schedules.id, scheduleId));
+    if (!schedule) throw new Error("Agenda não encontrada.");
+    const [item] = await db
+      .select()
+      .from(quote_line_items)
+      .where(eq(quote_line_items.id, schedule.quote_line_item_id));
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, item?.quote_id ?? ""));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    if (quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível editar preços em uma Cotação em Rascunho.");
+    const price = Number(unitPrice);
+    if (!Number.isFinite(price) || price <= 0)
+      throw new Error("Informe um preço maior que zero.");
+    const [opp] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, quote.opportunity_id));
+    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+    const mainTariff = Number(useCbs ? schedule.tariff_cbs : schedule.tariff_net);
+    const pct = mainTariff > 0 ? Number(((price / mainTariff) * 100).toFixed(2)) : 100;
+    await db
+      .update(quote_schedules)
+      .set({
+        ...(useCbs
+          ? { accessory_cbs: price, accessory_cbs_pct: pct }
+          : { accessory_net: price, accessory_net_pct: pct }),
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(quote_schedules.id, scheduleId));
+    await markQuotePricesStale(quote.id);
+    const result = await computeQuotePriceComparison(quote.id);
+    return { ok: true, result };
   },
 );
 
@@ -2795,31 +2902,47 @@ export const decideQuoteApproval = createServerFn({ method: "POST" }).handler(
 );
 
 /** Garante preços recomendados (Jetsons mock) para todos os serviços/períodos da Cotação. */
-async function ensureRecommendedPricesForQuote(quoteId: string, seed: number) {
+/**
+ * Garante que o Jetsons (mock) tenha preço recomendado para cada Agenda da
+ * Cotação. Os preços vêm do modelo de mercado: mesmos produto + trecho +
+ * serviço + período resultam no mesmo valor em qualquer Cotação.
+ */
+async function ensureRecommendedPricesForQuote(quoteId: string) {
   const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
-  if (!quote) return;
-  const f = seededFaker(Number(seed) + 7);
+  if (!quote) return 0;
   const items = await db
     .select()
     .from(quote_line_items)
     .where(eq(quote_line_items.quote_id, quoteId));
-  if (!items.length) return;
-  const [opp] = await db
-    .select()
-    .from(opportunities)
-    .where(eq(opportunities.id, quote.opportunity_id));
-  const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+  if (!items.length) return 0;
+  const flowIds = [...new Set(items.map((item) => item.planned_flow_id))];
+  const flows = await db
+    .select({
+      id: planned_flows.id,
+      origin_id: planned_flows.origin_id,
+      destination_id: planned_flows.destination_id,
+      merchandise_name: merchandise.name,
+    })
+    .from(planned_flows)
+    .innerJoin(merchandise, eq(planned_flows.merchandise_id, merchandise.id))
+    .where(inArray(planned_flows.id, flowIds));
+  const flowById = new Map(flows.map((flow) => [flow.id, flow]));
+  const locationRows = await db.select().from(locations);
+  const locationById = new Map(locationRows.map((location) => [location.id, location]));
   const prices = await db
     .select()
     .from(recommended_prices)
-    .where(
-      inArray(recommended_prices.planned_flow_id, items.map((item) => item.planned_flow_id)),
-    );
+    .where(inArray(recommended_prices.planned_flow_id, flowIds));
   const priceMap = new Set(
     prices.map((price) => `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`),
   );
   const now = new Date().toISOString();
+  let created = 0;
   for (const item of items) {
+    const flow = flowById.get(item.planned_flow_id);
+    const origin = locationById.get(flow?.origin_id ?? "");
+    const destination = locationById.get(flow?.destination_id ?? "");
+    if (!flow || !origin || !destination) continue;
     const schedules = await db
       .select()
       .from(quote_schedules)
@@ -2827,14 +2950,14 @@ async function ensureRecommendedPricesForQuote(quoteId: string, seed: number) {
     for (const schedule of schedules) {
       const key = `${item.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`;
       if (priceMap.has(key)) continue;
-      const practicedUnit = Number(
-        useCbs
-          ? (schedule.accessory_cbs ?? schedule.tariff_cbs ?? 0)
-          : (schedule.accessory_net ?? schedule.tariff_net ?? 0),
-      );
-      const delta = f.number.float({ min: -0.12, max: 0.05 });
-      const unitPrice = Number((practicedUnit * (1 + delta)).toFixed(2));
-      if (unitPrice <= 0) continue;
+      const unitPrice = jetsonsUnitPrice({
+        origin: origin as JetsonsEndpoint,
+        destination: destination as JetsonsEndpoint,
+        merchandise: flow.merchandise_name,
+        service: schedule.service,
+        year: schedule.year,
+        month: schedule.month,
+      });
       await db.insert(recommended_prices).values({
         id: crypto.randomUUID(),
         planned_flow_id: item.planned_flow_id,
@@ -2842,11 +2965,13 @@ async function ensureRecommendedPricesForQuote(quoteId: string, seed: number) {
         year: schedule.year,
         month: schedule.month,
         unit_price: unitPrice,
-        source: "Jetsons (mock)",
+        source: "Jetsons (mock · mercado)",
         created_at: now,
         updated_at: now,
       });
       priceMap.add(key);
+      created++;
     }
   }
+  return created;
 }

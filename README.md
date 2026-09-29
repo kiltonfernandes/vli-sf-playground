@@ -10,6 +10,15 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v5.19.06 — Preços Jetsons por Agenda e avisos fecháveis
+
+- **Preço Jetsons de mercado**: recomendações determinísticas por mercadoria, trecho, serviço e período são geradas automaticamente na Cotação e exibidas ao lado do preço praticado.
+- **Comparativo e alçada por Agenda**: a tela agrupa Companhia → Mercadoria → Trecho → Modal → Serviço, lista todas as Agendas e permite editar cada preço. Verde até 5%, amarelo acima de 5% até 7%, vermelho acima de 7%. A pior Agenda individual governa a Cotação — descontos fortes não são mais diluídos pela média do Item.
+- **Ações de preço**: aplicação do recomendado em todas as Agendas, revalidação com feedback e envio para a fila de Aprovação. O status do cabeçalho atualiza após uma edição.
+- **Cotações alternativas**: uma nova Cotação pode reutilizar o mesmo período e praça do Fluxo em outra Cotação da Oportunidade; a chave da Agenda vale dentro de cada Cotação.
+- **Avisos fecháveis**: notificações toast exibem um X acessível para dispensá-las.
+- Verificação: build de produção aprovado; E2E passou em 24/24 verificações, incluindo edição, limites de alçada, envio à fila e fechamento do aviso.
+
 ### v5.19.05 — Correções de UX: vigência configurável, header responsivo, aba Aprovação e ACS
 
 - **Vigência configurável onde é exigida**: a Cotação agora mostra a vigência da Oportunidade com edição inline (alerta "Definir vigência" quando ausente), e o screenflow do Item exibe um banner com os campos de início/fim quando a Oportunidade não tem vigência — salvar e continuar no mesmo fluxo, sem sair da tela. Valida início antes do fim e ACS inferior a 12 meses.

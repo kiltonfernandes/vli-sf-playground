@@ -16,6 +16,7 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v5.19.06` — Add deterministic Jetsons market prices, show them across the five-level Quote grouping, edit prices by Schedule, and govern approval by the worst individual Schedule so a large discount cannot be diluted by an Item average. Allow alternate Quotes to reuse the same Flow periods, refresh Quote status after inline edits, and add an X close button to toast notifications.
 - `v5.19.05` — Make the opportunity term configurable from the Quote and the item screenflow, keep the global header responsive in a single row, show the Aprovação tab only for logged approvers, re-seed the built-in approvers on server boot, and skip the Reajuste Ferro step for ACS quotes.
 - `v5.19.04` — Add price validation against recommended prices (Jetsons mock), configurable approval thresholds (Gerente Geral/Diretoria), approver login in Settings, the Aprovação tab with a Salesforce-style approve/reject queue, and the Aprovadores/Preços Recomendados/Aprovações objects with Faker generators.
 - `v4.18.04` — Define a batch commit subject convention that includes previous and new versions.

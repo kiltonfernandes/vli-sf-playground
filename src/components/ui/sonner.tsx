@@ -8,6 +8,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       duration={Infinity}
       className="toaster group"
       toastOptions={{
+        closeButtonAriaLabel: "Fechar aviso",
         classNames: {
           toast:
             "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",

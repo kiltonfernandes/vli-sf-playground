@@ -1,12 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   applyRecommendedPrices,
   completeQuote,
   deleteRecord,
-  generateMissingRecommendedPrices,
   getQuoteFull,
   listQuoteOptions,
   saveRecord,
@@ -14,6 +13,7 @@ import {
   submitQuoteForApproval,
   syncQuote,
   updateOpportunityTerm,
+  updateScheduleTariff,
   validateQuotePrices,
 } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
@@ -65,6 +65,7 @@ function QuotePage() {
     );
   const q = data.quote,
     items = data.items as any[];
+  const thresholds = data.thresholds ?? { gg: 5, dir: 7 };
   const tariffMode = q.tariff_mode || options?.opportunity?.integration_tariff || "Líquida";
   const canChangeTariff = !items.some((item) => item.schedules?.length);
   const applicationDay = Number(options?.opportunity?.application_day ?? 10);
@@ -152,6 +153,23 @@ function QuotePage() {
           : "Não foi possível sincronizar a Cotação",
         { description: error },
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function doSubmitApproval() {
+    setBusy(true);
+    try {
+      const response = await submitQuoteForApproval({ data: { id } });
+      toast.success("Preços enviados para aprovação", {
+        description: `A fila de Aprovação aguarda um aprovador ${response.alcada_level}.`,
+      });
+      await refresh();
+      await qc.invalidateQueries({ queryKey: ["approvals"] });
+    } catch (e) {
+      toast.error("Não foi possível enviar para aprovação", {
+        description: e instanceof Error ? e.message : "Tente novamente.",
+      });
     } finally {
       setBusy(false);
     }
@@ -251,7 +269,7 @@ function QuotePage() {
         <Section
           id="items"
           title="Itens da Cotação"
-          subtitle={`${items.length} itens, agrupados por Cliente, Origem, Destino, Mercadoria e Modal`}
+          subtitle={`${items.length} itens · agrupados por Companhia, Mercadoria, Trecho, Modal e Serviço`}
         >
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
             <button
@@ -264,125 +282,204 @@ function QuotePage() {
           </div>
           {!items.length && (
             <p style={{ color: "#706e6b" }}>
-              Nenhum Item. Adicione uma combinação de Cliente, Origem, Destino, Mercadoria e Modal.
+              Nenhum Item. Adicione uma combinação de Companhia, Trecho, Mercadoria, Modal e
+              Serviço.
             </p>
           )}
-          <div style={{ display: "grid", gap: 10 }}>
-            {items.map((item) => (
-              <details key={item.id} className="sf-nested-accordion" open>
-                <summary>
-                  <span>›</span>
-                  <strong>
-                    {q.account_name} · {item.route} · {item.merchandise_name} · Ferroviário ·{" "}
-                    {item.service}
-                  </strong>
-                  <small>
-                    {item.schedules.length} agendas · {item.unit}
-                  </small>
-                  <Link
-                    to="/quote-line-items/$id"
-                    params={{ id: item.id }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    Abrir registro
-                  </Link>
-                  <button
-                    className="sf-link"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setEditItem(item);
-                    }}
-                  >
-                    Editar
-                  </button>
-                </summary>
-                <div style={{ padding: 12 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: 10,
-                    }}
-                  >
-                    <span>{item.schedules.length} subitens de agenda</span>
-                    <button className="sf-btn sf-btn--brand" onClick={() => setScheduleItem(item)}>
-                      + Adicionar Agenda
-                    </button>
-                  </div>
-                  {item.schedules.length > 0 && (
-                    <div style={{ overflowX: "auto" }}>
-                      <table className="sf-table">
-                        <thead>
-                          <tr>
-                            <th>Período</th>
-                            <th>Chave da agenda</th>
-                            <th>Volume</th>
-                            <th>Tarifa</th>
-                            <th>Serviço</th>
-                            <th>Acessório</th>
-                            <th>Ações</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {item.schedules.map((row: any) => (
-                            <tr key={row.id}>
-                              <td>
-                                {String(row.month).padStart(2, "0")}/{row.year} ·{" "}
-                                {row.period_window}
-                              </td>
-                              <td>
-                                <Link
-                                  to="/quote-schedules/$id"
-                                  params={{ id: row.id }}
-                                  style={{ color: "#0176d3" }}
-                                >
-                                  {row.schedule_key}
-                                </Link>
-                              </td>
-                              <td>
-                                {row.volume.toLocaleString("pt-BR")} {item.unit}
-                              </td>
-                              <td>{fmtMoney(Number(row.tariff_cbs ?? row.tariff_net))}</td>
-                              <td>{row.service}</td>
-                              <td>
-                                {fmtMoney(Number(row.accessory_cbs ?? row.accessory_net))} ·{" "}
-                                {Number(row.accessory_cbs_pct ?? row.accessory_net_pct).toFixed(2)}%
-                              </td>
-                              <td>
-                                <button
-                                  className="sf-link"
-                                  onClick={() => setEditSchedule({ ...row, item })}
-                                >
-                                  Editar
-                                </button>{" "}
-                                ·{" "}
-                                <button
-                                  className="sf-link"
-                                  style={{ color: "#ba0517" }}
-                                  onClick={async () => {
-                                    if (confirm("Excluir esta Agenda?")) {
-                                      await deleteRecord({
-                                        data: { table: "quote_schedules", id: row.id },
-                                      });
-                                      await refresh();
-                                    }
-                                  }}
-                                >
-                                  Excluir
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+          {buildItemGroups(items, q.account_name).map((company) => (
+            <details key={company.id} className="sf-nested-accordion" open>
+              <summary>
+                <span>›</span>
+                <strong>🏢 {company.name}</strong>
+                <small>
+                  {company.itemCount} itens · {company.scheduleCount} agendas · volume{" "}
+                  {company.volume.toLocaleString("pt-BR")}
+                </small>
+              </summary>
+              <div style={{ padding: "2px 0 8px 18px" }}>
+                {company.merchandises.map((merch) => (
+                  <details key={merch.key} className="sf-nested-accordion" open>
+                    <summary>
+                      <span>›</span>
+                      <strong>📦 {merch.name}</strong>
+                      <small>
+                        {merch.itemCount} itens · volume {merch.volume.toLocaleString("pt-BR")}{" "}
+                        {merch.unit}
+                      </small>
+                    </summary>
+                    <div style={{ padding: "2px 0 8px 18px" }}>
+                      {merch.routes.map((route) => (
+                        <details key={route.key} className="sf-nested-accordion" open>
+                          <summary>
+                            <span>›</span>
+                            <strong>🛤️ {route.label}</strong>
+                            <small>🚂 {route.modal}</small>
+                          </summary>
+                          <div style={{ padding: "2px 0 8px 18px" }}>
+                            {route.items.map((item) => (
+                              <details key={item.id} className="sf-nested-accordion" open>
+                                <summary>
+                                  <span>›</span>
+                                  <strong>🔧 {item.service}</strong>
+                                  <small>
+                                    {item.schedules.length} agendas · praticado{" "}
+                                    {fmtMoney(itemPracticedTotal(item, tariffMode))} ·{" "}
+                                    <SituationChip
+                                      situation={itemSituation(item, tariffMode, thresholds)}
+                                      thresholds={thresholds}
+                                    />
+                                  </small>
+                                  <Link
+                                    to="/quote-line-items/$id"
+                                    params={{ id: item.id }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    Abrir registro
+                                  </Link>
+                                  <button
+                                    className="sf-link"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setEditItem(item);
+                                    }}
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    className="sf-btn sf-btn--brand"
+                                    style={{ padding: "2px 10px", fontSize: 12 }}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setScheduleItem(item);
+                                    }}
+                                  >
+                                    + Agenda
+                                  </button>
+                                </summary>
+                                <div style={{ padding: 8 }}>
+                                  {item.schedules.length > 0 ? (
+                                    <div style={{ overflowX: "auto" }}>
+                                      <table className="sf-table">
+                                        <thead>
+                                          <tr>
+                                            <th>Período</th>
+                                            <th>Praça</th>
+                                            <th>Volume</th>
+                                            <th>Tarifa grupo</th>
+                                            <th>Praticada</th>
+                                            <th>Jetsons</th>
+                                            <th>Desvio</th>
+                                            <th>Situação</th>
+                                            <th>Ações</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {item.schedules.map((row: any) => {
+                                            const practiced = Number(
+                                              tariffMode === "CBS"
+                                                ? (row.accessory_cbs ?? row.tariff_cbs ?? 0)
+                                                : (row.accessory_net ?? row.tariff_net ?? 0),
+                                            );
+                                            const jetsons = row.recommended_unit;
+                                            const deviation =
+                                              jetsons && jetsons > 0
+                                                ? ((practiced - jetsons) / jetsons) * 100
+                                                : null;
+                                            const situation = priceSituation(deviation, thresholds);
+                                            return (
+                                              <tr key={row.id} style={situationRowStyle(situation)}>
+                                                <td>
+                                                  <Link
+                                                    to="/quote-schedules/$id"
+                                                    params={{ id: row.id }}
+                                                    style={{ color: "#0176d3" }}
+                                                  >
+                                                    {String(row.month).padStart(2, "0")}/{row.year} ·{" "}
+                                                    {row.period_window}
+                                                  </Link>
+                                                </td>
+                                                <td>{row.plaza}</td>
+                                                <td>
+                                                  {row.volume.toLocaleString("pt-BR")} {item.unit}
+                                                </td>
+                                                <td>
+                                                  {fmtMoney(
+                                                    Number(
+                                                      tariffMode === "CBS"
+                                                        ? row.tariff_cbs
+                                                        : row.tariff_net,
+                                                    ),
+                                                  )}
+                                                </td>
+                                                <td>{fmtMoney(practiced)}</td>
+                                                <td>
+                                                  {jetsons ? fmtMoney(Number(jetsons)) : "—"}
+                                                </td>
+                                                <td
+                                                  style={{
+                                                    color: deviationColor(deviation, thresholds),
+                                                    fontWeight: 600,
+                                                  }}
+                                                >
+                                                  {deviation === null
+                                                    ? "—"
+                                                    : `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%`}
+                                                </td>
+                                                <td>
+                                                  <SituationChip
+                                                    situation={situation}
+                                                    thresholds={thresholds}
+                                                  />
+                                                </td>
+                                                <td>
+                                                  <button
+                                                    className="sf-link"
+                                                    onClick={() => setEditSchedule({ ...row, item })}
+                                                  >
+                                                    Editar
+                                                  </button>{" "}
+                                                  ·{" "}
+                                                  <button
+                                                    className="sf-link"
+                                                    style={{ color: "#ba0517" }}
+                                                    onClick={async () => {
+                                                      if (confirm("Excluir esta Agenda?")) {
+                                                        await deleteRecord({
+                                                          data: {
+                                                            table: "quote_schedules",
+                                                            id: row.id,
+                                                          },
+                                                        });
+                                                        await refresh();
+                                                      }
+                                                    }}
+                                                  >
+                                                    Excluir
+                                                  </button>
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <p style={{ color: "#706e6b" }}>Nenhuma agenda neste serviço.</p>
+                                  )}
+                                </div>
+                              </details>
+                            ))}
+                          </div>
+                        </details>
+                      ))}
                     </div>
-                  )}
-                </div>
-              </details>
-            ))}
-          </div>
+                  </details>
+                ))}
+              </div>
+            </details>
+          ))}
         </Section>
         <div
           className="sf-card"
@@ -419,7 +516,7 @@ function QuotePage() {
             <button
               className="sf-btn"
               disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
-              title="Compara o preço de cada Item com o preço recomendado (Jetsons) e calcula a alçada da Cotação"
+              title="Abre o comparativo do Jetsons com todas as Agendas: desvio por linha, cores de alçada e edição de preço"
               onClick={async () => {
                 setBusy(true);
                 try {
@@ -437,6 +534,16 @@ function QuotePage() {
             >
               {busy ? "Validando…" : "Validar preços"}
             </button>
+            {q.price_status === "Pendente alçada" && (
+              <button
+                className="sf-btn sf-btn--brand"
+                disabled={busy}
+                title="Envia os preços desta Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
+                onClick={() => doSubmitApproval()}
+              >
+                {busy ? "Enviando…" : "Enviar preços para aprovação"}
+              </button>
+            )}
             <button
               className="sf-btn"
               disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
@@ -527,6 +634,7 @@ function QuotePage() {
       {pricePanel && (
         <PricePanel
           result={pricePanel}
+          canEdit={q.status === "Rascunho" && !q.is_synced}
           onClose={() => setPricePanel(null)}
           onRefreshed={(fresh) => setPricePanel(fresh)}
         />
@@ -1063,30 +1171,268 @@ function PriceStatusBadge({ quote }: { quote: any }) {
   );
 }
 
+type PriceSituation = "ok" | "gg" | "dir" | null;
+
+/** Classifica o desvio: verde sem alçada, amarelo Gerente Geral, vermelho Diretoria. */
+function priceSituation(deviation: number | null, thresholds: { gg: number; dir: number }): PriceSituation {
+  if (deviation === null) return null;
+  const discount = Math.max(0, -deviation);
+  if (discount > thresholds.dir) return "dir";
+  if (discount > thresholds.gg) return "gg";
+  return "ok";
+}
+
+function deviationColor(deviation: number | null, thresholds: { gg: number; dir: number }) {
+  const situation = priceSituation(deviation, thresholds);
+  if (situation === "dir") return "#ba0517";
+  if (situation === "gg") return "#fe9339";
+  if (situation === "ok") return "#2e844a";
+  return "#706e6b";
+}
+
+function situationRowStyle(situation: PriceSituation) {
+  if (situation === "dir") return { background: "#fdeef0" };
+  if (situation === "gg") return { background: "#fef7e3" };
+  if (situation === "ok") return { background: "#f0f9f1" };
+  return undefined;
+}
+
+function SituationChip({
+  situation,
+  thresholds,
+}: {
+  situation: PriceSituation;
+  thresholds: { gg: number; dir: number };
+}) {
+  if (!situation)
+    return <span style={{ color: "#706e6b", fontSize: 12 }}>sem preço Jetsons</span>;
+  const config = {
+    ok: { bg: "#f0f9f1", color: "#2e844a", label: "✅ Ok · sem alçada" },
+    gg: { bg: "#fef7e3", color: "#9c6700", label: `⚠️ Alçada Gerente Geral (> ${thresholds.gg}%)` },
+    dir: { bg: "#fdeef0", color: "#ba0517", label: `⛔ Alçada Diretoria (> ${thresholds.dir}%)` },
+  }[situation];
+  return (
+    <span
+      style={{
+        background: config.bg,
+        color: config.color,
+        fontSize: 12,
+        fontWeight: 600,
+        padding: "2px 8px",
+        borderRadius: 999,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {config.label}
+    </span>
+  );
+}
+
+type GroupedRoute = { key: string; label: string; modal: string; items: any[] };
+type GroupedMerchandise = {
+  key: string;
+  id: string;
+  name: string;
+  unit: string;
+  itemCount: number;
+  scheduleCount: number;
+  volume: number;
+  routes: GroupedRoute[];
+};
+type GroupedCompany = {
+  id: string;
+  name: string;
+  itemCount: number;
+  scheduleCount: number;
+  volume: number;
+  merchandises: GroupedMerchandise[];
+};
+
+/** Árvore de Itens em 5 layers: Companhia → Mercadoria → Trecho → Modal → Serviço. */
+function buildItemGroups(items: any[], accountName: string): GroupedCompany[] {
+  const companies = new Map<string, GroupedCompany>();
+  for (const item of items) {
+    let company = companies.get(item.account_id);
+    if (!company) {
+      company = {
+        id: item.account_id,
+        name: accountName,
+        itemCount: 0,
+        scheduleCount: 0,
+        volume: 0,
+        merchandises: [],
+      };
+      companies.set(item.account_id, company);
+    }
+    const volume = (item.schedules ?? []).reduce(
+      (sum: number, row: any) => sum + Number(row.volume ?? 0),
+      0,
+    );
+    company.itemCount++;
+    company.scheduleCount += (item.schedules ?? []).length;
+    company.volume += volume;
+    let merch = company.merchandises.find((entry) => entry.id === item.merchandise_id);
+    if (!merch) {
+      merch = {
+        key: item.merchandise_id,
+        id: item.merchandise_id,
+        name: item.merchandise_name,
+        unit: item.unit,
+        itemCount: 0,
+        scheduleCount: 0,
+        volume: 0,
+        routes: [],
+      };
+      company.merchandises.push(merch);
+    }
+    merch.itemCount++;
+    merch.scheduleCount += (item.schedules ?? []).length;
+    merch.volume += volume;
+    const routeKey = `${item.origin_id}|${item.destination_id}`;
+    let route = merch.routes.find((entry) => entry.key === routeKey);
+    if (!route) {
+      route = {
+        key: routeKey,
+        label: `${item.origin_name} (${item.origin_code}) → ${item.destination_name} (${item.destination_code})`,
+        modal: item.modal,
+        items: [],
+      };
+      merch.routes.push(route);
+    }
+    route.items.push(item);
+  }
+  return [...companies.values()];
+}
+
+function schedulePracticedUnit(row: any, tariffMode: string) {
+  return Number(
+    tariffMode === "CBS"
+      ? (row.accessory_cbs ?? row.tariff_cbs ?? 0)
+      : (row.accessory_net ?? row.tariff_net ?? 0),
+  );
+}
+
+function itemPracticedTotal(item: any, tariffMode: string) {
+  return (item.schedules ?? []).reduce(
+    (sum: number, row: any) => sum + schedulePracticedUnit(row, tariffMode) * Number(row.volume ?? 0),
+    0,
+  );
+}
+
+/** Pior situação entre as Agendas do Item (a maior exigência governa o Item). */
+function itemSituation(
+  item: any,
+  tariffMode: string,
+  thresholds: { gg: number; dir: number },
+): PriceSituation {
+  let worst: PriceSituation = null;
+  for (const row of item.schedules ?? []) {
+    const jetsons = row.recommended_unit;
+    if (!jetsons) continue;
+    const deviation =
+      ((schedulePracticedUnit(row, tariffMode) - jetsons) / jetsons) * 100;
+    const situation = priceSituation(deviation, thresholds);
+    if (situation === "dir") return "dir";
+    if (situation === "gg") worst = "gg";
+    if (situation === "ok" && !worst) worst = "ok";
+  }
+  return worst;
+}
+
+/** Campo editável de preço praticado: salva ao sair do campo (blur) ou com Enter. */
+function PriceInput({
+  scheduleId,
+  value,
+  disabled,
+  onSaved,
+}: {
+  scheduleId: string;
+  value: number;
+  disabled: boolean;
+  onSaved: (response: any) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setDraft(String(value)), [value]);
+  async function commit() {
+    const parsed = Number(draft.replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed === Number(value)) {
+      setDraft(String(value));
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await updateScheduleTariff({
+        data: { scheduleId, unitPrice: parsed },
+      });
+      await onSaved(response);
+    } catch (error) {
+      toast.error("Não foi possível salvar o preço", {
+        description: error instanceof Error ? error.message : "Tente novamente.",
+      });
+      setDraft(String(value));
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <input
+      type="number"
+      step="0.01"
+      min="0"
+      value={draft}
+      disabled={disabled || saving}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+      }}
+      title={
+        disabled
+          ? "Edição de preço disponível somente em Rascunho"
+          : "Edite o preço praticado e saia do campo para salvar e recalcular"
+      }
+      style={{
+        width: 96,
+        textAlign: "right",
+        padding: "3px 6px",
+        border: "1px solid #dddbda",
+        borderRadius: 4,
+        color: "#16325c",
+      }}
+    />
+  );
+}
+
 function PricePanel({
   result,
+  canEdit,
   onClose,
   onRefreshed,
 }: {
   result: any;
+  canEdit: boolean;
   onClose: () => void;
   onRefreshed: (fresh: any) => void;
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const thresholds = result.thresholds ?? { gg: 5, dir: 7 };
-  const missing = (result.rows ?? []).filter((row: any) => row.missing);
+  const schedules = (result.schedules ?? []) as any[];
   const ok = result.price_status === "Ok" || result.price_status === "Aprovada";
+  const byItem = new Map<string, any[]>();
+  for (const row of schedules)
+    byItem.set(row.item_id, [...(byItem.get(row.item_id) ?? []), row]);
 
   const verdict = ok
     ? result.price_status === "Aprovada"
       ? `✅ Preços aprovados por alçada ${result.alcada_level} — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%. A Cotação pode ser concluída.`
       : `✅ Preços ok — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%, dentro do limite de ${thresholds.gg}%. Sem alçada.`
     : result.price_status === "Não validada"
-      ? `⚠️ ${missing.length} item(ns) sem preço recomendado no Jetsons. Gere os preços ausentes para validar.`
+      ? "⚠️ Sem preços para comparar. Adicione Itens e Agendas à Cotação."
       : result.price_status === "Rejeitada"
-        ? `⛔ Alçada rejeitada — ajuste os preços e valide novamente para concluir.`
-        : `⚠️ Não ok — desvio de ${Number(result.max_discount_pct).toFixed(2)}% acima do limite de ${thresholds.gg}%. Exige alçada ${result.alcada_level}.`;
+        ? "⛔ Alçada rejeitada — ajuste os preços e valide novamente para concluir."
+        : `⚠️ Desvio de ${Number(result.max_discount_pct).toFixed(2)}% acima do limite de ${thresholds.gg}%. Exige alçada ${result.alcada_level}.`;
 
   const verdictColor = ok
     ? "#2e844a"
@@ -1096,20 +1442,26 @@ function PricePanel({
         ? "#ba0517"
         : "#fe9339";
 
-  async function rerun(action?: () => Promise<any>) {
+  async function invalidateAll() {
+    await qc.invalidateQueries({ queryKey: ["quote-full", result.quote_id] });
+    await qc.invalidateQueries({ queryKey: ["approvals"] });
+    await qc.invalidateQueries({ queryKey: ["quotes"] });
+    await qc.invalidateQueries({ queryKey: ["home-dashboard"] });
+  }
+
+  async function revalidate(action?: () => Promise<any>) {
     setBusy(true);
     try {
       if (action) await action();
       const fresh = await validateQuotePrices({ data: { id: result.quote_id } });
       onRefreshed(fresh);
-      await qc.invalidateQueries({ queryKey: ["quote-full", result.quote_id] });
-      await qc.invalidateQueries({ queryKey: ["approvals"] });
-      await qc.invalidateQueries({ queryKey: ["quotes"] });
-      await qc.invalidateQueries({ queryKey: ["home-dashboard"] });
+      await invalidateAll();
+      return fresh;
     } catch (error) {
       toast.error("Não foi possível concluir a ação", {
-        description: error instanceof Error ? error.message : undefined,
+        description: error instanceof Error ? error.message : "Tente novamente.",
       });
+      return null;
     } finally {
       setBusy(false);
     }
@@ -1123,10 +1475,10 @@ function PricePanel({
         aria-modal="true"
         aria-labelledby="price-panel-title"
         onClick={(event) => event.stopPropagation()}
-        style={{ maxWidth: 900 }}
+        style={{ maxWidth: 980 }}
       >
         <div className="sf-modal-header">
-          <h2 id="price-panel-title">Comparativo de preços · {result.quote_id ? "Cotação" : ""}</h2>
+          <h2 id="price-panel-title">Comparativo de preços · Jetsons</h2>
           <button className="sf-btn" disabled={busy} onClick={onClose}>
             Fechar
           </button>
@@ -1146,73 +1498,137 @@ function PricePanel({
             {verdict}
           </div>
           <p style={{ fontSize: 12, color: "#706e6b" }}>
-            Modalidade de tarifa: {result.tariff_mode}. Limiares configurados: sem alçada até{" "}
-            {thresholds.gg}%, Gerente Geral até {thresholds.dir}%, Diretoria acima. O maior desvio
-            entre os Itens governa a Cotação inteira.
+            Modalidade de tarifa: {result.tariff_mode}. O Jetsons (mock de mercado) mantém o preço
+            recomendado por produto + trecho + serviço + período. Linhas verdes dispensam alçada
+            (desvio até {thresholds.gg}%), amarelas exigem Gerente Geral (até {thresholds.dir}%) e
+            vermelhas exigem Diretoria (acima). O maior desvio entre as Agendas governa a Cotação
+            inteira. Edite o preço praticado direto na linha e saia do campo para salvar.
           </p>
-          <div style={{ overflowX: "auto" }}>
-            <table className="sf-table">
-              <thead>
-                <tr>
-                  <th>Item (Fluxo · Serviço)</th>
-                  <th>Volume</th>
-                  <th>Preço praticado</th>
-                  <th>Preço recomendado</th>
-                  <th>Desvio</th>
-                  <th>Situação</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(result.rows ?? []).map((row: any) => {
-                  const deviation = row.deviation_pct;
-                  const discount = deviation === null ? null : Math.max(0, -deviation);
-                  const rowColor =
-                    row.missing
-                      ? "#706e6b"
-                      : discount === null
-                        ? "#706e6b"
-                        : discount > thresholds.dir
-                          ? "#ba0517"
-                          : discount > thresholds.gg
-                            ? "#fe9339"
-                            : "#2e844a";
-                  return (
-                    <tr key={row.item_id}>
-                      <td>
-                        {row.route} ({row.flow_code}) · {row.service}
-                      </td>
-                      <td>{Number(row.volume_total).toLocaleString("pt-BR")}</td>
-                      <td>{fmtMoney(Number(row.practiced_total))}</td>
-                      <td>
-                        {row.recommended_total === null ? "—" : fmtMoney(Number(row.recommended_total))}
-                      </td>
-                      <td style={{ color: rowColor, fontWeight: 600 }}>
-                        {deviation === null ? "—" : `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%`}
-                      </td>
-                      <td style={{ fontSize: 12 }}>
-                        {row.missing
-                          ? `⚠️ Sem preço no Jetsons (${row.missing_periods.join(", ")})`
-                          : deviation === null
-                            ? "—"
-                            : discount > thresholds.dir
-                              ? "Excede Diretoria"
-                              : discount > thresholds.gg
-                                ? "Excede Gerente Geral"
-                                : "Ok"}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!(result.rows ?? []).length && (
-                  <tr>
-                    <td colSpan={6} style={{ color: "#706e6b" }}>
-                      Adicione Itens e Agendas para comparar preços.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          {(result.rows ?? []).map((row: any) => {
+            const groupRows = byItem.get(row.item_id) ?? [];
+            const situation = groupRows.reduce<PriceSituation>((worst, entry) => {
+              const entrySituation = priceSituation(entry.deviation_pct, thresholds);
+              if (entrySituation === "dir" || worst === "dir") return "dir";
+              if (entrySituation === "gg" || worst === "gg") return "gg";
+              return entrySituation ?? worst;
+            }, null);
+            return (
+              <div key={row.item_id} style={{ marginBottom: 14 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    marginBottom: 6,
+                  }}
+                >
+                  <div>
+                    <strong>
+                      {row.flow_code} · {row.origin_name} → {row.destination_name}
+                    </strong>
+                    <div style={{ fontSize: 12, color: "#706e6b" }}>
+                      {row.merchandise} · {row.service} · volume{" "}
+                      {Number(row.volume_total).toLocaleString("pt-BR")} {row.unit}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", fontSize: 12 }}>
+                    <div>
+                      Praticado <strong>{fmtMoney(Number(row.practiced_total))}</strong> · Jetsons{" "}
+                      <strong>
+                        {row.recommended_total === null
+                          ? "—"
+                          : fmtMoney(Number(row.recommended_total))}
+                      </strong>
+                    </div>
+                    <SituationChip situation={situation} thresholds={thresholds} />
+                  </div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="sf-table">
+                    <thead>
+                      <tr>
+                        <th>Período</th>
+                        <th>Praça</th>
+                        <th>Volume</th>
+                        <th>Preço praticado</th>
+                        <th>Preço Jetsons</th>
+                        <th>Desvio</th>
+                        <th>Situação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groupRows.map((entry: any) => {
+                        const deviation = entry.deviation_pct;
+                        const entrySituation = priceSituation(deviation, thresholds);
+                        return (
+                          <tr
+                            key={entry.schedule_id}
+                            style={situationRowStyle(entrySituation)}
+                          >
+                            <td>
+                              {String(entry.month).padStart(2, "0")}/{entry.year} ·{" "}
+                              {entry.period_window}
+                            </td>
+                            <td>{entry.plaza}</td>
+                            <td>{Number(entry.volume).toLocaleString("pt-BR")}</td>
+                            <td>
+                              <PriceInput
+                                scheduleId={entry.schedule_id}
+                                value={Number(entry.practiced_unit)}
+                                disabled={busy || !canEdit}
+                                onSaved={async (response) => {
+                                  onRefreshed(response.result);
+                                  await invalidateAll();
+                                  toast.success("Preço atualizado", {
+                                    description:
+                                      "Comparativo recalculado com o novo preço praticado.",
+                                  });
+                                }}
+                              />
+                            </td>
+                            <td>
+                              {entry.recommended_unit === null
+                                ? "—"
+                                : fmtMoney(Number(entry.recommended_unit))}
+                            </td>
+                            <td
+                              style={{
+                                color: deviationColor(deviation, thresholds),
+                                fontWeight: 600,
+                              }}
+                            >
+                              {deviation === null
+                                ? "—"
+                                : `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%`}
+                            </td>
+                            <td>
+                              <SituationChip
+                                situation={entrySituation}
+                                thresholds={thresholds}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!groupRows.length && (
+                        <tr>
+                          <td colSpan={7} style={{ color: "#706e6b" }}>
+                            Nenhuma Agenda neste Item.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          {!(result.rows ?? []).length && (
+            <p style={{ color: "#706e6b" }}>
+              Adicione Itens e Agendas para comparar preços com o Jetsons.
+            </p>
+          )}
           <div
             style={{
               display: "flex",
@@ -1222,44 +1638,38 @@ function PricePanel({
               flexWrap: "wrap",
             }}
           >
-            {missing.length > 0 && (
-              <button
-                className="sf-btn"
-                disabled={busy}
-                title="Cria com Faker (seed da Cotação) os preços recomendados ausentes de cada Item, imitando o cadastro manual no Jetsons"
-                onClick={() =>
-                  rerun(() =>
-                    generateMissingRecommendedPrices({ data: { id: result.quote_id } }).then(
-                      (response: any) =>
-                        toast.success("Preços recomendados gerados", {
-                          description: `${response.created} preço(s) criado(s) com a seed da Cotação.`,
-                        }),
-                    ),
-                  )
+            <button
+              className="sf-btn"
+              disabled={busy || !canEdit}
+              title={
+                canEdit
+                  ? "Grava o preço recomendado do Jetsons em todas as Agendas, mantendo o rateio em 100%"
+                  : "Disponível somente em uma Cotação em Rascunho"
+              }
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const response = await applyRecommendedPrices({
+                    data: { id: result.quote_id },
+                  });
+                  onRefreshed(response.result);
+                  await invalidateAll();
+                  toast.success("Preço recomendado aplicado em todas as Agendas", {
+                    description: `Desvio máximo agora é de ${Number(
+                      response.result.max_discount_pct,
+                    ).toFixed(2)}%.`,
+                  });
+                } catch (error) {
+                  toast.error("Não foi possível aplicar os preços", {
+                    description: error instanceof Error ? error.message : "Tente novamente.",
+                  });
+                } finally {
+                  setBusy(false);
                 }
-              >
-                {busy ? "Gerando…" : "Gerar preços recomendados ausentes"}
-              </button>
-            )}
-            {!ok && !missing.length && (
-              <button
-                className="sf-btn"
-                disabled={busy}
-                title="Reescreve as tarifas de todos os grupos de Agenda com os valores recomendados, mantendo o rateio em 100%"
-                onClick={() =>
-                  rerun(() =>
-                    applyRecommendedPrices({ data: { id: result.quote_id } }).then(
-                      (response: any) =>
-                        toast.success("Preços recomendados aplicados", {
-                          description: `Desvio máximo agora é de ${Number(response.result.max_discount_pct).toFixed(2)}%.`,
-                        }),
-                    ),
-                  )
-                }
-              >
-                {busy ? "Aplicando…" : "Aplicar preço recomendado"}
-              </button>
-            )}
+              }}
+            >
+              {busy ? "Aplicando…" : "Aprovar todas com preço recomendado"}
+            </button>
             {result.price_status === "Pendente alçada" && (
               <button
                 className="sf-btn sf-btn--brand"
@@ -1267,28 +1677,45 @@ function PricePanel({
                 title={
                   result.open_approval
                     ? "Já existe uma solicitação aberta na fila de Aprovação"
-                    : "Envia a Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
+                    : "Envia os preços desta Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
                 }
-                onClick={() =>
-                  rerun(() =>
-                    submitQuoteForApproval({ data: { id: result.quote_id } }).then(() =>
-                      toast.success("Solicitação de alçada enviada", {
-                        description: `A fila de Aprovação aguarda um aprovador ${result.alcada_level}.`,
-                      }),
-                    ),
-                  )
-                }
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await submitQuoteForApproval({ data: { id: result.quote_id } });
+                    await invalidateAll();
+                    toast.success("Preços enviados para aprovação", {
+                      description: `A fila de Aprovação aguarda um aprovador ${result.alcada_level}.`,
+                    });
+                    const fresh = await validateQuotePrices({ data: { id: result.quote_id } });
+                    onRefreshed(fresh);
+                  } catch (error) {
+                    toast.error("Não foi possível enviar para aprovação", {
+                      description: error instanceof Error ? error.message : "Tente novamente.",
+                    });
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
               >
-                {result.open_approval ? "Na fila de aprovação" : "Enviar para aprovação"}
+                {result.open_approval ? "Na fila de aprovação" : "Enviar preços para aprovação"}
               </button>
             )}
             <button
               className="sf-btn"
               disabled={busy}
               title="Recalcula o comparativo com os dados atuais"
-              onClick={() => rerun()}
+              onClick={async () => {
+                const fresh = await revalidate();
+                if (fresh)
+                  toast.success("Comparativo revalidado", {
+                    description: `Situação: ${fresh.price_status} · desvio máximo de ${Number(
+                      fresh.max_discount_pct,
+                    ).toFixed(2)}%.`,
+                  });
+              }}
             >
-              Revalidar
+              {busy ? "Revalidando…" : "Revalidar"}
             </button>
           </div>
         </div>
