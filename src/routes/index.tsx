@@ -53,7 +53,7 @@ function HomePage() {
         style={{
           padding: "16px 24px",
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(5, 1fr)",
           gap: 16,
         }}
       >
@@ -61,6 +61,11 @@ function HomePage() {
         <Kpi label="Contatos" value={String(data?.contactCount ?? 0)} accent="#2e844a" />
         <Kpi label="Valor total (LTV)" value={fmtMoney(ltvTotal)} accent="#fe9339" />
         <Kpi label="Contas em risco" value={String(atRisk)} accent="#ea001e" />
+        <Kpi
+          label="Aprovações pendentes"
+          value={String(data?.pendingApprovals ?? 0)}
+          accent="#0b5cab"
+        />
       </div>
 
       <div style={{ padding: "0 24px 32px" }}>

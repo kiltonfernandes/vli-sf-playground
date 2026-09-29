@@ -67,6 +67,45 @@ const CONFIG: Record<string, Config> = {
       "origin_system",
     ],
   },
+  approvers: {
+    table: "approvers",
+    label: "Aprovadores",
+    fields: [
+      { name: "name", label: "Nome do aprovador", required: true },
+      {
+        name: "level",
+        label: "Nível de alçada",
+        type: "select",
+        options: ["Gerente Geral", "Diretoria"],
+        required: true,
+      },
+      { name: "email", label: "E-mail" },
+    ],
+    columns: ["name", "level", "email"],
+  },
+  recommended_prices: {
+    table: "recommended_prices",
+    label: "Preços Recomendados",
+    fields: [
+      { name: "planned_flow_id", label: "ID do Fluxo Planejado", required: true },
+      {
+        name: "service",
+        label: "Serviço",
+        type: "select",
+        options: ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"],
+        required: true,
+      },
+      { name: "year", label: "Ano", type: "number", required: true },
+      { name: "month", label: "Mês (1–12)", type: "number", required: true },
+      {
+        name: "unit_price",
+        label: "Preço unitário recomendado",
+        type: "number",
+        required: true,
+      },
+    ],
+    columns: ["flow_code", "service", "year", "month", "unit_price", "source"],
+  },
 };
 export function SfReferenceObjectPage({ object, id }: { object: string; id?: string }) {
   const config = CONFIG[object],

@@ -1,11 +1,20 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { APP_VERSION } from "../lib/version";
-import { useState } from "react";
-import { resetPlaygroundData } from "@/lib/crud";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  getAppSettings,
+  listApprovers,
+  resetPlaygroundData,
+  setCurrentApprover,
+  updateAlcadaThresholds,
+} from "@/lib/crud";
 
 const TABS: Array<{ label: string; to: string }> = [
   { label: "Início", to: "/" },
+  { label: "Aprovação", to: "/approvals" },
   { label: "Contas", to: "/accounts" },
   { label: "Contatos", to: "/contacts" },
   { label: "Oportunidades", to: "/opportunities" },
@@ -16,13 +25,36 @@ const TABS: Array<{ label: string; to: string }> = [
   { label: "Locations", to: "/locations" },
   { label: "Mercadorias", to: "/merchandise" },
   { label: "Bases Diesel", to: "/diesel-bases" },
+  { label: "Aprovadores", to: "/approvers" },
+  { label: "Preços Recomendados", to: "/recommended-prices" },
 ];
 
 export function SfShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const path = location.pathname;
+  const qc = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
+  const [ggPct, setGgPct] = useState("5");
+  const [dirPct, setDirPct] = useState("7");
+  const { data: settings } = useQuery({
+    queryKey: ["app-settings"],
+    queryFn: () => getAppSettings() as Promise<any>,
+  });
+  const { data: approvers = [] } = useQuery({
+    queryKey: ["approvers"],
+    enabled: settingsOpen,
+    queryFn: () => listApprovers() as Promise<any[]>,
+  });
+  const currentApproverId = settings?.currentApprover?.id ?? "";
+  const currentApprover = settings?.currentApprover ?? null;
+  const thresholds = settings?.thresholds;
+  useEffect(() => {
+    if (thresholds) {
+      setGgPct(String(thresholds.gg));
+      setDirPct(String(thresholds.dir));
+    }
+  }, [thresholds?.gg, thresholds?.dir]);
 
   const isActive = (to: string) => {
     if (to === "/") return path === "/";
@@ -43,6 +75,14 @@ export function SfShell({ children }: { children: ReactNode }) {
           <input className="sf-search-input" placeholder="Pesquisar" />
         </div>
         <div className="sf-gh-right">
+          {currentApprover && (
+            <span
+              className="sf-gh-version"
+              title={`Aprovador logado: ${currentApprover.name} (${currentApprover.level})`}
+            >
+              Aprovador: {currentApprover.name}
+            </span>
+          )}
           <button className="sf-btn" onClick={() => setSettingsOpen(true)}>
             Configurações
           </button>
@@ -85,6 +125,101 @@ export function SfShell({ children }: { children: ReactNode }) {
             </div>
             <div className="sf-modal-body">
               <p>Gerencie os dados de demonstração do app.</p>
+              <div style={{ marginTop: 20 }}>
+                <strong>Aprovador logado</strong>
+                <p style={{ fontSize: 12, color: "#706e6b", margin: "4px 0 8px" }}>
+                  Logue como um aprovador para decidir alçadas de Cotação na aba Aprovação. A
+                  Diretoria aprova qualquer nível; o Gerente Geral aprova apenas alçadas de
+                  Gerente Geral.
+                </p>
+                <select
+                  className="sf-input"
+                  value={currentApproverId}
+                  disabled={resetBusy}
+                  style={{ width: "100%", padding: 8 }}
+                  onChange={async (event) => {
+                    try {
+                      await setCurrentApprover({ data: { id: event.target.value } });
+                      await qc.invalidateQueries({ queryKey: ["app-settings"] });
+                      toast.success(
+                        event.target.value
+                          ? "Aprovador alterado com sucesso."
+                          : "Você saiu do modo aprovador.",
+                      );
+                    } catch (error) {
+                      toast.error("Não foi possível trocar o aprovador", {
+                        description: error instanceof Error ? error.message : undefined,
+                      });
+                    }
+                  }}
+                >
+                  <option value="">— Usuário padrão (sem poder de aprovação) —</option>
+                  {approvers.map((approver: any) => (
+                    <option key={approver.id} value={approver.id}>
+                      {approver.name} · {approver.level}
+                    </option>
+                  ))}
+                </select>
+                {!approvers.length && (
+                  <p style={{ fontSize: 12, color: "#ba0517", marginTop: 6 }}>
+                    Nenhum aprovador cadastrado. Gere aprovadores na aba Aprovadores ou faça o
+                    factory reset.
+                  </p>
+                )}
+              </div>
+              <div style={{ marginTop: 20 }}>
+                <strong>Limiares de alçada</strong>
+                <p style={{ fontSize: 12, color: "#706e6b", margin: "4px 0 8px" }}>
+                  Desvio de preço até o limite de Gerente Geral dispensa aprovação; acima dele
+                  exige Gerente Geral; acima do limite da Diretoria exige Diretoria. O maior desvio
+                  entre os Itens governa a Cotação inteira.
+                </p>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <label style={{ fontSize: 12 }}>
+                    Gerente Geral (%)
+                    <input
+                      className="sf-input"
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      value={ggPct}
+                      onChange={(event) => setGgPct(event.target.value)}
+                      style={{ marginLeft: 6, padding: 6, width: 90 }}
+                    />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    Diretoria (%)
+                    <input
+                      className="sf-input"
+                      type="number"
+                      min={0.2}
+                      step={0.1}
+                      value={dirPct}
+                      onChange={(event) => setDirPct(event.target.value)}
+                      style={{ marginLeft: 6, padding: 6, width: 90 }}
+                    />
+                  </label>
+                  <button
+                    className="sf-btn"
+                    disabled={resetBusy}
+                    onClick={async () => {
+                      try {
+                        await updateAlcadaThresholds({
+                          data: { gg: Number(ggPct), dir: Number(dirPct) },
+                        });
+                        await qc.invalidateQueries({ queryKey: ["app-settings"] });
+                        toast.success("Limiares de alçada atualizados.");
+                      } catch (error) {
+                        toast.error("Não foi possível atualizar os limiares", {
+                          description: error instanceof Error ? error.message : undefined,
+                        });
+                      }
+                    }}
+                  >
+                    Salvar limiares
+                  </button>
+                </div>
+              </div>
               <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
                 <button
                   className="sf-btn"

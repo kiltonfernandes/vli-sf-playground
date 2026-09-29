@@ -12,6 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsIndexRouteImport } from './routes/accounts.index'
 import { Route as AccountsIdRouteImport } from './routes/accounts.$id'
+import { Route as ApprovalsIndexRouteImport } from './routes/approvals.index'
+import { Route as ApprovalsIdRouteImport } from './routes/approvals.$id'
+import { Route as ApproversIndexRouteImport } from './routes/approvers.index'
+import { Route as ApproversIdRouteImport } from './routes/approvers.$id'
 import { Route as ContactsIndexRouteImport } from './routes/contacts.index'
 import { Route as ContactsIdRouteImport } from './routes/contacts.$id'
 import { Route as DieselBasesIndexRouteImport } from './routes/diesel-bases.index'
@@ -30,6 +34,8 @@ import { Route as QuoteSchedulesIndexRouteImport } from './routes/quote-schedule
 import { Route as QuoteSchedulesIdRouteImport } from './routes/quote-schedules.$id'
 import { Route as QuotesIndexRouteImport } from './routes/quotes.index'
 import { Route as QuotesIdRouteImport } from './routes/quotes.$id'
+import { Route as RecommendedPricesIndexRouteImport } from './routes/recommended-prices.index'
+import { Route as RecommendedPricesIdRouteImport } from './routes/recommended-prices.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -44,6 +50,26 @@ const AccountsIndexRoute = AccountsIndexRouteImport.update({
 const AccountsIdRoute = AccountsIdRouteImport.update({
   id: '/accounts/$id',
   path: '/accounts/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApprovalsIndexRoute = ApprovalsIndexRouteImport.update({
+  id: '/approvals/',
+  path: '/approvals/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApprovalsIdRoute = ApprovalsIdRouteImport.update({
+  id: '/approvals/$id',
+  path: '/approvals/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApproversIndexRoute = ApproversIndexRouteImport.update({
+  id: '/approvers/',
+  path: '/approvers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApproversIdRoute = ApproversIdRouteImport.update({
+  id: '/approvers/$id',
+  path: '/approvers/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ContactsIndexRoute = ContactsIndexRouteImport.update({
@@ -136,10 +162,22 @@ const QuotesIdRoute = QuotesIdRouteImport.update({
   path: '/quotes/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RecommendedPricesIndexRoute = RecommendedPricesIndexRouteImport.update({
+  id: '/recommended-prices/',
+  path: '/recommended-prices/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecommendedPricesIdRoute = RecommendedPricesIdRouteImport.update({
+  id: '/recommended-prices/$id',
+  path: '/recommended-prices/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts/$id': typeof AccountsIdRoute
+  '/approvals/$id': typeof ApprovalsIdRoute
+  '/approvers/$id': typeof ApproversIdRoute
   '/contacts/$id': typeof ContactsIdRoute
   '/diesel-bases/$id': typeof DieselBasesIdRoute
   '/locations/$id': typeof LocationsIdRoute
@@ -149,7 +187,10 @@ export interface FileRoutesByFullPath {
   '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
   '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
   '/quotes/$id': typeof QuotesIdRoute
+  '/recommended-prices/$id': typeof RecommendedPricesIdRoute
   '/accounts/': typeof AccountsIndexRoute
+  '/approvals/': typeof ApprovalsIndexRoute
+  '/approvers/': typeof ApproversIndexRoute
   '/contacts/': typeof ContactsIndexRoute
   '/diesel-bases/': typeof DieselBasesIndexRoute
   '/locations/': typeof LocationsIndexRoute
@@ -159,10 +200,13 @@ export interface FileRoutesByFullPath {
   '/quote-line-items/': typeof QuoteLineItemsIndexRoute
   '/quote-schedules/': typeof QuoteSchedulesIndexRoute
   '/quotes/': typeof QuotesIndexRoute
+  '/recommended-prices/': typeof RecommendedPricesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts/$id': typeof AccountsIdRoute
+  '/approvals/$id': typeof ApprovalsIdRoute
+  '/approvers/$id': typeof ApproversIdRoute
   '/contacts/$id': typeof ContactsIdRoute
   '/diesel-bases/$id': typeof DieselBasesIdRoute
   '/locations/$id': typeof LocationsIdRoute
@@ -172,7 +216,10 @@ export interface FileRoutesByTo {
   '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
   '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
   '/quotes/$id': typeof QuotesIdRoute
+  '/recommended-prices/$id': typeof RecommendedPricesIdRoute
   '/accounts': typeof AccountsIndexRoute
+  '/approvals': typeof ApprovalsIndexRoute
+  '/approvers': typeof ApproversIndexRoute
   '/contacts': typeof ContactsIndexRoute
   '/diesel-bases': typeof DieselBasesIndexRoute
   '/locations': typeof LocationsIndexRoute
@@ -182,11 +229,14 @@ export interface FileRoutesByTo {
   '/quote-line-items': typeof QuoteLineItemsIndexRoute
   '/quote-schedules': typeof QuoteSchedulesIndexRoute
   '/quotes': typeof QuotesIndexRoute
+  '/recommended-prices': typeof RecommendedPricesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accounts/$id': typeof AccountsIdRoute
+  '/approvals/$id': typeof ApprovalsIdRoute
+  '/approvers/$id': typeof ApproversIdRoute
   '/contacts/$id': typeof ContactsIdRoute
   '/diesel-bases/$id': typeof DieselBasesIdRoute
   '/locations/$id': typeof LocationsIdRoute
@@ -196,7 +246,10 @@ export interface FileRoutesById {
   '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
   '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
   '/quotes/$id': typeof QuotesIdRoute
+  '/recommended-prices/$id': typeof RecommendedPricesIdRoute
   '/accounts/': typeof AccountsIndexRoute
+  '/approvals/': typeof ApprovalsIndexRoute
+  '/approvers/': typeof ApproversIndexRoute
   '/contacts/': typeof ContactsIndexRoute
   '/diesel-bases/': typeof DieselBasesIndexRoute
   '/locations/': typeof LocationsIndexRoute
@@ -206,12 +259,15 @@ export interface FileRoutesById {
   '/quote-line-items/': typeof QuoteLineItemsIndexRoute
   '/quote-schedules/': typeof QuoteSchedulesIndexRoute
   '/quotes/': typeof QuotesIndexRoute
+  '/recommended-prices/': typeof RecommendedPricesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/accounts/$id'
+    | '/approvals/$id'
+    | '/approvers/$id'
     | '/contacts/$id'
     | '/diesel-bases/$id'
     | '/locations/$id'
@@ -221,7 +277,10 @@ export interface FileRouteTypes {
     | '/quote-line-items/$id'
     | '/quote-schedules/$id'
     | '/quotes/$id'
+    | '/recommended-prices/$id'
     | '/accounts/'
+    | '/approvals/'
+    | '/approvers/'
     | '/contacts/'
     | '/diesel-bases/'
     | '/locations/'
@@ -231,10 +290,13 @@ export interface FileRouteTypes {
     | '/quote-line-items/'
     | '/quote-schedules/'
     | '/quotes/'
+    | '/recommended-prices/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/accounts/$id'
+    | '/approvals/$id'
+    | '/approvers/$id'
     | '/contacts/$id'
     | '/diesel-bases/$id'
     | '/locations/$id'
@@ -244,7 +306,10 @@ export interface FileRouteTypes {
     | '/quote-line-items/$id'
     | '/quote-schedules/$id'
     | '/quotes/$id'
+    | '/recommended-prices/$id'
     | '/accounts'
+    | '/approvals'
+    | '/approvers'
     | '/contacts'
     | '/diesel-bases'
     | '/locations'
@@ -254,10 +319,13 @@ export interface FileRouteTypes {
     | '/quote-line-items'
     | '/quote-schedules'
     | '/quotes'
+    | '/recommended-prices'
   id:
     | '__root__'
     | '/'
     | '/accounts/$id'
+    | '/approvals/$id'
+    | '/approvers/$id'
     | '/contacts/$id'
     | '/diesel-bases/$id'
     | '/locations/$id'
@@ -267,7 +335,10 @@ export interface FileRouteTypes {
     | '/quote-line-items/$id'
     | '/quote-schedules/$id'
     | '/quotes/$id'
+    | '/recommended-prices/$id'
     | '/accounts/'
+    | '/approvals/'
+    | '/approvers/'
     | '/contacts/'
     | '/diesel-bases/'
     | '/locations/'
@@ -277,11 +348,14 @@ export interface FileRouteTypes {
     | '/quote-line-items/'
     | '/quote-schedules/'
     | '/quotes/'
+    | '/recommended-prices/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsIdRoute: typeof AccountsIdRoute
+  ApprovalsIdRoute: typeof ApprovalsIdRoute
+  ApproversIdRoute: typeof ApproversIdRoute
   ContactsIdRoute: typeof ContactsIdRoute
   DieselBasesIdRoute: typeof DieselBasesIdRoute
   LocationsIdRoute: typeof LocationsIdRoute
@@ -291,7 +365,10 @@ export interface RootRouteChildren {
   QuoteLineItemsIdRoute: typeof QuoteLineItemsIdRoute
   QuoteSchedulesIdRoute: typeof QuoteSchedulesIdRoute
   QuotesIdRoute: typeof QuotesIdRoute
+  RecommendedPricesIdRoute: typeof RecommendedPricesIdRoute
   AccountsIndexRoute: typeof AccountsIndexRoute
+  ApprovalsIndexRoute: typeof ApprovalsIndexRoute
+  ApproversIndexRoute: typeof ApproversIndexRoute
   ContactsIndexRoute: typeof ContactsIndexRoute
   DieselBasesIndexRoute: typeof DieselBasesIndexRoute
   LocationsIndexRoute: typeof LocationsIndexRoute
@@ -301,6 +378,7 @@ export interface RootRouteChildren {
   QuoteLineItemsIndexRoute: typeof QuoteLineItemsIndexRoute
   QuoteSchedulesIndexRoute: typeof QuoteSchedulesIndexRoute
   QuotesIndexRoute: typeof QuotesIndexRoute
+  RecommendedPricesIndexRoute: typeof RecommendedPricesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -324,6 +402,34 @@ declare module '@tanstack/react-router' {
       path: '/accounts/$id'
       fullPath: '/accounts/$id'
       preLoaderRoute: typeof AccountsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/approvals/': {
+      id: '/approvals/'
+      path: '/approvals'
+      fullPath: '/approvals/'
+      preLoaderRoute: typeof ApprovalsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/approvals/$id': {
+      id: '/approvals/$id'
+      path: '/approvals/$id'
+      fullPath: '/approvals/$id'
+      preLoaderRoute: typeof ApprovalsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/approvers/': {
+      id: '/approvers/'
+      path: '/approvers'
+      fullPath: '/approvers/'
+      preLoaderRoute: typeof ApproversIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/approvers/$id': {
+      id: '/approvers/$id'
+      path: '/approvers/$id'
+      fullPath: '/approvers/$id'
+      preLoaderRoute: typeof ApproversIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/contacts/': {
@@ -452,12 +558,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof QuotesIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/recommended-prices/': {
+      id: '/recommended-prices/'
+      path: '/recommended-prices'
+      fullPath: '/recommended-prices/'
+      preLoaderRoute: typeof RecommendedPricesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recommended-prices/$id': {
+      id: '/recommended-prices/$id'
+      path: '/recommended-prices/$id'
+      fullPath: '/recommended-prices/$id'
+      preLoaderRoute: typeof RecommendedPricesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsIdRoute: AccountsIdRoute,
+  ApprovalsIdRoute: ApprovalsIdRoute,
+  ApproversIdRoute: ApproversIdRoute,
   ContactsIdRoute: ContactsIdRoute,
   DieselBasesIdRoute: DieselBasesIdRoute,
   LocationsIdRoute: LocationsIdRoute,
@@ -467,7 +589,10 @@ const rootRouteChildren: RootRouteChildren = {
   QuoteLineItemsIdRoute: QuoteLineItemsIdRoute,
   QuoteSchedulesIdRoute: QuoteSchedulesIdRoute,
   QuotesIdRoute: QuotesIdRoute,
+  RecommendedPricesIdRoute: RecommendedPricesIdRoute,
   AccountsIndexRoute: AccountsIndexRoute,
+  ApprovalsIndexRoute: ApprovalsIndexRoute,
+  ApproversIndexRoute: ApproversIndexRoute,
   ContactsIndexRoute: ContactsIndexRoute,
   DieselBasesIndexRoute: DieselBasesIndexRoute,
   LocationsIndexRoute: LocationsIndexRoute,
@@ -477,6 +602,7 @@ const rootRouteChildren: RootRouteChildren = {
   QuoteLineItemsIndexRoute: QuoteLineItemsIndexRoute,
   QuoteSchedulesIndexRoute: QuoteSchedulesIndexRoute,
   QuotesIndexRoute: QuotesIndexRoute,
+  RecommendedPricesIndexRoute: RecommendedPricesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
