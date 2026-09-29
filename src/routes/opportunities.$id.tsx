@@ -350,6 +350,9 @@ function OpportunityRecordPage() {
 
       <OpportunityPath
         stage={opportunity.stage}
+        hasSyncedQuote={quoteRows.some(
+          (quote) => !!quote.is_synced && quote.status === "Sincronizada",
+        )}
         opportunityId={id}
         accountName={account?.name ?? "—"}
         instrument={opportunity.instrument_type}
@@ -363,16 +366,17 @@ function OpportunityRecordPage() {
         onAdvance={async () => {
           setPathBusy(true);
           setPathMessage("");
+          const nextStage = opportunity.stage === "Prospecção" ? "Negociação" : "Aprovação";
           try {
             await saveRecord({
-              data: { table: "opportunities", recordId: id, data: { stage: "Negociação" } },
+              data: { table: "opportunities", recordId: id, data: { stage: nextStage } },
             });
             await Promise.all([
               qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
               qc.invalidateQueries({ queryKey: ["opportunities"] }),
               qc.invalidateQueries({ queryKey: ["account-full", opportunity.account_id] }),
             ]);
-            setPathMessage("Etapa atualizada para Negociação.");
+            setPathMessage(`Etapa atualizada para ${nextStage}.`);
           } catch (error) {
             setPathMessage(
               error instanceof Error ? error.message : "Não foi possível atualizar a etapa.",
@@ -447,10 +451,7 @@ function OpportunityRecordPage() {
                   <button className="sf-btn" onClick={() => openQuoteForm("bulk")}>
                     Criar em lote
                   </button>
-                  <button
-                    className="sf-btn sf-btn--brand"
-                    onClick={() => openQuoteForm("single")}
-                  >
+                  <button className="sf-btn sf-btn--brand" onClick={() => openQuoteForm("single")}>
                     Nova Cotação
                   </button>
                 </div>
@@ -646,6 +647,7 @@ function OpportunityRecordPage() {
 
 function OpportunityPath({
   stage,
+  hasSyncedQuote,
   accountName,
   instrument,
   segment,
@@ -658,6 +660,7 @@ function OpportunityPath({
   onAdvance,
 }: {
   stage: string;
+  hasSyncedQuote: boolean;
   accountName: string;
   instrument: string;
   segment: string;
@@ -670,7 +673,7 @@ function OpportunityPath({
   onAdvance: () => void;
 }) {
   const activeIndex = Math.max(0, STAGES.indexOf(stage));
-  const canAdvance = stage === "Prospecção";
+  const canAdvance = stage === "Prospecção" || (stage === "Negociação" && hasSyncedQuote);
   const guidance: Record<string, string[]> = {
     Prospecção: [
       "Confirme a conta de gestão e o tipo de instrumento.",
@@ -678,7 +681,9 @@ function OpportunityPath({
     ],
     Negociação: [
       "Revise os dados comerciais e jurídicos da oportunidade.",
-      "Para avançar, será necessário concluir e sincronizar uma cotação.",
+      hasSyncedQuote
+        ? "A Cotação está sincronizada. Avance para Aprovação."
+        : "Para avançar, conclua e sincronize uma cotação.",
     ],
     Aprovação: [
       "A oportunidade aguarda decisão das alçadas responsáveis.",
@@ -760,13 +765,19 @@ function OpportunityPath({
                   <li key={item}>{item}</li>
                 ))}
               </ul>
-              {!canAdvance && stage !== "Fechado" && (
+              {stage === "Negociação" && !hasSyncedQuote && (
                 <p className="sf-path-blocker">
-                  {stage === "Negociação"
-                    ? "Avanço bloqueado: conclua e sincronize uma Cotação primeiro."
-                    : stage === "Aprovação"
-                      ? "Avanço bloqueado: registre a aprovação antes da formalização."
-                      : "Avanço bloqueado: a integração NetLex ainda não está disponível."}
+                  Avanço bloqueado: conclua e sincronize uma Cotação primeiro.
+                </p>
+              )}
+              {stage === "Aprovação" && (
+                <p className="sf-path-blocker">
+                  Avanço bloqueado: registre a aprovação antes da formalização.
+                </p>
+              )}
+              {stage === "Formalização" && (
+                <p className="sf-path-blocker">
+                  Avanço bloqueado: a integração NetLex ainda não está disponível.
                 </p>
               )}
             </div>

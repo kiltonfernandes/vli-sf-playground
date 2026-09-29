@@ -115,6 +115,7 @@ function QuotePage() {
     await qc.invalidateQueries({ queryKey: ["quote-full", id] });
     await qc.invalidateQueries({ queryKey: ["quote-options"] });
     await qc.invalidateQueries({ queryKey: ["quotes"] });
+    await qc.invalidateQueries({ queryKey: ["opportunity-quotes"] });
     await qc.invalidateQueries({ queryKey: ["quote-items"] });
     await qc.invalidateQueries({ queryKey: ["quote-schedules"] });
   };

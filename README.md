@@ -6,6 +6,13 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v3.12.03 — Avanço do Path após sincronização
+
+- Corrige o Path da Oportunidade, que mantinha **Marcar etapa como concluída** desabilitado em Negociação mesmo com uma Cotação sincronizada.
+- Agora Negociação → Aprovação é liberado quando existe Cotação com status **Sincronizada**; sem ela, o bloqueio explica o que falta. A validação do servidor continua sendo a autoridade.
+- Atualiza a lista relacionada após sincronizar para refletir o estado novo sem recarregar manualmente.
+- Revisão de regressão de ponta a ponta em produção: abrir Nova Cotação na Oportunidade; criar Item/Agenda pelo screenflow; corrigir rateio inválido; concluir e sincronizar. A tela da Oportunidade confirmou Cotação Sincronizada. Próximo passo é avançar Path para Aprovação após esta publicação; Formalização e NetLex seguem pendentes.
+
 ### v3.11.03 — Screenflow de Item e Agenda
 
 - Ao adicionar um Item novo ou Agenda a um Item existente, abre um screenflow de três etapas: Fluxo do Cliente, Agendas e Revisão.
@@ -226,6 +233,7 @@ As regras de negócio completas do processo futuro também devem ser mantidas aq
    - Após concluir, clique **Sincronizar com Oportunidade**. O status passa para **Sincronizada**.
 7. **Onde o fluxo termina hoje**
    - Volte à Oportunidade. Com a Cotação sincronizada, o Path permite avançar de **Negociação** para **Aprovação**.
+   - Clique **Marcar etapa como concluída**; o estágio vira **Aprovação** e esse é o ponto final implementado atualmente.
    - **Aprovação é o ponto final implementado atualmente.** Formalização/NetLex, Contrato vigente e fechamento ainda não existem no playground; por isso o Path bloqueia **Aprovação → Formalização** e **Formalização → Fechado**.
 
 Ao registrar novas regras ou corrigir o fluxo, manter a hierarquia de bullets e subtópicos e indicar o que está ativo, o que está pendente e em que etapa aparece cada validação.
