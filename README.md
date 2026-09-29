@@ -11,6 +11,7 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 - Ao adicionar um Item novo ou Agenda a um Item existente, abre um screenflow de três etapas: Fluxo do Cliente, Agendas e Revisão.
 - Guia Cliente → Origem → Destino → Mercadoria → Modal; o Cliente é fixado pela Conta de gestão da Oportunidade.
 - Permite adicionar múltiplos períodos e serviços no mesmo grupo, exige FRETE e ajuda a ratear tarifas/percentuais até 100%; inclui Faker com seed explícita.
+- Ao adicionar Agendas a um Item existente, mantém o Cliente e o Fluxo fixos; o Faker procura o próximo período ainda sem chave usada. Edição do serviço principal do Item continua disponível.
 - Grava novo Item e todas as Agendas em uma transação única. Se qualquer regra falhar, nada desse envio fica parcialmente salvo e a Cotação mostra toast com a causa.
 - Valida no servidor etapa/segmento/instrumento da Oportunidade, titularidade ferroviária FLOU do Fluxo, vigência (ACS < 12 meses), período dentro da vigência, volume inteiro, tarifa CBS ou líquida, Base Diesel, periodicidade/janela, FRETE, rateio e duplicidade.
 - Revisão de regressão: build de produção; verificar abertura do assistente em Novo Item e Adicionar Agenda, filtro Cliente/Fluxo, seed repetível, grupos múltiplos, erro com toast, gravação atômica e os botões Concluir/Sincronizar. Pendente publicar e repetir o smoke test na produção após o deploy.

@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { saveRecord } from "@/lib/crud";
+import { toast } from "sonner";
 
 type Flow = {
   id: string;
@@ -34,6 +36,7 @@ type Props = {
   contractStart: string;
   contractEnd: string;
   integrationTariff: string;
+  usedSchedules: Array<{ schedule_key: string; service: string }>;
   initialFlowId?: string;
   initialService?: string;
   itemId?: string;
@@ -73,6 +76,99 @@ const labelStyle = {
   fontSize: 12,
   fontWeight: 600,
 } as const;
+
+export function QuoteItemEditDialog({
+  item,
+  quoteId,
+  onClose,
+  onSaved,
+}: {
+  item: {
+    id: string;
+    planned_flow_id: string;
+    service: string;
+    route: string;
+    merchandise_name: string;
+    volume_total: number;
+    revenue_total: number;
+    top_eligible: number;
+  };
+  quoteId: string;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [service, setService] = useState(item.service);
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    try {
+      await saveRecord({
+        data: {
+          table: "quote_line_items",
+          recordId: item.id,
+          data: {
+            quote_id: quoteId,
+            planned_flow_id: item.planned_flow_id,
+            service,
+            volume_total: item.volume_total,
+            revenue_total: item.revenue_total,
+            top_eligible: item.top_eligible,
+          },
+        },
+      });
+      await onSaved();
+      toast.success("Item atualizado");
+      onClose();
+    } catch (error) {
+      toast.error("Não foi possível atualizar o Item", {
+        description: error instanceof Error ? error.message : "Tente novamente.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="sf-modal-backdrop" onClick={onClose}>
+      <div
+        className="sf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Editar Item"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sf-modal-header">
+          <h2>Editar Item da Cotação</h2>
+        </div>
+        <div className="sf-modal-body">
+          <p>
+            {item.route} · {item.merchandise_name}
+          </p>
+          <label style={labelStyle}>
+            Serviço principal
+            <select style={inputStyle} value={service} onChange={(e) => setService(e.target.value)}>
+              {SERVICES.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <small>
+            Para alterar o Fluxo, recrie o Item; as Agendas existentes permanecem vinculadas ao
+            Fluxo atual.
+          </small>
+        </div>
+        <div className="sf-modal-footer">
+          <button className="sf-btn" onClick={onClose} disabled={busy}>
+            Cancelar
+          </button>
+          <button className="sf-btn sf-btn--brand" onClick={() => void save()} disabled={busy}>
+            {busy ? "Salvando…" : "Salvar alterações"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function unique<T>(items: T[], key: (item: T) => string) {
   return [...new Map(items.map((item) => [key(item), item])).values()];
 }
@@ -84,6 +180,7 @@ export function QuoteItemScreenflow({
   contractStart,
   contractEnd,
   integrationTariff,
+  usedSchedules,
   initialFlowId,
   initialService = "FRETE",
   itemId,
@@ -199,9 +296,18 @@ export function QuoteItemScreenflow({
   }
   function generateGroup(index: number) {
     const group = groups[index];
-    const available = yearMonths.find(
-      (period) => period.year * 100 + period.month >= group.year * 100 + group.month,
-    );
+    const blocked = new Set(usedSchedules.map((row) => row.schedule_key));
+    groups.forEach((candidate, candidateIndex) => {
+      if (candidateIndex === index) return;
+      blocked.add(
+        `${selectedFlow?.code}|${candidate.year}${String(candidate.month).padStart(2, "0")}|${candidate.division}|${candidate.plaza}`,
+      );
+    });
+    const available = yearMonths.find((period) => {
+      if (period.year * 100 + period.month < group.year * 100 + group.month) return false;
+      const key = `${selectedFlow?.code}|${period.year}${String(period.month).padStart(2, "0")}|${group.division}|${group.plaza}`;
+      return !blocked.has(key);
+    });
     if (!available) {
       setError("Não há períodos disponíveis dentro da vigência do Contrato.");
       return;
@@ -318,8 +424,9 @@ export function QuoteItemScreenflow({
           {step === 0 && (
             <>
               <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
-                O Cliente vem da Conta de Gestão da Oportunidade. Escolha cada nível; as opções
-                seguintes acompanham sua seleção.
+                {itemId
+                  ? "O Cliente e o Fluxo estão fixados pelo Item. Monte os períodos e serviços das novas Agendas."
+                  : "O Cliente vem da Conta de Gestão da Oportunidade. Escolha cada nível; as opções seguintes acompanham sua seleção."}
               </p>
               <label style={labelStyle}>
                 👤 Cliente
@@ -344,6 +451,7 @@ export function QuoteItemScreenflow({
                       label: `${f.origin_code} · ${f.origin_name}`,
                     })),
                   ],
+                  !!itemId,
                 )}
               </label>
               <label style={labelStyle}>
@@ -362,7 +470,7 @@ export function QuoteItemScreenflow({
                       label: `${f.destination_code} · ${f.destination_name}`,
                     })),
                   ],
-                  !originId,
+                  !!itemId || !originId,
                 )}
               </label>
               <label style={labelStyle}>
@@ -380,7 +488,7 @@ export function QuoteItemScreenflow({
                       label: f.merchandise,
                     })),
                   ],
-                  !destinationId,
+                  !!itemId || !destinationId,
                 )}
               </label>
               <label style={labelStyle}>
@@ -392,7 +500,7 @@ export function QuoteItemScreenflow({
                     { value: "", label: "— Selecione —" },
                     ...modals.map((f) => ({ value: f.modal, label: f.modal })),
                   ],
-                  !merchandiseId,
+                  !!itemId || !merchandiseId,
                 )}
               </label>
               {!flows.length && (

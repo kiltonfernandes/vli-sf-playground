@@ -13,7 +13,7 @@ import {
 } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfRecordDialog, SfDeleteButton, type FieldDef } from "@/components/SfRecordDialog";
-import { QuoteItemScreenflow } from "@/components/QuoteItemScreenflow";
+import { QuoteItemEditDialog, QuoteItemScreenflow } from "@/components/QuoteItemScreenflow";
 import { fmtMoney } from "@/lib/format";
 
 const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
@@ -28,6 +28,7 @@ function QuotePage() {
   const [open, setOpen] = useState<Record<string, boolean>>({ items: true }),
     [newItem, setNewItem] = useState(false),
     [scheduleItem, setScheduleItem] = useState<any>(null),
+    [editItem, setEditItem] = useState<any>(null),
     [editSchedule, setEditSchedule] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
@@ -264,6 +265,16 @@ function QuotePage() {
                   >
                     Abrir registro
                   </Link>
+                  <button
+                    className="sf-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setEditItem(item);
+                    }}
+                  >
+                    Editar
+                  </button>
                 </summary>
                 <div style={{ padding: 12 }}>
                   <div
@@ -466,6 +477,7 @@ function QuotePage() {
           contractStart={options?.opportunity?.contract_start ?? ""}
           contractEnd={options?.opportunity?.contract_end ?? ""}
           integrationTariff={options?.opportunity?.integration_tariff ?? "CBS"}
+          usedSchedules={options?.usedSchedules ?? []}
           initialFlowId={scheduleItem?.flow_id}
           initialService={scheduleItem?.service}
           itemId={scheduleItem?.id}
@@ -491,6 +503,14 @@ function QuotePage() {
               return false;
             }
           }}
+        />
+      )}
+      {editItem && (
+        <QuoteItemEditDialog
+          item={editItem}
+          quoteId={id}
+          onClose={() => setEditItem(null)}
+          onSaved={refresh}
         />
       )}
       {editSchedule && (
