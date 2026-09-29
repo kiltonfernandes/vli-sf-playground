@@ -55,6 +55,7 @@ export const opportunities = sqliteTable(
     close_date: text("close_date"),
     contract_start: text("contract_start"),
     contract_end: text("contract_end"),
+    first_readjustment_date: text("first_readjustment_date"),
     application_day: integer("application_day").notNull().default(10),
     diesel_pct: real("diesel_pct").notNull().default(0),
     igpm_pct: real("igpm_pct").notNull().default(0),

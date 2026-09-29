@@ -12,6 +12,8 @@ Use the three numeric segments as follows. Increment only the segment that match
 
 ## Version history
 
+- `v4.16.03` — Add the Reajuste Ferro step to the Quote screenflow, with annual percentage/date validation and per-flow diesel base details.
+
 - `v4.15.03` — Add batch creation of monthly Schedule groups across a selected date range within the Opportunity term.
 - `v4.14.03` — Add reusable, accessible business-rule explanations and responsive tooltips to Opportunity and Quote checklists.
 - `v4.13.03` — Replace static success guidance with live business-rule checklists on Opportunity and Quote pages; show completion in green and pending requirements in red.

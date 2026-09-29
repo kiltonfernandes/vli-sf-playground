@@ -137,6 +137,25 @@ function OpportunityRecordPage() {
         "O dia de aplicação aceito é 1, 10 ou 20. Ele determina o dia efetivo da Data Base Diesel nas Agendas; ao montar a data, o Playground usa este valor da Oportunidade em vez do dia digitado.",
     },
     {
+      label: "Reajuste anual configurado",
+      passed:
+        !isTermOver365Days(opportunity) ||
+        (Math.abs(
+          Number(opportunity.diesel_pct) +
+            Number(opportunity.igpm_pct) +
+            Number(opportunity.ipca_pct) -
+            100,
+        ) <= 0.001 &&
+          !!opportunity.first_readjustment_date &&
+          String(opportunity.first_readjustment_date) >= String(opportunity.contract_start) &&
+          String(opportunity.first_readjustment_date) <= String(opportunity.contract_end)),
+      detail: !isTermOver365Days(opportunity)
+        ? "Percentuais anuais não exigidos para esta vigência."
+        : `Diesel ${Number(opportunity.diesel_pct).toFixed(2)}% + IGP-M ${Number(opportunity.igpm_pct).toFixed(2)}% + IPCA ${Number(opportunity.ipca_pct).toFixed(2)}%; primeiro reajuste ${opportunity.first_readjustment_date || "pendente"}.`,
+      explanation:
+        "Em contratos com vigência superior a 365 dias, os percentuais de Diesel, IGP-M e IPCA precisam somar exatamente 100%, e a data do primeiro reajuste deve estar preenchida dentro da vigência. Esses dados são configurados aqui e conferidos novamente no screenflow da Cotação.",
+    },
+    {
       label: "Oportunidade em Negociação",
       passed: STAGES.indexOf(opportunity.stage) >= STAGES.indexOf("Negociação"),
       detail:
@@ -178,6 +197,7 @@ function OpportunityRecordPage() {
     { name: "close_date", label: "Data de fechamento", type: "date" },
     { name: "contract_start", label: "Início da vigência", type: "date" },
     { name: "contract_end", label: "Fim da vigência", type: "date" },
+    { name: "first_readjustment_date", label: "Data do primeiro reajuste", type: "date" },
     {
       name: "application_day",
       label: "Dia de aplicação",
@@ -209,6 +229,7 @@ function OpportunityRecordPage() {
     close_date: opportunity.close_date ?? "",
     contract_start: opportunity.contract_start ?? "",
     contract_end: opportunity.contract_end ?? "",
+    first_readjustment_date: opportunity.first_readjustment_date ?? "",
     application_day: String(opportunity.application_day ?? 10),
     diesel_pct: opportunity.diesel_pct ?? 0,
     igpm_pct: opportunity.igpm_pct ?? 0,
@@ -600,6 +621,14 @@ function OpportunityRecordPage() {
               <Field label="Dia de aplicação" value={String(opportunity.application_day ?? 10)} />
               <Field label="Reajuste IGP-M" value={`${opportunity.igpm_pct}%`} />
               <Field label="Reajuste IPCA" value={`${opportunity.ipca_pct}%`} />
+              <Field
+                label="Primeiro reajuste"
+                value={
+                  opportunity.first_readjustment_date
+                    ? fmtDate(opportunity.first_readjustment_date)
+                    : "—"
+                }
+              />
               <Field label="Contratante(s)" value={opportunity.contracting_parties ?? "—"} />
               <Field label="Entidade VLI" value={opportunity.vli_entity ?? "—"} />
               <Field label="Devedor solidário" value={opportunity.joint_debtor ?? "—"} />
@@ -839,6 +868,13 @@ function isOpportunityTermValid(opportunity: any) {
   const limit = new Date(start);
   limit.setUTCMonth(limit.getUTCMonth() + 12);
   return end < limit;
+}
+
+function isTermOver365Days(opportunity: any) {
+  if (!opportunity?.contract_start || !opportunity?.contract_end) return false;
+  const start = Date.parse(`${opportunity.contract_start}T00:00:00Z`);
+  const end = Date.parse(`${opportunity.contract_end}T00:00:00Z`);
+  return Number.isFinite(start) && Number.isFinite(end) && end - start > 365 * 86400000;
 }
 
 function Highlight({ label, value }: { label: string; value: string }) {

@@ -35,6 +35,8 @@ type Props = {
   dieselBases: Array<{ id: string; name: string }>;
   contractStart: string;
   contractEnd: string;
+  firstReadjustmentDate: string;
+  readjustment: { diesel: number; igpm: number; ipca: number };
   integrationTariff: string;
   applicationDay: number;
   canChangeTariff: boolean;
@@ -186,6 +188,8 @@ export function QuoteItemScreenflow({
   dieselBases,
   contractStart,
   contractEnd,
+  firstReadjustmentDate,
+  readjustment,
   integrationTariff,
   applicationDay,
   canChangeTariff,
@@ -214,6 +218,16 @@ export function QuoteItemScreenflow({
   const startMonth = Number(contractStart?.slice(5, 7) || 1);
   const endYear = Number(contractEnd?.slice(0, 4) || startYear);
   const endMonth = Number(contractEnd?.slice(5, 7) || 12);
+  const termDays =
+    contractStart && contractEnd
+      ? Math.round(
+          (Date.parse(`${contractEnd}T00:00:00Z`) - Date.parse(`${contractStart}T00:00:00Z`)) /
+            86400000,
+        )
+      : 0;
+  const requiresAnnualSplit = termDays > 365;
+  const readjustmentTotal = readjustment.diesel + readjustment.igpm + readjustment.ipca;
+  const readjustmentValid = !requiresAnnualSplit || Math.abs(readjustmentTotal - 100) < 0.001;
   const yearMonths = useMemo(() => {
     const result: Array<{ year: number; month: number }> = [];
     for (let y = startYear; y <= endYear; y++)
@@ -404,12 +418,33 @@ export function QuoteItemScreenflow({
       setError("Complete Cliente, Origem, Destino, Mercadoria e Modal para continuar.");
       return false;
     }
-    if (step === 1 && (!itemService || !groups.length || !["CBS", "Líquida"].includes(tariffMode))) {
+    if (step === 1 && !readjustmentValid) {
+      setError("Para vigência superior a 365 dias, Diesel + IGP-M + IPCA precisam somar 100%.");
+      return false;
+    }
+    if (step === 1 && requiresAnnualSplit && !firstReadjustmentDate) {
+      setError("Informe a data do primeiro reajuste na Oportunidade antes de continuar.");
+      return false;
+    }
+    if (step === 1 && firstReadjustmentDate && contractStart && contractEnd) {
+      const firstDate = Date.parse(`${firstReadjustmentDate}T00:00:00Z`);
+      if (
+        firstDate < Date.parse(`${contractStart}T00:00:00Z`) ||
+        firstDate > Date.parse(`${contractEnd}T00:00:00Z`)
+      ) {
+        setError("A data do primeiro reajuste precisa estar dentro da vigência do contrato.");
+        return false;
+      }
+    }
+    if (
+      step === 2 &&
+      (!itemService || !groups.length || !["CBS", "Líquida"].includes(tariffMode))
+    ) {
       setError("Escolha o serviço do Item e adicione ao menos um grupo de Agenda.");
       return false;
     }
     if (
-      step === 1 &&
+      step === 2 &&
       groups.some(
         (g) =>
           !Number.isInteger(g.volume) ||
@@ -453,7 +488,12 @@ export function QuoteItemScreenflow({
       ))}
     </select>
   );
-  const stepTitles = ["Fluxo do Cliente", "Agendas", "Revisão"];
+  const stepTitles = [
+    "Fluxo do Cliente",
+    "Reajuste Ferro",
+    "Agendas e Data Base Diesel",
+    "Revisão",
+  ];
   return (
     <div className="sf-modal-backdrop" onClick={onClose}>
       <div
@@ -481,7 +521,7 @@ export function QuoteItemScreenflow({
           }}
         >
           <b>
-            Etapa {step + 1} de 3 · {stepTitles[step]}
+            Etapa {step + 1} de 4 · {stepTitles[step]}
           </b>
           <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
             {stepTitles.map((title, i) => (
@@ -586,6 +626,92 @@ export function QuoteItemScreenflow({
             </>
           )}
           {step === 1 && (
+            <>
+              <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
+                Confira os parâmetros anuais cadastrados na Oportunidade antes de montar as Agendas.
+                O modal e o tipo do instrumento vêm do cadastro comercial.
+              </p>
+              <section
+                style={{
+                  border: "1px solid #dddbda",
+                  borderRadius: 6,
+                  padding: 16,
+                  marginBottom: 14,
+                }}
+              >
+                <h3 style={{ marginTop: 0 }}>Percentuais do contrato</h3>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
+                    gap: 12,
+                  }}
+                >
+                  {[
+                    ["Diesel", readjustment.diesel],
+                    ["IGP-M", readjustment.igpm],
+                    ["IPCA", readjustment.ipca],
+                  ].map(([label, value]) => (
+                    <div
+                      key={String(label)}
+                      style={{ padding: 12, background: "#f3f3f3", borderRadius: 4 }}
+                    >
+                      <small>{label}</small>
+                      <div style={{ fontSize: 22, fontWeight: 700 }}>
+                        {Number(value).toFixed(2)}%
+                      </div>
+                    </div>
+                  ))}
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 4,
+                      background: readjustmentValid ? "#eef8f1" : "#fef1ee",
+                      color: readjustmentValid ? "#2e844a" : "#ba0517",
+                    }}
+                  >
+                    <small>Total</small>
+                    <div style={{ fontSize: 22, fontWeight: 700 }}>
+                      {readjustmentTotal.toFixed(2)}%
+                    </div>
+                    <small>
+                      {requiresAnnualSplit
+                        ? readjustmentValid
+                          ? "Soma válida"
+                          : "Precisa somar 100%"
+                        : "A soma de 100% não é exigida nesta vigência"}
+                    </small>
+                  </div>
+                </div>
+                <small style={{ display: "block", marginTop: 12 }}>
+                  Vigência: {contractStart || "—"} a {contractEnd || "—"} · {termDays} dias · Dia de
+                  aplicação: {applicationDay}
+                </small>
+                {requiresAnnualSplit && (
+                  <p
+                    role="status"
+                    style={{ color: readjustmentValid ? "#2e844a" : "#ba0517", marginBottom: 0 }}
+                  >
+                    Contratos com mais de 365 dias precisam distribuir 100% entre Diesel, IGP-M e
+                    IPCA. Para ajustar os percentuais, edite a Oportunidade e retorne a esta
+                    Cotação.
+                  </p>
+                )}
+              </section>
+              <section style={{ border: "1px solid #dddbda", borderRadius: 6, padding: 16 }}>
+                <h3 style={{ marginTop: 0 }}>Primeiro reajuste</h3>
+                <p style={{ marginBottom: 4 }}>
+                  Primeiro reajuste: {firstReadjustmentDate || "não informado"}. As aplicações
+                  seguem o dia {applicationDay} de cada período.
+                </p>
+                <small>
+                  A Data Base Diesel e a base aplicável serão definidas por fluxo na próxima etapa.
+                  O cálculo financeiro do reajuste permanece como gap técnico registrado.
+                </small>
+              </section>
+            </>
+          )}
+          {step === 2 && (
             <>
               <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
                 Adicione os períodos que desejar. Os serviços do mesmo período são rateados para
@@ -816,14 +942,14 @@ export function QuoteItemScreenflow({
                       />
                     </label>
                     <label style={labelStyle}>
-                      Base Diesel
+                      Base Diesel do fluxo
                       {select(g.diesel_base_id, (v) => updateGroup(index, { diesel_base_id: v }), [
                         { value: "", label: "— Selecione —" },
                         ...dieselBases.map((b) => ({ value: b.id, label: b.name })),
                       ])}
                     </label>
                     <label style={labelStyle}>
-                      Data de aplicação diesel (automática)
+                      Data Base Diesel do fluxo (automática)
                       <input
                         style={inputStyle}
                         aria-label="Data de aplicação diesel automática"
@@ -901,7 +1027,7 @@ export function QuoteItemScreenflow({
               </button>
             </>
           )}
-          {step === 2 && (
+          {step === 3 && (
             <>
               <h3>Confira antes de salvar</h3>
               <ul>
@@ -949,7 +1075,7 @@ export function QuoteItemScreenflow({
               Voltar
             </button>
           )}
-          {step < 2 ? (
+          {step < 3 ? (
             <button
               className="sf-btn sf-btn--brand"
               onClick={() => {

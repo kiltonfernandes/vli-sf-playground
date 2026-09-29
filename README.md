@@ -6,6 +6,14 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v4.16.03 — Etapa Reajuste Ferro no screenflow da Cotação
+
+- Insere **Reajuste Ferro** entre a seleção do Fluxo e a montagem das Agendas, exibindo percentuais, vigência, dia de aplicação e data do primeiro reajuste configurados na Oportunidade.
+- Para vigências acima de 365 dias, exige percentuais de Diesel + IGP-M + IPCA somando 100% e data do primeiro reajuste dentro da vigência; a regra é verificada na tela, no checklist da Oportunidade e no servidor ao salvar.
+- Identifica a Base Diesel e a Data Base Diesel em cada grupo de Agenda/Fluxo, com o dia de aplicação herdado da Oportunidade.
+- Mantém o cálculo financeiro de reajuste como gap técnico registrado; a geração da cláusula NetLex segue fora desta etapa.
+- Verificação: build de produção aprovado.
+
 ### v4.15.03 — Criação de Agendas em lote por intervalo
 
 - Adiciona **Criar em lote** aos grupos de Agenda do screenflow, com seleção de mês inicial e final dentro da vigência da Oportunidade.
