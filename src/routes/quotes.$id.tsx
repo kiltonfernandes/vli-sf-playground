@@ -3,13 +3,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
+  applyRecommendedPrices,
   completeQuote,
   deleteRecord,
+  generateMissingRecommendedPrices,
   getQuoteFull,
   listQuoteOptions,
   saveRecord,
   saveQuoteItemScreenflow,
+  submitQuoteForApproval,
   syncQuote,
+  validateQuotePrices,
 } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfRecordDialog, SfDeleteButton, type FieldDef } from "@/components/SfRecordDialog";
@@ -32,7 +36,8 @@ function QuotePage() {
     [editItem, setEditItem] = useState<any>(null),
     [editSchedule, setEditSchedule] = useState<any>(null),
     [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    [pricePanel, setPricePanel] = useState<any>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["quote-full", id],
     queryFn: () => getQuoteFull({ data: { id } }) as Promise<any>,
@@ -385,6 +390,9 @@ function QuotePage() {
             <div style={{ fontSize: 12, color: "#706e6b" }}>
               Rascunho → Concluída → Sincronizada
             </div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              <PriceStatusBadge quote={q} />
+            </div>
             {message && (
               <div
                 role="status"
@@ -399,6 +407,27 @@ function QuotePage() {
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="sf-btn"
+              disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
+              title="Compara o preço de cada Item com o preço recomendado (Jetsons) e calcula a alçada da Cotação"
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const result = await validateQuotePrices({ data: { id } });
+                  setPricePanel(result);
+                  await refresh();
+                } catch (error) {
+                  toast.error("Não foi possível validar os preços", {
+                    description: error instanceof Error ? error.message : undefined,
+                  });
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? "Validando…" : "Validar preços"}
+            </button>
             <button
               className="sf-btn"
               disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
@@ -477,6 +506,13 @@ function QuotePage() {
           quoteId={id}
           onClose={() => setEditItem(null)}
           onSaved={refresh}
+        />
+      )}
+      {pricePanel && (
+        <PricePanel
+          result={pricePanel}
+          onClose={() => setPricePanel(null)}
+          onRefreshed={(fresh) => setPricePanel(fresh)}
         />
       )}
       {editSchedule && (
@@ -803,6 +839,30 @@ function getQuoteBusinessRules(
         ]
       : []),
     {
+      label: "Preço validado contra o recomendado",
+      passed: ["Ok", "Aprovada"].includes(String(quote.price_status ?? "")),
+      detail: ["Ok", "Aprovada"].includes(String(quote.price_status ?? ""))
+        ? `Desvio máximo de ${Number(quote.max_discount_pct ?? 0).toFixed(2)}%${quote.price_status === "Ok" ? " — sem alçada" : " — alçada liberada"}.`
+        : "Use Validar preços para comparar cada Item com o preço recomendado do Jetsons.",
+      explanation:
+        "No ferroviário a margem é avaliada por competitividade de preço: cada Item é comparado ao preço recomendado (Jetsons). O desvio percentual é o maior desconto praticado em relação ao recomendado. Use o botão Validar preços para ver o comparativo por Item e o veredito da Cotação.",
+    },
+    {
+      label: "Alçada aprovada quando exigida",
+      passed:
+        quote.price_status === "Ok" ||
+        (quote.alcada_level !== "Sem alçada" && quote.price_status === "Aprovada") ||
+        (quote.alcada_level === "Sem alçada" && ["Ok", "Aprovada"].includes(String(quote.price_status ?? ""))),
+      detail:
+        quote.price_status === "Aprovada"
+          ? `Alçada ${quote.alcada_level} aprovada; a Cotação pode ser concluída.`
+          : quote.price_status === "Pendente alçada"
+            ? `Desvio de ${Number(quote.max_discount_pct ?? 0).toFixed(2)}% exige alçada ${quote.alcada_level}.`
+            : "Sem alçada exigida ou ainda não avaliada.",
+      explanation:
+        "Desvios até o limite de Gerente Geral dispensam aprovação. Acima disso, a Cotação inteira fica pendente de alçada do maior desvio entre os Itens: entre os dois limiares exige Gerente Geral e acima do maior limiar exige Diretoria. A solicitação vai para a fila da aba Aprovação, onde um aprovador logado decide aprovar ou rejeitar; a rejeição bloqueia a conclusão até os preços serem ajustados e revalidados.",
+    },
+    {
       label: "Cotação concluída e sincronizada",
       passed: synced,
       detail: synced
@@ -823,4 +883,263 @@ function isQuoteTermValid(opportunity: any) {
   const limit = new Date(start);
   limit.setUTCMonth(limit.getUTCMonth() + 12);
   return end < limit;
+}
+
+function PriceStatusBadge({ quote }: { quote: any }) {
+  const status = String(quote.price_status ?? "Não validada");
+  const needsAlcada =
+    quote.alcada_level && quote.alcada_level !== "Sem alçada" && status !== "Não validada";
+  const color =
+    status === "Ok" || status === "Aprovada"
+      ? "#2e844a"
+      : status === "Não validada"
+        ? "#706e6b"
+        : status === "Rejeitada"
+          ? "#ba0517"
+          : "#fe9339";
+  const suffix = needsAlcada
+    ? ` · ${quote.alcada_level}`
+    : status === "Ok"
+      ? " — sem alçada"
+      : "";
+  return (
+    <span style={{ color, fontWeight: 600 }} title="Situação da validação de preço da Cotação">
+      Preço: {status}
+      {suffix}
+    </span>
+  );
+}
+
+function PricePanel({
+  result,
+  onClose,
+  onRefreshed,
+}: {
+  result: any;
+  onClose: () => void;
+  onRefreshed: (fresh: any) => void;
+}) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const thresholds = result.thresholds ?? { gg: 5, dir: 7 };
+  const missing = (result.rows ?? []).filter((row: any) => row.missing);
+  const ok = result.price_status === "Ok" || result.price_status === "Aprovada";
+
+  const verdict = ok
+    ? result.price_status === "Aprovada"
+      ? `✅ Preços aprovados por alçada ${result.alcada_level} — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%. A Cotação pode ser concluída.`
+      : `✅ Preços ok — desvio máximo de ${Number(result.max_discount_pct).toFixed(2)}%, dentro do limite de ${thresholds.gg}%. Sem alçada.`
+    : result.price_status === "Não validada"
+      ? `⚠️ ${missing.length} item(ns) sem preço recomendado no Jetsons. Gere os preços ausentes para validar.`
+      : result.price_status === "Rejeitada"
+        ? `⛔ Alçada rejeitada — ajuste os preços e valide novamente para concluir.`
+        : `⚠️ Não ok — desvio de ${Number(result.max_discount_pct).toFixed(2)}% acima do limite de ${thresholds.gg}%. Exige alçada ${result.alcada_level}.`;
+
+  const verdictColor = ok
+    ? "#2e844a"
+    : result.price_status === "Não validada"
+      ? "#706e6b"
+      : result.price_status === "Rejeitada"
+        ? "#ba0517"
+        : "#fe9339";
+
+  async function rerun(action?: () => Promise<any>) {
+    setBusy(true);
+    try {
+      if (action) await action();
+      const fresh = await validateQuotePrices({ data: { id: result.quote_id } });
+      onRefreshed(fresh);
+      await qc.invalidateQueries({ queryKey: ["quote-full", result.quote_id] });
+      await qc.invalidateQueries({ queryKey: ["approvals"] });
+      await qc.invalidateQueries({ queryKey: ["quotes"] });
+      await qc.invalidateQueries({ queryKey: ["home-dashboard"] });
+    } catch (error) {
+      toast.error("Não foi possível concluir a ação", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sf-modal-backdrop" onClick={() => !busy && onClose()}>
+      <section
+        className="sf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="price-panel-title"
+        onClick={(event) => event.stopPropagation()}
+        style={{ maxWidth: 900 }}
+      >
+        <div className="sf-modal-header">
+          <h2 id="price-panel-title">Comparativo de preços · {result.quote_id ? "Cotação" : ""}</h2>
+          <button className="sf-btn" disabled={busy} onClick={onClose}>
+            Fechar
+          </button>
+        </div>
+        <div className="sf-modal-body">
+          <div
+            role="status"
+            style={{
+              color: verdictColor,
+              fontWeight: 600,
+              border: `1px solid ${verdictColor}`,
+              borderRadius: 8,
+              padding: "8px 12px",
+              marginBottom: 12,
+            }}
+          >
+            {verdict}
+          </div>
+          <p style={{ fontSize: 12, color: "#706e6b" }}>
+            Modalidade de tarifa: {result.tariff_mode}. Limiares configurados: sem alçada até{" "}
+            {thresholds.gg}%, Gerente Geral até {thresholds.dir}%, Diretoria acima. O maior desvio
+            entre os Itens governa a Cotação inteira.
+          </p>
+          <div style={{ overflowX: "auto" }}>
+            <table className="sf-table">
+              <thead>
+                <tr>
+                  <th>Item (Fluxo · Serviço)</th>
+                  <th>Volume</th>
+                  <th>Preço praticado</th>
+                  <th>Preço recomendado</th>
+                  <th>Desvio</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(result.rows ?? []).map((row: any) => {
+                  const deviation = row.deviation_pct;
+                  const discount = deviation === null ? null : Math.max(0, -deviation);
+                  const rowColor =
+                    row.missing
+                      ? "#706e6b"
+                      : discount === null
+                        ? "#706e6b"
+                        : discount > thresholds.dir
+                          ? "#ba0517"
+                          : discount > thresholds.gg
+                            ? "#fe9339"
+                            : "#2e844a";
+                  return (
+                    <tr key={row.item_id}>
+                      <td>
+                        {row.route} ({row.flow_code}) · {row.service}
+                      </td>
+                      <td>{Number(row.volume_total).toLocaleString("pt-BR")}</td>
+                      <td>{fmtMoney(Number(row.practiced_total))}</td>
+                      <td>
+                        {row.recommended_total === null ? "—" : fmtMoney(Number(row.recommended_total))}
+                      </td>
+                      <td style={{ color: rowColor, fontWeight: 600 }}>
+                        {deviation === null ? "—" : `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%`}
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        {row.missing
+                          ? `⚠️ Sem preço no Jetsons (${row.missing_periods.join(", ")})`
+                          : deviation === null
+                            ? "—"
+                            : discount > thresholds.dir
+                              ? "Excede Diretoria"
+                              : discount > thresholds.gg
+                                ? "Excede Gerente Geral"
+                                : "Ok"}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!(result.rows ?? []).length && (
+                  <tr>
+                    <td colSpan={6} style={{ color: "#706e6b" }}>
+                      Adicione Itens e Agendas para comparar preços.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              marginTop: 16,
+              justifyContent: "flex-end",
+              flexWrap: "wrap",
+            }}
+          >
+            {missing.length > 0 && (
+              <button
+                className="sf-btn"
+                disabled={busy}
+                title="Cria com Faker (seed da Cotação) os preços recomendados ausentes de cada Item, imitando o cadastro manual no Jetsons"
+                onClick={() =>
+                  rerun(() =>
+                    generateMissingRecommendedPrices({ data: { id: result.quote_id } }).then(
+                      (response: any) =>
+                        toast.success("Preços recomendados gerados", {
+                          description: `${response.created} preço(s) criado(s) com a seed da Cotação.`,
+                        }),
+                    ),
+                  )
+                }
+              >
+                {busy ? "Gerando…" : "Gerar preços recomendados ausentes"}
+              </button>
+            )}
+            {!ok && !missing.length && (
+              <button
+                className="sf-btn"
+                disabled={busy}
+                title="Reescreve as tarifas de todos os grupos de Agenda com os valores recomendados, mantendo o rateio em 100%"
+                onClick={() =>
+                  rerun(() =>
+                    applyRecommendedPrices({ data: { id: result.quote_id } }).then(
+                      (response: any) =>
+                        toast.success("Preços recomendados aplicados", {
+                          description: `Desvio máximo agora é de ${Number(response.result.max_discount_pct).toFixed(2)}%.`,
+                        }),
+                    ),
+                  )
+                }
+              >
+                {busy ? "Aplicando…" : "Aplicar preço recomendado"}
+              </button>
+            )}
+            {result.price_status === "Pendente alçada" && (
+              <button
+                className="sf-btn sf-btn--brand"
+                disabled={busy || result.open_approval}
+                title={
+                  result.open_approval
+                    ? "Já existe uma solicitação aberta na fila de Aprovação"
+                    : "Envia a Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
+                }
+                onClick={() =>
+                  rerun(() =>
+                    submitQuoteForApproval({ data: { id: result.quote_id } }).then(() =>
+                      toast.success("Solicitação de alçada enviada", {
+                        description: `A fila de Aprovação aguarda um aprovador ${result.alcada_level}.`,
+                      }),
+                    ),
+                  )
+                }
+              >
+                {result.open_approval ? "Na fila de aprovação" : "Enviar para aprovação"}
+              </button>
+            )}
+            <button
+              className="sf-btn"
+              disabled={busy}
+              title="Recalcula o comparativo com os dados atuais"
+              onClick={() => rerun()}
+            >
+              Revalidar
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }
