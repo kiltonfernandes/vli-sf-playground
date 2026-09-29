@@ -12,6 +12,7 @@ Use the three numeric segments as follows. Increment only the segment that match
 
 ## Version history
 
+- `v4.18.03` — Increment app version to identify the Vercel preview deployment.
 - `v4.17.03` — Keep individual generated pipeline amounts between 3 and 4 digits and add shared responsive behavior for portrait, landscape, tablet, and mobile viewports.
 
 - `v4.16.03` — Add the Reajuste Ferro step to the Quote screenflow, with annual percentage/date validation and per-flow diesel base details.
