@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 7664)
+Total output lines: 325
+
 # VLI SF Playground 🚂
 
 CRM de estudos em **português do Brasil**, com interface inspirada no Salesforce Lightning. O app usa **TanStack Start**, React 19, **Tailwind CSS 4**, **Drizzle ORM** e **Turso (libSQL/SQLite)**. As operações de banco são executadas no servidor por server functions.
@@ -5,6 +8,16 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 > A partir de 2026-09-28, este README é o registro de retomada do projeto: cada ajuste deve atualizar o changelog abaixo e a arquitetura/regras quando elas mudarem. O item mais recente fica sempre no topo.
 
 ## Changelog
+
+### v4.12.03 — Regras de geração e entrada da Cotação
+
+- Contas criadas pelo Faker passam a ser sempre Contas de gestão (`Cliente - Direto`).
+- O Faker de Oportunidade gera somente o escopo ferroviário atual: Contrato com vigência de 1 a 5 anos ou ACS com vigência de 1 a 11 meses, ambos iniciando hoje; escolhe e salva automaticamente o dia de aplicação 1, 10 ou 20.
+- O screenflow mostra a escolha CBS ou tarifa líquida na etapa de Agendas; a escolha vale para toda a Cotação e fica travada após a primeira Agenda.
+- O dia de aplicação da Oportunidade substitui o dia informado na Data Base Diesel, que fica visível como data automática no screenflow.
+- Ao abrir as opções de Fluxo da Cotação, o servidor garante um catálogo ferroviário elegível vinculado à Conta e apresenta somente esses Fluxos, sem expor o sistema de origem na jornada.
+- Migração automática adiciona os campos novos às bases existentes; regras de tolerância e aditivo seguem fora deste incremento.
+- Verificação: build de produção aprovado. O lint geral aponta falhas de formatação preexistentes em vários arquivos do repositório; não foi usado para reformatar arquivos inteiros fora do escopo.
 
 ### v3.12.03 — Avanço do Path após sincronização
 
@@ -85,103 +98,7 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 - Adiciona o objeto Oportunidade ligado obrigatoriamente a uma Conta de gestão.
 - Inclui instrumento, estágio, segmento, valor, datas previstas e de vigência, percentuais de reajuste, partes contratuais, tarifa de integração e Take or Pay.
 - Inclui CRUD individual e em lote, lista relacionada à Conta e total do valor das oportunidades no detalhe da Conta.
-- Registra um gerador Faker com seed determinística. O gerador fica pronto para uso; não cria registros automaticamente.
-
-### v2.02.03 — Configurações e personalização de listas
-
-- Adiciona Configurações com opção de apagar os dados do playground e opção de restauração de fábrica dos dados de demonstração.
-- Adiciona configuração por objeto para reordenar colunas e escolher quais colunas aparecem.
-
-### v1.02.03 — Identificação de versão
-
-- Exibe a versão atual junto ao nome CRM.
-- Define a política de versionamento em [VERSIONING.md](VERSIONING.md).
-
-### Base anterior ao versionamento — Contas, Contatos e listas relacionadas
-
-- Adiciona CRUD individual e em lote, incluindo exclusão individual e em lote, para Contas e Contatos.
-- Adiciona páginas próprias para os registros de Conta e Contato.
-- Adiciona listas relacionadas configuráveis com criação individual/em lote, vínculo automático ao registro pai, reordenação, remoção e visualização em tela cheia.
-- Adiciona geradores Faker em português com seed determinística.
-- Estabelece componentes compartilhados para listas, formulários, exclusão e listas relacionadas.
-
-## Objetos e arquitetura
-
-A arquitetura segue o padrão de objetos reutilizáveis do playground. Cada objeto tem sua tabela persistida, lista de registros, rota de detalhe, formulários CRUD e gerador Faker. As relações usam chaves estrangeiras e as listas relacionadas reaproveitam os componentes comuns.
-
-```mermaid
-erDiagram
-    ACCOUNTS ||--o{ CONTACTS : "possui"
-    ACCOUNTS ||--o{ OPPORTUNITIES : "gerencia"
-    OPPORTUNITIES ||--o{ QUOTES : "contém"
-    QUOTES ||--o{ QUOTE_LINE_ITEMS : "totaliza"
-    PLANNED_FLOWS ||--o{ QUOTE_LINE_ITEMS : "identifica"
-    QUOTE_LINE_ITEMS ||--o{ QUOTE_SCHEDULES : "agenda"
-    LOCATIONS ||--o{ PLANNED_FLOWS : "origem e destino"
-    MERCHANDISE ||--o{ PLANNED_FLOWS : "classifica"
-    DIESEL_BASES ||--o{ QUOTE_SCHEDULES : "referência"
-```
-
-| Objeto          | Tabela             | Relacionamento                                                                                | Página de lista     | Página do registro      |
-| --------------- | ------------------ | --------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
-| Conta           | `accounts`         | Registro pai de Contatos e Oportunidades                                                      | `/accounts`         | `/accounts/$id`         |
-| Contato         | `contacts`         | `account_id` obrigatório → Conta                                                              | `/contacts`         | `/contacts/$id`         |
-| Oportunidade    | `opportunities`    | `account_id` obrigatório → Conta de gestão                                                    | `/opportunities`    | `/opportunities/$id`    |
-| Fluxo Planejado | `planned_flows`    | Conta + Location de origem + Location de destino + Mercadoria; modal Ferroviário; origem FLOU | `/planned-flows`    | `/planned-flows/$id`    |
-| Location        | `locations`        | Dimensão geográfica usada como origem ou destino                                              | `/locations`        | `/locations/$id`        |
-| Mercadoria      | `merchandise`      | Dimensão de produto e unidade do fluxo                                                        | `/merchandise`      | `/merchandise/$id`      |
-| Base Diesel     | `diesel_bases`     | Referência exigida em cada Agenda ferroviária                                                 | `/diesel-bases`     | `/diesel-bases/$id`     |
-| Cotação         | `quotes`           | `opportunity_id` obrigatório → Oportunidade                                                   | `/quotes`           | `/quotes/$id`           |
-| Item da Cotação | `quote_line_items` | Cotação + Fluxo Planejado + Serviço                                                           | `/quote-line-items` | `/quote-line-items/$id` |
-| Agenda          | `quote_schedules`  | Item + período + tarifa + diesel + serviço e rateio                                           | `/quote-schedules`  | `/quote-schedules/$id`  |
-
-### Relações e efeitos
-
-- Uma Conta pode ter muitos Contatos e muitas Oportunidades.
-- Contato e Oportunidade pertencem a uma Conta por `account_id`; a exclusão da Conta remove seus registros dependentes.
-- A lista relacionada respeita o registro pai: ao criar um contato ou oportunidade dentro de uma Conta, o vínculo àquela Conta é aplicado automaticamente.
-- A página da Conta agrega o valor das Oportunidades vinculadas. Esse total é uma soma calculada e não substitui o campo próprio `lifetime_value` da Conta.
-- O catálogo ferroviário é mockado no banco do playground. Uma Conta recebe Fluxos Planejados vinculados quando o pacote de cotação é gerado. A mesma seed produz códigos, número de Cotação, serviços, volumes, tarifas e rateios reproduzíveis.
-- A rota visível do fluxo usa `Location.code` para origem e destino, por exemplo `PPN → QPM`. O registro do Fluxo mantém as referências às cinco dimensões: Conta, origem, destino, Mercadoria e modal; a sigla da rota sozinha não identifica um fluxo.
-- Uma Cotação pertence a uma Oportunidade em Negociação. Ela pode conter vários Itens; cada Item representa uma combinação de fluxo e serviço; as Agendas guardam as linhas de período. Cada página tem sua própria rota, e a tela da Cotação permite expandir/recolher itens e agendas com chevrons.
-- A Cotação pode ser montada manualmente ou pelo gerador com seed. O gerador cria três fluxos da Conta, um Item por serviço e agendas mensais para cada grupo, incluindo FRETE e dois ou três serviços acessórios.
-- O catálogo usa siglas de Location, mercadorias e Base Diesel ELDORADO documentadas. Esses cadastros e as tarifas são dados fictícios do playground, não registros consultados em Salesforce.
-- Uma Oportunidade aponta para a Conta de gestão, que representa o nível superior. Contas granulares e demais partes contratuais ainda não têm objeto/relacionamento próprio no playground.
-
-### Campos da Oportunidade
-
-| Grupo       | Campos                                                                                                                                 |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Contexto    | Conta de gestão                                                                                                                        |
-| Comercial   | Tipo de instrumento (Contrato, ACS, Aditivo, Outros Serviços), segmento, estágio, valor e data prevista de fechamento                  |
-| Jurídico    | Vigência inicial/final, reajustes Diesel/IGP-M/IPCA, contratante(s), entidade VLI contratada, devedor solidário e tarifa de integração |
-| Compromisso | Take or Pay                                                                                                                            |
-
-### Path e validações atuais
-
-Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação → Formalização → Fechado**.
-
-- Toda oportunidade nova começa em **Prospecção**.
-- O Path permite avançar de **Prospecção** para **Negociação**.
-- A alteração de estágio é validada no servidor para CRUD individual e em lote; não depende apenas do botão ou da interface.
-- De **Negociação** para **Aprovação**, o servidor exige que uma Cotação seja concluída e sincronizada.
-- De **Aprovação** para **Formalização**, exige aprovação registrada. Como o objeto/fluxo de Aprovação ainda não existe, o avanço permanece bloqueado.
-- De **Formalização** para **Fechado**, exige a formalização via NetLex. Como a integração ainda não existe, o avanço permanece bloqueado.
-- A transição de **Aprovação** para **Negociação** é permitida para representar rejeição ou cancelamento de aprovação.
-- A edição de outros campos da oportunidade não exige mudança de estágio.
-
-### Cotação ferroviária: Contrato e ACS
-
-- A lista relacionada de Cotações aparece na Oportunidade ferroviária de Contrato/ACS. Uma nova Cotação exige a Oportunidade em Negociação.
-- Status da Cotação: **Rascunho → Concluída → Sincronizada**. Há no máximo uma Cotação sincronizada por Oportunidade. Concluir valida toda a hierarquia; sincronizar replica o estado para a Oportunidade.
-- Record Type usado no escopo atual: `VLI_General`. Tipos de Quote diferentes de Contrato/ACS não são oferecidos nesta entrega.
-- Um Fluxo Planejado só pode ser escolhido quando pertence à Conta da Oportunidade, tem modal Ferroviário e origem `FLOU`. Location e Mercadoria são referências ligadas ao registro do fluxo. A interface monta a rota a partir das siglas cadastradas.
-- Cada agenda deve ter ano entre 1900 e 4000, mês de 1 a 12, volume inteiro positivo, Base Diesel, serviço ferroviário permitido e uma tarifa coerente com `integration_tariff` da Oportunidade: CBS ou líquida. Não são aceitas duas tarifas positivas.
-- Serviços permitidos: FRETE, CARGA, DESCARGA, BALDEAÇÃO, MANOBRA ORIGEM e MANOBRA DESTINO. Cada grupo de Fluxo/período/divisão/praça precisa conter FRETE; o rateio de acessórios deve fechar o valor principal com diferença máxima de R$ 0,02 e somar 100% com tolerância de 0,2 ponto percentual.
-- `VLI_KeySchedule__c` é representada localmente como `schedule_key`: código do fluxo + AAAAMM + divisão + praça. A agenda repetida para outro serviço pode compartilhar a chave; o mesmo serviço na mesma chave é rejeitado inclusive entre cotações.
-- DataBaseDiesel aceita `MM/AAAA` ou `DD/MM/AAAA`; é exigida para periodicidade anual ou quando o fluxo tem agendas em meses diferentes. Um fluxo mantém uma Base Diesel por Cotação. O catálogo mock inicial inclui ELDORADO.
-- Vigência inicial/final da Oportunidade deve cobrir as agendas. ACS exige vigência inferior a 12 meses e rejeita qualquer tolerância positiva; assim, ACS não cria Take or Pay. Em Contrato, as quatro tolerâncias, quando usadas, devem ser inteiras de 0 a 100 e preenchidas em conjunto.
-- Dados Faker são mockados e reproduzíveis por seed. O gerador não consulta Jetsons, não calcula recomendação real de preço e não representa sincronização com Salesforce.
+- Registra um gerador Faker com seed deter…2664 tokens truncated…Salesforce.
 
 As regras de negócio completas do processo futuro também devem ser mantidas aqui quando Cotação, Aprovação e integração NetLex forem implementadas. Regras ainda não executadas pelo app devem ser marcadas como pendentes, sem serem descritas como validações ativas.
 

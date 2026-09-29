@@ -58,6 +58,9 @@ function QuotePage() {
     );
   const q = data.quote,
     items = data.items as any[];
+  const tariffMode = q.tariff_mode || options?.opportunity?.integration_tariff || "Líquida";
+  const canChangeTariff = !items.some((item) => item.schedules?.length);
+  const applicationDay = Number(options?.opportunity?.application_day ?? 10);
   const baseLabels = new Map((options?.dieselBases ?? []).map((base: any) => [base.name, base.id]));
   const scheduleFields: FieldDef[] = [
     { name: "year", label: "Ano", type: "number", required: true },
@@ -91,8 +94,8 @@ function QuotePage() {
     { name: "division", label: "Divisão" },
     { name: "plaza", label: "Praça", placeholder: "TODAS_PRACAS_NACIONAL" },
     { name: "volume", label: "Volume inteiro", type: "number", required: true },
-    { name: "tariff_cbs", label: "Tarifa CBS (deixe vazio se usar líquida)", type: "number" },
-    { name: "tariff_net", label: "Tarifa líquida", type: "number" },
+    { name: "tariff_cbs", label: `Tarifa CBS${tariffMode === "CBS" ? " (selecionada)" : " (não selecionada)"}`, type: "number" },
+    { name: "tariff_net", label: `Tarifa líquida${tariffMode === "CBS" ? " (não selecionada)" : " (selecionada)"}`, type: "number" },
     {
       name: "diesel_label",
       label: "Base de repasse diesel",
@@ -376,7 +379,7 @@ function QuotePage() {
                 <li>
                   É a Conta de gestão da Oportunidade.
                   <ul>
-                    <li>Os Fluxos Planejados precisam pertencer a essa Conta e ter origem FLOU.</li>
+                    <li>O sistema oferece os Fluxos Planejados elegíveis vinculados a essa Conta.</li>
                   </ul>
                 </li>
                 <li>
@@ -404,6 +407,7 @@ function QuotePage() {
               <ul>
                 <li>Volume é inteiro e positivo; CBS ou tarifa líquida deve estar preenchida.</li>
                 <li>Cada grupo tem FRETE, Base Diesel e rateio que fecha o total e soma 100%.</li>
+                <li>A Data de aplicação diesel usa automaticamente o dia configurado na Oportunidade.</li>
                 <li>
                   Duplicidade usa código de fluxo, ano/mês, divisão, praça e serviço, inclusive
                   entre Cotações.
@@ -477,7 +481,9 @@ function QuotePage() {
           dieselBases={options?.dieselBases ?? []}
           contractStart={options?.opportunity?.contract_start ?? ""}
           contractEnd={options?.opportunity?.contract_end ?? ""}
-          integrationTariff={options?.opportunity?.integration_tariff ?? "CBS"}
+          integrationTariff={tariffMode}
+          applicationDay={applicationDay}
+          canChangeTariff={canChangeTariff}
           usedSchedules={options?.usedSchedules ?? []}
           initialFlowId={scheduleItem?.flow_id}
           initialService={scheduleItem?.service}
@@ -486,10 +492,17 @@ function QuotePage() {
             setNewItem(false);
             setScheduleItem(null);
           }}
-          onSave={async ({ flowId, itemService, groups }) => {
+          onSave={async ({ flowId, itemService, tariffMode: selectedTariffMode, groups }) => {
             try {
               const result = await saveQuoteItemScreenflow({
-                data: { quoteId: id, itemId: scheduleItem?.id, flowId, itemService, groups },
+                data: {
+                  quoteId: id,
+                  itemId: scheduleItem?.id,
+                  flowId,
+                  itemService,
+                  tariffMode: selectedTariffMode,
+                  groups,
+                },
               });
               await refresh();
               toast.success(
@@ -544,15 +557,15 @@ function QuotePage() {
                   division: "Todas",
                   plaza: "TODAS_PRACAS_NACIONAL",
                   volume: 1000,
-                  tariff_cbs: options?.opportunity?.integration_tariff === "CBS" ? 400 : "",
-                  tariff_net: options?.opportunity?.integration_tariff === "CBS" ? "" : 400,
+                  tariff_cbs: tariffMode === "CBS" ? 400 : "",
+                  tariff_net: tariffMode === "CBS" ? "" : 400,
                   diesel_label: "ELDORADO",
-                  diesel_base_date: `${String(options?.opportunity?.contract_start?.slice(5, 7) ?? "10").padStart(2, "0")}/${options?.opportunity?.contract_start?.slice(0, 4) ?? "2026"}`,
+                  diesel_base_date: `${String(applicationDay).padStart(2, "0")}/${String(options?.opportunity?.contract_start?.slice(5, 7) ?? "10").padStart(2, "0")}/${options?.opportunity?.contract_start?.slice(0, 4) ?? "2026"}`,
                   service: scheduleItem?.service ?? "FRETE",
-                  accessory_cbs: options?.opportunity?.integration_tariff === "CBS" ? 400 : "",
-                  accessory_cbs_pct: options?.opportunity?.integration_tariff === "CBS" ? 100 : "",
-                  accessory_net: options?.opportunity?.integration_tariff === "CBS" ? "" : 400,
-                  accessory_net_pct: options?.opportunity?.integration_tariff === "CBS" ? "" : 100,
+                  accessory_cbs: tariffMode === "CBS" ? 400 : "",
+                  accessory_cbs_pct: tariffMode === "CBS" ? 100 : "",
+                  accessory_net: tariffMode === "CBS" ? "" : 400,
+                  accessory_net_pct: tariffMode === "CBS" ? "" : 100,
                   tolerance_vli_tariff: 0,
                   tolerance_client_tariff: 0,
                   tolerance_vli_volume: 0,
@@ -603,7 +616,7 @@ function QuotePage() {
                   year,
                   month,
                   service,
-                  diesel_base_date: `${String(month).padStart(2, "0")}/${year}`,
+                  diesel_base_date: `${String(applicationDay).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
                 };
               }
             }

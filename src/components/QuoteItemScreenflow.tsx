@@ -36,6 +36,8 @@ type Props = {
   contractStart: string;
   contractEnd: string;
   integrationTariff: string;
+  applicationDay: number;
+  canChangeTariff: boolean;
   usedSchedules: Array<{ schedule_key: string; service: string }>;
   initialFlowId?: string;
   initialService?: string;
@@ -44,6 +46,7 @@ type Props = {
   onSave: (payload: {
     flowId: string;
     itemService: string;
+    tariffMode: string;
     groups: AgendaGroup[];
   }) => Promise<boolean>;
 };
@@ -76,6 +79,10 @@ const labelStyle = {
   fontSize: 12,
   fontWeight: 600,
 } as const;
+
+function applicationDate(day: number, month: number, year: number) {
+  return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
+}
 
 export function QuoteItemEditDialog({
   item,
@@ -180,6 +187,8 @@ export function QuoteItemScreenflow({
   contractStart,
   contractEnd,
   integrationTariff,
+  applicationDay,
+  canChangeTariff,
   usedSchedules,
   initialFlowId,
   initialService = "FRETE",
@@ -194,6 +203,7 @@ export function QuoteItemScreenflow({
   const [merchandiseId, setMerchandiseId] = useState(initial?.merchandise_id ?? "");
   const [modal, setModal] = useState(initial?.modal ?? "");
   const [itemService, setItemService] = useState(initialService);
+  const [tariffMode, setTariffMode] = useState(integrationTariff);
   const [seed, setSeed] = useState(790043);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -247,7 +257,7 @@ export function QuoteItemScreenflow({
         volume: 1000,
         tariff,
         diesel_base_id: dieselBases[0]?.id ?? "",
-        diesel_base_date: `${String(startMonth).padStart(2, "0")}/${startYear}`,
+        diesel_base_date: applicationDate(applicationDay, startMonth, startYear),
         services: [{ service: "FRETE", percent: 100 }],
       },
     ];
@@ -289,7 +299,7 @@ export function QuoteItemScreenflow({
         ...last,
         year: nextPeriod.year,
         month: nextPeriod.month,
-        diesel_base_date: `${String(nextPeriod.month).padStart(2, "0")}/${nextPeriod.year}`,
+        diesel_base_date: applicationDate(applicationDay, nextPeriod.month, nextPeriod.year),
         services: last.services.map((s) => ({ ...s })),
       },
     ]);
@@ -315,9 +325,9 @@ export function QuoteItemScreenflow({
     const seeded = Math.abs(Math.imul(seed + index * 7919, 2654435761) >>> 0);
     updateGroup(index, {
       ...available,
+      diesel_base_date: applicationDate(applicationDay, available.month, available.year),
       volume: 1000 + (seeded % 9000),
       tariff: 100 + ((Math.imul(seeded, 1097) >>> 0) % 9900) / 100,
-      diesel_base_date: `${String(available.month).padStart(2, "0")}/${available.year}`,
     });
     setError("");
   }
@@ -327,7 +337,7 @@ export function QuoteItemScreenflow({
       setError("Complete Cliente, Origem, Destino, Mercadoria e Modal para continuar.");
       return false;
     }
-    if (step === 1 && (!itemService || !groups.length)) {
+    if (step === 1 && (!itemService || !groups.length || !["CBS", "Líquida"].includes(tariffMode))) {
       setError("Escolha o serviço do Item e adicione ao menos um grupo de Agenda.");
       return false;
     }
@@ -352,7 +362,7 @@ export function QuoteItemScreenflow({
     if (!validateCurrent() || !selectedFlow) return;
     setBusy(true);
     try {
-      if (await onSave({ flowId: selectedFlow.id, itemService, groups })) onClose();
+      if (await onSave({ flowId: selectedFlow.id, itemService, tariffMode, groups })) onClose();
     } finally {
       setBusy(false);
     }
@@ -514,6 +524,23 @@ export function QuoteItemScreenflow({
                 Adicione os períodos que desejar. Os serviços do mesmo período são rateados para
                 fechar 100%; FRETE é obrigatório.
               </p>
+              <label style={labelStyle}>
+                Tarifa usada nesta Cotação
+                {select(
+                  tariffMode,
+                  setTariffMode,
+                  [
+                    { value: "CBS", label: "Tarifa CBS" },
+                    { value: "Líquida", label: "Tarifa líquida" },
+                  ],
+                  !canChangeTariff,
+                )}
+                <small>
+                  {canChangeTariff
+                    ? "Escolha a modalidade usada em todos os valores desta Cotação."
+                    : "A modalidade fica fixa depois que a Cotação recebe sua primeira Agenda."}
+                </small>
+              </label>
               {!itemId && (
                 <label style={labelStyle}>
                   Serviço principal do Item
@@ -571,7 +598,7 @@ export function QuoteItemScreenflow({
                         (v) =>
                           updateGroup(index, {
                             year: Number(v),
-                            diesel_base_date: `${String(g.month).padStart(2, "0")}/${v}`,
+                            diesel_base_date: applicationDate(applicationDay, g.month, Number(v)),
                           }),
                         unique(yearMonths, (p) => String(p.year)).map((p) => ({
                           value: String(p.year),
@@ -586,7 +613,7 @@ export function QuoteItemScreenflow({
                         (v) =>
                           updateGroup(index, {
                             month: Number(v),
-                            diesel_base_date: `${String(v).padStart(2, "0")}/${g.year}`,
+                            diesel_base_date: applicationDate(applicationDay, Number(v), g.year),
                           }),
                         yearMonths
                           .filter((p) => p.year === g.year)
@@ -640,7 +667,7 @@ export function QuoteItemScreenflow({
                       />
                     </label>
                     <label style={labelStyle}>
-                      Tarifa {integrationTariff === "CBS" ? "CBS" : "líquida"}
+                      Tarifa {tariffMode === "CBS" ? "CBS" : "líquida"}
                       <input
                         style={inputStyle}
                         type="number"
@@ -658,12 +685,12 @@ export function QuoteItemScreenflow({
                       ])}
                     </label>
                     <label style={labelStyle}>
-                      Data base diesel (MM/AAAA)
+                      Data de aplicação diesel (automática)
                       <input
                         style={inputStyle}
-                        placeholder="MM/AAAA"
+                        aria-label="Data de aplicação diesel automática"
                         value={g.diesel_base_date}
-                        onChange={(e) => updateGroup(index, { diesel_base_date: e.target.value })}
+                        readOnly
                       />
                     </label>
                   </div>

@@ -112,6 +112,7 @@ function OpportunityRecordPage() {
     { name: "close_date", label: "Data de fechamento", type: "date" },
     { name: "contract_start", label: "Início da vigência", type: "date" },
     { name: "contract_end", label: "Fim da vigência", type: "date" },
+    { name: "application_day", label: "Dia de aplicação", type: "select", options: ["1", "10", "20"], required: true },
     { name: "diesel_pct", label: "Reajuste diesel (%)", type: "number" },
     { name: "igpm_pct", label: "Reajuste IGP-M (%)", type: "number" },
     { name: "ipca_pct", label: "Reajuste IPCA (%)", type: "number" },
@@ -120,7 +121,7 @@ function OpportunityRecordPage() {
     { name: "joint_debtor", label: "Devedor solidário" },
     {
       name: "integration_tariff",
-      label: "Tarifa de integração",
+      label: "Tarifa padrão para novas Cotações",
       type: "select",
       options: ["CBS", "Líquida"],
     },
@@ -136,6 +137,7 @@ function OpportunityRecordPage() {
     close_date: opportunity.close_date ?? "",
     contract_start: opportunity.contract_start ?? "",
     contract_end: opportunity.contract_end ?? "",
+    application_day: String(opportunity.application_day ?? 10),
     diesel_pct: opportunity.diesel_pct ?? 0,
     igpm_pct: opportunity.igpm_pct ?? 0,
     ipca_pct: opportunity.ipca_pct ?? 0,
@@ -149,6 +151,7 @@ function OpportunityRecordPage() {
     const { account_name, ...rest } = form;
     return {
       ...rest,
+      application_day: Number(rest.application_day ?? 10),
       account_id: accountIdByName.get(account_name),
       take_or_pay: rest.take_or_pay ? 1 : 0,
     };
@@ -523,12 +526,13 @@ function OpportunityRecordPage() {
                 value={opportunity.contract_end ? fmtDate(opportunity.contract_end) : "—"}
               />
               <Field label="Reajuste diesel" value={`${opportunity.diesel_pct}%`} />
+              <Field label="Dia de aplicação" value={String(opportunity.application_day ?? 10)} />
               <Field label="Reajuste IGP-M" value={`${opportunity.igpm_pct}%`} />
               <Field label="Reajuste IPCA" value={`${opportunity.ipca_pct}%`} />
               <Field label="Contratante(s)" value={opportunity.contracting_parties ?? "—"} />
               <Field label="Entidade VLI" value={opportunity.vli_entity ?? "—"} />
               <Field label="Devedor solidário" value={opportunity.joint_debtor ?? "—"} />
-              <Field label="Tarifa de integração" value={opportunity.integration_tariff} />
+              <Field label="Tarifa padrão para novas Cotações" value={opportunity.integration_tariff} />
               <Field label="Take or Pay" value={opportunity.take_or_pay ? "Sim" : "Não"} />
             </div>
           </Card>

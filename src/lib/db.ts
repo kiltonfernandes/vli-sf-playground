@@ -70,6 +70,7 @@ export function ensureSchema(): Promise<void> {
       close_date text,
       contract_start text,
       contract_end text,
+      application_day integer NOT NULL DEFAULT 10,
       diesel_pct real NOT NULL DEFAULT 0,
       igpm_pct real NOT NULL DEFAULT 0,
       ipca_pct real NOT NULL DEFAULT 0,
@@ -84,6 +85,11 @@ export function ensureSchema(): Promise<void> {
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_opportunities_account_id ON opportunities(account_id)`,
     );
+    const opportunityColumns = await client.execute(`PRAGMA table_info(opportunities)`);
+    if (!opportunityColumns.rows.some((row) => row.name === "application_day"))
+      await client.execute(
+        `ALTER TABLE opportunities ADD COLUMN application_day integer NOT NULL DEFAULT 10`,
+      );
 
     await client.execute(
       `CREATE TABLE IF NOT EXISTS locations (id text PRIMARY KEY, name text NOT NULL, code text NOT NULL, city text NOT NULL, state text NOT NULL, microregion text NOT NULL, location_type text NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,
@@ -101,8 +107,11 @@ export function ensureSchema(): Promise<void> {
       `CREATE INDEX IF NOT EXISTS idx_planned_flows_account_id ON planned_flows(account_id)`,
     );
     await client.execute(
-      `CREATE TABLE IF NOT EXISTS quotes (id text PRIMARY KEY, opportunity_id text NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE, quote_number text NOT NULL, name text NOT NULL, record_type text NOT NULL DEFAULT 'VLI_General', status text NOT NULL DEFAULT 'Rascunho', is_synced integer NOT NULL DEFAULT 0, seed integer NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,
+      `CREATE TABLE IF NOT EXISTS quotes (id text PRIMARY KEY, opportunity_id text NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE, quote_number text NOT NULL, name text NOT NULL, record_type text NOT NULL DEFAULT 'VLI_General', tariff_mode text, status text NOT NULL DEFAULT 'Rascunho', is_synced integer NOT NULL DEFAULT 0, seed integer NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,
     );
+    const quoteColumns = await client.execute(`PRAGMA table_info(quotes)`);
+    if (!quoteColumns.rows.some((row) => row.name === "tariff_mode"))
+      await client.execute(`ALTER TABLE quotes ADD COLUMN tariff_mode text`);
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_quotes_opportunity_id ON quotes(opportunity_id)`,
     );

@@ -1,6 +1,6 @@
 import type { Generator } from "./core";
 import { slug } from "./core";
-import { TIPOS, STATUS, RISCOS, SAUDE } from "../options";
+import { STATUS, RISCOS, SAUDE } from "../options";
 
 const SETORES = [
   "Tecnologia",
@@ -36,7 +36,8 @@ export const accountsGenerator: Generator = (f) => {
     Math.round((employees * f.number.int({ min: 80_000, max: 600_000 })) / 1000) * 1000;
   return {
     name: `${nome} ${f.helpers.arrayElement(SETORES)} ${f.helpers.arrayElement(SUFIXOS)}`,
-    type: f.helpers.arrayElement(TIPOS),
+    // As Contas Faker deste projeto representam sempre a Conta de gestão.
+    type: "Cliente - Direto",
     industry: f.helpers.arrayElement(SETORES),
     city: f.location.city(),
     state: f.location.state({ abbreviated: true }),

@@ -15,6 +15,7 @@ const SEGMENTS = ["Ferroviário", "Portuário", "Rodoviário"];
 type Opportunity = {
   id: string; account_id: string; account_name: string; name: string; instrument_type: string; stage: string;
   segment: string | null; amount: number; close_date: string | null; contract_start: string | null; contract_end: string | null;
+  application_day: number;
   diesel_pct: number; igpm_pct: number; ipca_pct: number; contracting_parties: string | null; vli_entity: string | null;
   joint_debtor: string | null; integration_tariff: string; take_or_pay: number;
 };
@@ -44,13 +45,14 @@ function OpportunitiesPage() {
     { name: "close_date", label: "Data de fechamento", type: "date" },
     { name: "contract_start", label: "Início da vigência", type: "date" },
     { name: "contract_end", label: "Fim da vigência", type: "date" },
+    { name: "application_day", label: "Dia de aplicação", type: "select", options: ["1", "10", "20"], required: true },
     { name: "diesel_pct", label: "Reajuste diesel (%)", type: "number" },
     { name: "igpm_pct", label: "Reajuste IGP-M (%)", type: "number" },
     { name: "ipca_pct", label: "Reajuste IPCA (%)", type: "number" },
     { name: "contracting_parties", label: "Contratante(s)" },
     { name: "vli_entity", label: "Entidade contratada VLI" },
     { name: "joint_debtor", label: "Devedor solidário" },
-    { name: "integration_tariff", label: "Tarifa de integração", type: "select", options: ["CBS", "Líquida"] },
+    { name: "integration_tariff", label: "Tarifa padrão para novas Cotações", type: "select", options: ["CBS", "Líquida"] },
     { name: "take_or_pay", label: "Take or Pay", type: "checkbox" },
   ];
   const columns: Column<Opportunity>[] = [
@@ -64,13 +66,14 @@ function OpportunitiesPage() {
   ];
   const transform = (form: Record<string, any>) => {
     const { account_name, ...rest } = form;
-    return { ...rest, account_id: accountIdByName.get(account_name), take_or_pay: rest.take_or_pay ? 1 : 0 };
+    return { ...rest, application_day: Number(rest.application_day ?? 10), account_id: accountIdByName.get(account_name), take_or_pay: rest.take_or_pay ? 1 : 0 };
   };
   const defaults = (row?: Opportunity | null) => ({
     name: row?.name ?? "", account_name: row?.account_name ?? "",
     instrument_type: row?.instrument_type ?? "Contrato", stage: row?.stage ?? "Prospecção",
     segment: row?.segment ?? "", amount: row?.amount ?? 0, close_date: row?.close_date ?? "",
     contract_start: row?.contract_start ?? "", contract_end: row?.contract_end ?? "",
+    application_day: String(row?.application_day ?? 10),
     diesel_pct: row?.diesel_pct ?? 0, igpm_pct: row?.igpm_pct ?? 0, ipca_pct: row?.ipca_pct ?? 0,
     contracting_parties: row?.contracting_parties ?? "", vli_entity: row?.vli_entity ?? "VLI Multimodal S.A.",
     joint_debtor: row?.joint_debtor ?? "", integration_tariff: row?.integration_tariff ?? "Líquida",
@@ -99,7 +102,7 @@ function OpportunitiesPage() {
       ]}
       rowActions={[{ label: "Editar", onRun: (row) => setEditRow(row) }, { label: "Excluir", onRun: remove }]} />
     {(showNew || editRow) && <SfRecordDialog title={editRow ? `Editar ${editRow.name}` : "Nova oportunidade"} table="opportunities" fields={fields} defaults={defaults(editRow)} recordId={editRow?.id} transform={transform} onClose={() => { setShowNew(false); setEditRow(null); }} onSaved={refresh} />}
-    {bulkCreate && <SfBulkRecordDialog table="opportunities" fields={fields} defaults={{ instrument_type: "Contrato", stage: "Prospecção", vli_entity: "VLI Multimodal S.A.", integration_tariff: "Líquida" }} transform={transform} onClose={() => setBulkCreate(false)} onSaved={refresh} />}
+    {bulkCreate && <SfBulkRecordDialog table="opportunities" fields={fields} defaults={{ instrument_type: "Contrato", stage: "Prospecção", vli_entity: "VLI Multimodal S.A.", integration_tariff: "Líquida", application_day: "10" }} transform={transform} onClose={() => setBulkCreate(false)} onSaved={refresh} />}
     {bulkRows && <SfBulkRecordDialog table="opportunities" fields={fields} rows={bulkRows} defaults={{}} transform={transform} onClose={() => setBulkRows(null)} onSaved={refresh} />}
   </SfShell>;
 }

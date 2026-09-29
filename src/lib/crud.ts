@@ -59,13 +59,13 @@ export const listOpportunities = createServerFn({ method: "GET" }).handler(async
       close_date: opportunities.close_date,
       contract_start: opportunities.contract_start,
       contract_end: opportunities.contract_end,
+      application_day: opportunities.application_day,
       diesel_pct: opportunities.diesel_pct,
       igpm_pct: opportunities.igpm_pct,
       ipca_pct: opportunities.ipca_pct,
       contracting_parties: opportunities.contracting_parties,
       vli_entity: opportunities.vli_entity,
       joint_debtor: opportunities.joint_debtor,
-      integration_tariff: opportunities.integration_tariff,
       take_or_pay: opportunities.take_or_pay,
       account_name: accounts.name,
     })
@@ -163,6 +163,7 @@ export const listQuotes = createServerFn({ method: "GET" }).handler(async () => 
       quote_number: quotes.quote_number,
       name: quotes.name,
       record_type: quotes.record_type,
+      tariff_mode: quotes.tariff_mode,
       status: quotes.status,
       is_synced: quotes.is_synced,
       seed: quotes.seed,
@@ -198,6 +199,7 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
       quote_number: quotes.quote_number,
       name: quotes.name,
       record_type: quotes.record_type,
+      tariff_mode: quotes.tariff_mode,
       status: quotes.status,
       is_synced: quotes.is_synced,
       seed: quotes.seed,
@@ -280,12 +282,13 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
         integration_tariff: opportunities.integration_tariff,
         contract_start: opportunities.contract_start,
         contract_end: opportunities.contract_end,
+        application_day: opportunities.application_day,
       })
       .from(opportunities)
       .where(eq(opportunities.id, opportunityId));
     if (!opportunity) return { flows: [], dieselBases: [], opportunity: null };
     await ensureRailCatalog(opportunity.account_id, 260929);
-    const flows = await db
+    const allFlows = await db
       .select({
         id: planned_flows.id,
         code: planned_flows.code,
@@ -305,6 +308,9 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
       .innerJoin(locations, eq(planned_flows.origin_id, locations.id))
       .where(eq(planned_flows.account_id, opportunity.account_id))
       .orderBy(asc(planned_flows.code));
+    const flows = allFlows.filter(
+      (flow) => flow.modal === "Ferroviário" && flow.origin_system === "FLOU",
+    );
     const options = await Promise.all(
       flows.map(async (flow) => {
         const [destination] = await db
@@ -409,7 +415,6 @@ export const listQuoteSchedules = createServerFn({ method: "GET" }).handler(asyn
       flow_code: planned_flows.code,
       origin_id: planned_flows.origin_id,
       destination_id: planned_flows.destination_id,
-      service: quote_schedules.service,
       diesel_base_name: diesel_bases.name,
       origin_code: locations.code,
     })
@@ -501,7 +506,6 @@ export const getQuoteLineItemFull = createServerFn({ method: "GET" }).handler(
         updated_at: quote_line_items.updated_at,
         quote_number: quotes.quote_number,
         quote_name: quotes.name,
-        quote_id: quotes.id,
         opportunity_id: quotes.opportunity_id,
         flow_code: planned_flows.code,
         flow_id: planned_flows.id,
@@ -668,13 +672,14 @@ export const syncQuote = createServerFn({ method: "POST" }).handler(async ({ dat
           row.tariff_net !== group[0].tariff_net ||
           row.tariff_cbs !== group[0].tariff_cbs ||
           row.volume !== group[0].volume ||
-          row.diesel_base_id !== group[0].diesel_base_id,
+          row.diesel_base_id !== group[0].diesel_base_id ||
+          row.diesel_base_date !== group[0].diesel_base_date,
       )
     )
       throw new Error(
         "Volume, tarifa e Base Diesel devem ser consistentes em todas as linhas da mesma agenda.",
       );
-    const useCbs = opportunity.integration_tariff === "CBS";
+    const useCbs = (quote.tariff_mode || opportunity.integration_tariff) === "CBS";
     if (
       group.some((row) =>
         useCbs
@@ -753,6 +758,8 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     limit.setMonth(limit.getMonth() + 12);
     if (end >= limit) throw new Error("A vigência ACS deve ser inferior a 12 meses.");
   }
+  if (![1, 10, 20].includes(Number(opp.application_day)))
+    throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
   const items = await db.select().from(quote_line_items).where(eq(quote_line_items.quote_id, id));
   if (!items.length) throw new Error("Adicione ao menos um Item à Cotação.");
   const rows = [] as Array<typeof quote_schedules.$inferSelect>;
@@ -769,6 +776,7 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
   const frequencyByFlow = new Map<string, Set<string>>();
   const dieselByFlow = new Map<string, Set<string>>();
   const windowsByContext = new Map<string, Set<string>>();
+  const tariffMode = quote.tariff_mode || opp.integration_tariff;
   const startMonth = Number(opp.contract_start.slice(0, 4) + opp.contract_start.slice(5, 7));
   const endMonth = Number(opp.contract_end.slice(0, 4) + opp.contract_end.slice(5, 7));
   for (const row of rows) {
@@ -786,18 +794,23 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
       throw new Error("A vigência da Oportunidade precisa cobrir a primeira e a última Agenda.");
     if (frequencyByFlow.get(flowId)!.size > 1)
       throw new Error("Um Fluxo não pode misturar periodicidade mensal e anual na mesma Cotação.");
-    if (
-      (row.frequency === "Anual" || monthsByFlow.get(flowId)!.size > 1) &&
-      !/^(\d{2}\/\d{4}|\d{2}\/\d{2}\/\d{4})$/.test(row.diesel_base_date ?? "")
-    )
-      throw new Error(
-        "DataBaseDiesel é obrigatória para periodicidade anual ou fluxos com agendas em vários meses.",
-      );
+    if (row.diesel_base_date)
+      applicationDate(Number(opp.application_day), row.diesel_base_date, row.month, row.year);
   }
   if ([...dieselByFlow.values()].some((bases) => bases.size > 1))
     throw new Error("Cada Fluxo Planejado só pode usar uma Base Diesel nesta Cotação.");
   if ([...windowsByContext.values()].some((windows) => windows.size > 1))
     throw new Error("Não misture tipos de janela no mesmo Fluxo, ano, mês, divisão e praça.");
+  for (const row of rows) {
+    const flowId = flowForItem.get(row.quote_line_item_id) ?? "";
+    if (
+      (row.frequency === "Anual" || (monthsByFlow.get(flowId)?.size ?? 0) > 1) &&
+      !row.diesel_base_date
+    )
+      throw new Error(
+        "DataBaseDiesel é obrigatória para periodicidade anual ou fluxos com agendas em vários meses.",
+      );
+  }
   const groups = new Map<string, typeof rows>();
   for (const row of rows)
     groups.set(row.schedule_key, [...(groups.get(row.schedule_key) ?? []), row]);
@@ -810,11 +823,12 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
           row.tariff_net !== group[0].tariff_net ||
           row.tariff_cbs !== group[0].tariff_cbs ||
           row.volume !== group[0].volume ||
-          row.diesel_base_id !== group[0].diesel_base_id,
+          row.diesel_base_id !== group[0].diesel_base_id ||
+          row.diesel_base_date !== group[0].diesel_base_date,
       )
     )
       throw new Error("Volume, tarifa e Base Diesel devem ser iguais no grupo da agenda.");
-    const useCbs = opp.integration_tariff === "CBS";
+    const useCbs = tariffMode === "CBS";
     if (
       group.some((row) =>
         useCbs
@@ -875,12 +889,13 @@ function partitionInteger(total: number, parts: number, f: ReturnType<typeof see
 
 /** Cadastra um catálogo ferroviário fictício por conta, com seed estável e vínculos reais locais. */
 async function ensureRailCatalog(accountId: string, seed: number) {
-  const [existing] = await db
-    .select({ id: planned_flows.id })
+  const existing = await db
+    .select({ id: planned_flows.id, modal: planned_flows.modal, origin_system: planned_flows.origin_system })
     .from(planned_flows)
-    .where(eq(planned_flows.account_id, accountId))
-    .limit(1);
-  const hasFlows = Boolean(existing);
+    .where(eq(planned_flows.account_id, accountId));
+  const hasEligibleFlows = existing.some(
+    (flow) => flow.modal === "Ferroviário" && flow.origin_system === "FLOU",
+  );
   const now = new Date().toISOString();
   const f = seededFaker(seed);
   const locationsData = [
@@ -941,7 +956,7 @@ async function ensureRailCatalog(accountId: string, seed: number) {
     [4, 5, 1],
     [0, 5, 3],
   ] as const;
-  if (!hasFlows)
+  if (!hasEligibleFlows)
     for (const [origin, dest, product] of pairs)
       await db.insert(planned_flows).values({
         id: crypto.randomUUID(),
@@ -981,6 +996,11 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
       .from(planned_flows)
       .where(eq(planned_flows.account_id, opp.account_id))
       .orderBy(asc(planned_flows.code));
+    const eligibleFlows = flows.filter(
+      (flow) => flow.modal === "Ferroviário" && flow.origin_system === "FLOU",
+    );
+    if (!eligibleFlows.length)
+      throw new Error("Não foi possível preparar Fluxos ferroviários para esta Conta.");
     const bases = await db.select().from(diesel_bases).where(eq(diesel_bases.name, "ELDORADO"));
     const f = seededFaker(seed);
     const now = new Date().toISOString();
@@ -993,13 +1013,14 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
         quote_number: quoteNum,
         name: `${opp.name} · Ferroviário`,
         record_type: "VLI_General",
+        tariff_mode: opp.integration_tariff,
         status: "Rascunho",
         is_synced: 0,
         seed,
         created_at: now,
         updated_at: now,
       });
-      for (const flow of flows.slice(0, 3)) {
+      for (const flow of eligibleFlows.slice(0, 3)) {
         const start = opp.contract_start
           ? new Date(`${opp.contract_start}T00:00:00Z`)
           : new Date(Date.UTC(2027 + (seed % 3), seed % 12, 1));
@@ -1078,7 +1099,7 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
               tariff_cbs: useCbs ? tariffCents / 100 : null,
               tariff_net: useCbs ? 0 : tariffCents / 100,
               diesel_base_id: bases[0].id,
-              diesel_base_date: `${String(month).padStart(2, "0")}/${year}`,
+              diesel_base_date: `${String(opp.application_day ?? 10).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
               service,
               accessory_cbs: useCbs ? shares[index] / 100 : null,
               accessory_cbs_pct: useCbs ? percentages[index] / 100 : null,
@@ -1103,8 +1124,8 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
       id: quoteId,
       quote_number: quoteNum,
       seed,
-      itemCount: Math.min(flows.length, 3),
-      scheduleCount: Math.min(flows.length, 3) * scheduleCount,
+      itemCount: Math.min(eligibleFlows.length, 3),
+      scheduleCount: Math.min(eligibleFlows.length, 3) * scheduleCount,
     };
   },
 );
@@ -1140,6 +1161,11 @@ async function validateOpportunityStage(
   recordId: string | null | undefined,
   data: Record<string, unknown>,
 ) {
+  if (
+    Object.prototype.hasOwnProperty.call(data, "application_day") &&
+    ![1, 10, 20].includes(Number(data.application_day))
+  )
+    throw new Error("O dia de aplicação deve ser 1, 10 ou 20.");
   if (!Object.prototype.hasOwnProperty.call(data, "stage")) return;
   const nextStage = String(data.stage ?? "");
   if (!OPPORTUNITY_STAGES.includes(nextStage as (typeof OPPORTUNITY_STAGES)[number])) {
@@ -1182,6 +1208,31 @@ const RAIL_SERVICES = [
   "MANOBRA ORIGEM",
   "MANOBRA DESTINO",
 ];
+
+function applicationDate(day: number, rawValue: unknown, month: number, year: number) {
+  const raw = String(rawValue ?? "").trim();
+  let targetMonth = month;
+  let targetYear = year;
+  if (/^\d{2}\/\d{4}$/.test(raw)) {
+    targetMonth = Number(raw.slice(0, 2));
+    targetYear = Number(raw.slice(3));
+  } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
+    targetMonth = Number(raw.slice(3, 5));
+    targetYear = Number(raw.slice(6));
+  } else if (raw) {
+    throw new Error("Informe a Data base diesel como MM/AAAA ou DD/MM/AAAA.");
+  }
+  const date = new Date(Date.UTC(targetYear, targetMonth - 1, day));
+  if (
+    ![1, 10, 20].includes(day) ||
+    targetMonth < 1 || targetMonth > 12 ||
+    date.getUTCMonth() + 1 !== targetMonth ||
+    date.getUTCFullYear() !== targetYear
+  )
+    throw new Error("A Data base diesel precisa ter uma data válida e o dia de aplicação da Oportunidade.");
+  return `${String(day).padStart(2, "0")}/${String(targetMonth).padStart(2, "0")}/${targetYear}`;
+}
+
 async function validateQuoteSchedule(
   recordId: string | null | undefined,
   input: Record<string, unknown>,
@@ -1275,6 +1326,8 @@ async function validateQuoteSchedule(
     .where(eq(planned_flows.id, item.planned_flow_id));
   if (!opp || opp.stage !== "Negociação")
     throw new Error("A oportunidade vinculada precisa estar em Negociação.");
+  if (![1, 10, 20].includes(Number(opp.application_day)))
+    throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
   if (opp.segment !== "Ferroviário" || !["Contrato", "ACS"].includes(opp.instrument_type))
     throw new Error("Esta agenda atende somente Ferroviário de Contrato e ACS.");
   if (!opp.contract_start || !opp.contract_end)
@@ -1295,9 +1348,10 @@ async function validateQuoteSchedule(
     );
   if (opp.instrument_type === "ACS" && anyTolerance)
     throw new Error("ACS não aceita tolerâncias nem Take or Pay.");
-  if (opp.integration_tariff === "CBS" && !(Number(cbs ?? 0) > 0))
+  const tariffMode = quote?.tariff_mode || opp.integration_tariff;
+  if (tariffMode === "CBS" && !(Number(cbs ?? 0) > 0))
     throw new Error("A Oportunidade usa tarifa CBS. Preencha Tarifa CBS e deixe a líquida vazia.");
-  if (opp.integration_tariff !== "CBS" && !(Number(net ?? 0) > 0))
+  if (tariffMode !== "CBS" && !(Number(net ?? 0) > 0))
     throw new Error(
       "A Oportunidade usa tarifa líquida. Preencha Tarifa Líquida e deixe CBS vazia.",
     );
@@ -1308,6 +1362,17 @@ async function validateQuoteSchedule(
     .select({ id: quote_schedules.id })
     .from(quote_schedules)
     .where(eq(quote_schedules.schedule_key, scheduleKey));
+  if (
+    duplicates.some(
+      (row) =>
+        row.volume !== volume ||
+        row.tariff_cbs !== cbs ||
+        row.tariff_net !== (net ?? 0) ||
+        row.diesel_base_id !== d.diesel_base_id ||
+        row.diesel_base_date !== d.diesel_base_date,
+    )
+  )
+    throw new Error("Volume, tarifas, Base Diesel e data precisam ser iguais nas linhas da mesma Agenda.");
   if (duplicates.some((row) => row.id !== recordId)) {
     const matching = await db
       .select()
@@ -1350,10 +1415,16 @@ async function validateQuoteSchedule(
       : d.accessory_cbs_pct === null
         ? null
         : Number(d.accessory_cbs_pct);
-  if (opp.integration_tariff === "CBS" && (accessoryCbs === null || accessoryCbsPct === null))
+  if (tariffMode === "CBS" && (accessoryCbs === null || accessoryCbsPct === null))
     throw new Error("Preencha tarifa acessória e percentual no modo CBS.");
-  if (opp.integration_tariff !== "CBS" && (accessoryNet === null || accessoryPct === null))
+  if (tariffMode !== "CBS" && (accessoryNet === null || accessoryPct === null))
     throw new Error("Preencha tarifa acessória e percentual no modo líquido.");
+  d.diesel_base_date = applicationDate(
+    Number(opp.application_day),
+    d.diesel_base_date,
+    month,
+    year,
+  );
   d.tariff_cbs = cbs;
   d.tariff_net = net ?? 0;
   d.accessory_cbs = accessoryCbs;
@@ -1374,7 +1445,11 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
   const { table, recordId, data } = input as SaveInput;
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
-  if (table === "opportunities") await validateOpportunityStage(recordId, data);
+  if (table === "opportunities") {
+    if (!recordId && data.application_day === undefined) data.application_day = 10;
+    if (data.application_day !== undefined) data.application_day = Number(data.application_day);
+    await validateOpportunityStage(recordId, data);
+  }
   if (table === "quotes") {
     const opportunityId = String(data.opportunity_id ?? "");
     const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, opportunityId));
@@ -1390,6 +1465,7 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
     if (!recordId && !(data as any).quote_number)
       (data as any).quote_number = `COT-${Date.now().toString().slice(-6)}`;
     if (!recordId && !(data as any).seed) (data as any).seed = 20260929;
+    if (!recordId && !(data as any).tariff_mode) (data as any).tariff_mode = opp.integration_tariff;
   }
   if (table === "quote_line_items") {
     const [quote] = await db
@@ -1447,6 +1523,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
       itemId?: string;
       flowId: string;
       itemService: string;
+      tariffMode: string;
       groups: Array<{
         year: number;
         month: number;
@@ -1479,6 +1556,8 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
       );
     if (!opp.contract_start || !opp.contract_end)
       throw new Error("Preencha início e fim da vigência na Oportunidade antes de montar Agendas.");
+    if (![1, 10, 20].includes(Number(opp.application_day)))
+      throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
     if (opp.instrument_type === "ACS") {
       const start = new Date(`${opp.contract_start}T00:00:00Z`);
       const limit = new Date(start);
@@ -1502,8 +1581,23 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
     if (!RAIL_SERVICES.includes(request.itemService))
       throw new Error("Selecione um serviço ferroviário válido para o Item.");
     if (!request.groups.length) throw new Error("Adicione ao menos um grupo de Agenda.");
-    if (!["CBS", "Líquida", "Liquida"].includes(String(opp.integration_tariff)))
-      throw new Error("Defina na Oportunidade se a tarifa de integração será CBS ou líquida.");
+    if (!["CBS", "Líquida"].includes(request.tariffMode))
+      throw new Error("Escolha tarifa CBS ou tarifa líquida nesta Cotação.");
+    const quoteItemsBefore = await db
+      .select({ id: quote_line_items.id })
+      .from(quote_line_items)
+      .where(eq(quote_line_items.quote_id, request.quoteId));
+    let existingScheduleCount = 0;
+    for (const existingItem of quoteItemsBefore) {
+      const existingSchedules = await db
+        .select({ id: quote_schedules.id })
+        .from(quote_schedules)
+        .where(eq(quote_schedules.quote_line_item_id, existingItem.id));
+      existingScheduleCount += existingSchedules.length;
+    }
+    const savedTariffMode = quote.tariff_mode || opp.integration_tariff;
+    if (existingScheduleCount && request.tariffMode !== savedTariffMode)
+      throw new Error("A modalidade de tarifa não pode mudar depois da primeira Agenda da Cotação.");
     const [dieselBase] = await db
       .select()
       .from(diesel_bases)
@@ -1548,12 +1642,12 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         ].includes(group.period_window)
       )
         throw new Error("Período inválido na Agenda.");
-      if (
-        !/^\d{2}\/\d{4}$/.test(group.diesel_base_date) ||
-        Number(group.diesel_base_date.slice(0, 2)) < 1 ||
-        Number(group.diesel_base_date.slice(0, 2)) > 12
-      )
-        throw new Error("Informe a Data base diesel no formato MM/AAAA.");
+      const normalizedDieselDate = applicationDate(
+        Number(opp.application_day),
+        group.diesel_base_date,
+        group.month,
+        group.year,
+      );
       if (!group.services.some((entry) => entry.service === "FRETE"))
         throw new Error("Cada grupo precisa incluir o serviço FRETE.");
       if (group.services.some((entry) => !RAIL_SERVICES.includes(entry.service)))
@@ -1591,7 +1685,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         throw new Error(
           "Este grupo de Agenda já tem linhas salvas. Edite o grupo existente para ajustar o rateio.",
         );
-      const cbs = opp.integration_tariff === "CBS";
+      const cbs = request.tariffMode === "CBS";
       const cents = Math.round(group.tariff * 100);
       const pctUnits = group.services.map((entry) => Math.round(Number(entry.percent) * 100));
       const pctDiff = 10000 - pctUnits.reduce((sum, value) => sum + value, 0);
@@ -1614,7 +1708,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
           tariff_cbs: cbs ? cents / 100 : null,
           tariff_net: cbs ? 0 : cents / 100,
           diesel_base_id: group.diesel_base_id,
-          diesel_base_date: group.diesel_base_date,
+          diesel_base_date: normalizedDieselDate,
           service: entry.service,
           accessory_cbs: cbs ? shares[index] / 100 : null,
           accessory_cbs_pct: cbs ? pctUnits[index] / 100 : null,
@@ -1642,6 +1736,10 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         throw new Error("O Item selecionado não pertence a esta Cotação e a este Fluxo.");
     }
     await db.transaction(async (tx) => {
+      await tx
+        .update(quotes)
+        .set({ tariff_mode: request.tariffMode, updated_at: now })
+        .where(eq(quotes.id, request.quoteId));
       if (!request.itemId) {
         await tx.insert(quote_line_items).values({
           id: itemId,
@@ -1687,7 +1785,12 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
       await Promise.all(
         chunk.map(async ({ recordId, data }, localIndex) => {
           const recordData = { ...data };
-          if (table === "opportunities") await validateOpportunityStage(recordId, data);
+          if (table === "opportunities") {
+            if (!recordId && recordData.application_day === undefined) recordData.application_day = 10;
+            if (recordData.application_day !== undefined)
+              recordData.application_day = Number(recordData.application_day);
+            await validateOpportunityStage(recordId, recordData);
+          }
           if (table === "quotes") {
             const [opp] = await db
               .select()
@@ -1706,6 +1809,7 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
               if (!recordData.quote_number)
                 recordData.quote_number = `COT-${Date.now().toString().slice(-6)}${String(offset + localIndex).padStart(2, "0")}`;
               if (!recordData.seed) recordData.seed = 20260929;
+              if (!recordData.tariff_mode) recordData.tariff_mode = opp.integration_tariff;
             }
           }
           if (table === "quote_schedules") await validateQuoteSchedule(recordId, recordData);
