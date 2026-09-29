@@ -13,6 +13,7 @@ import {
   saveQuoteItemScreenflow,
   submitQuoteForApproval,
   syncQuote,
+  updateOpportunityTerm,
   validateQuotePrices,
 } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
@@ -30,7 +31,7 @@ export const Route = createFileRoute("/quotes/$id")({
 function QuotePage() {
   const { id } = Route.useParams(),
     qc = useQueryClient();
-  const [open, setOpen] = useState<Record<string, boolean>>({ items: true }),
+  const [open, setOpen] = useState<Record<string, boolean>>({ items: true, header: true }),
     [newItem, setNewItem] = useState(false),
     [scheduleItem, setScheduleItem] = useState<any>(null),
     [editItem, setEditItem] = useState<any>(null),
@@ -238,6 +239,14 @@ function QuotePage() {
             <Field label="Status" value={q.is_synced ? "Sincronizada" : q.status} />
             <Field label="Seed de geração" value={String(q.seed)} />
           </div>
+          <OpportunityTermQuickFix
+            opportunity={options?.opportunity}
+            onSaved={async () => {
+              await refresh();
+              await qc.invalidateQueries({ queryKey: ["quote-full", id] });
+              await qc.invalidateQueries({ queryKey: ["opportunities"] });
+            }}
+          />
         </Section>
         <Section
           id="items"
@@ -454,6 +463,8 @@ function QuotePage() {
           accountName={q.account_name}
           flows={options?.flows ?? []}
           dieselBases={options?.dieselBases ?? []}
+          opportunityId={options?.opportunity?.id ?? ""}
+          instrumentType={options?.opportunity?.instrument_type ?? "Contrato"}
           contractStart={options?.opportunity?.contract_start ?? ""}
           contractEnd={options?.opportunity?.contract_end ?? ""}
           firstReadjustmentDate={options?.opportunity?.first_readjustment_date ?? ""}
@@ -472,6 +483,11 @@ function QuotePage() {
           onClose={() => {
             setNewItem(false);
             setScheduleItem(null);
+          }}
+          onTermSaved={async () => {
+            await refresh();
+            await qc.invalidateQueries({ queryKey: ["quote-full", id] });
+            await qc.invalidateQueries({ queryKey: ["opportunities"] });
           }}
           onSave={async ({ flowId, itemService, tariffMode: selectedTariffMode, groups }) => {
             try {
@@ -883,6 +899,143 @@ function isQuoteTermValid(opportunity: any) {
   const limit = new Date(start);
   limit.setUTCMonth(limit.getUTCMonth() + 12);
   return end < limit;
+}
+
+/** Exibe a vigência da Oportunidade e, quando ausente, permite defini-la sem sair da Cotação. */
+function OpportunityTermQuickFix({
+  opportunity,
+  onSaved,
+}: {
+  opportunity: any;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!opportunity) return null;
+  const valid = isQuoteTermValid(opportunity);
+  if (!editing) {
+    if (valid) {
+      return (
+        <p style={{ fontSize: 12, color: "#706e6b", margin: "12px 0 0" }}>
+          Vigência da Oportunidade:{" "}
+          <strong>
+            {String(opportunity.contract_start).slice(0, 10)} a{" "}
+            {String(opportunity.contract_end).slice(0, 10)}
+          </strong>{" "}
+          ·{" "}
+          <button
+            className="sf-link"
+            onClick={() => {
+              setStart(String(opportunity.contract_start).slice(0, 10));
+              setEnd(String(opportunity.contract_end).slice(0, 10));
+              setEditing(true);
+            }}
+          >
+            editar
+          </button>
+        </p>
+      );
+    }
+    return (
+      <div
+        role="status"
+        style={{
+          marginTop: 12,
+          padding: "10px 12px",
+          border: "1px solid #fe9339",
+          background: "#fffaf2",
+          borderRadius: 6,
+          fontSize: 13,
+          color: "#b6761c",
+        }}
+      >
+        <strong>Vigência da Oportunidade não definida.</strong> As Agendas e a conclusão da Cotação
+        exigem o início e o fim da vigência — configure aqui mesmo, sem sair da Cotação.{" "}
+        <button
+          className="sf-btn"
+          style={{ marginLeft: 8, padding: "4px 10px", fontSize: 12 }}
+          onClick={() => {
+            setStart("");
+            setEnd("");
+            setEditing(true);
+          }}
+        >
+          Definir vigência
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "10px 12px",
+        border: "1px solid #dddbda",
+        borderRadius: 6,
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        alignItems: "flex-end",
+        fontSize: 12,
+      }}
+    >
+      <label>
+        <span style={{ display: "block", marginBottom: 4, fontWeight: 600, color: "#444" }}>
+          Início da vigência
+        </span>
+        <input
+          className="sf-input"
+          type="date"
+          value={start}
+          onChange={(e) => setStart(e.target.value)}
+          style={{ padding: 6 }}
+        />
+      </label>
+      <label>
+        <span style={{ display: "block", marginBottom: 4, fontWeight: 600, color: "#444" }}>
+          Fim da vigência
+        </span>
+        <input
+          className="sf-input"
+          type="date"
+          value={end}
+          onChange={(e) => setEnd(e.target.value)}
+          style={{ padding: 6 }}
+        />
+      </label>
+      <button
+        className="sf-btn sf-btn--brand"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await updateOpportunityTerm({
+              data: { id: opportunity.id, contract_start: start, contract_end: end },
+            });
+            toast.success("Vigência da Oportunidade atualizada.");
+            setEditing(false);
+            await onSaved();
+          } catch (error) {
+            toast.error("Não foi possível salvar a vigência", {
+              description: error instanceof Error ? error.message : undefined,
+            });
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Salvando…" : "Salvar vigência"}
+      </button>
+      <button className="sf-btn" disabled={busy} onClick={() => setEditing(false)}>
+        Cancelar
+      </button>
+      {opportunity.instrument_type === "ACS" && (
+        <span style={{ color: "#706e6b", alignSelf: "center" }}>ACS exige menos de 12 meses.</span>
+      )}
+    </div>
+  );
 }
 
 function PriceStatusBadge({ quote }: { quote: any }) {

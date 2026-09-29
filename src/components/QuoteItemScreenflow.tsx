@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { saveRecord } from "@/lib/crud";
+import { saveRecord, updateOpportunityTerm } from "@/lib/crud";
 import { toast } from "sonner";
 
 type Flow = {
@@ -33,6 +33,8 @@ type Props = {
   accountName: string;
   flows: Flow[];
   dieselBases: Array<{ id: string; name: string }>;
+  opportunityId: string;
+  instrumentType: string;
   contractStart: string;
   contractEnd: string;
   firstReadjustmentDate: string;
@@ -45,6 +47,7 @@ type Props = {
   initialService?: string;
   itemId?: string;
   onClose: () => void;
+  onTermSaved?: () => Promise<void> | void;
   onSave: (payload: {
     flowId: string;
     itemService: string;
@@ -186,6 +189,8 @@ export function QuoteItemScreenflow({
   accountName,
   flows,
   dieselBases,
+  opportunityId,
+  instrumentType,
   contractStart,
   contractEnd,
   firstReadjustmentDate,
@@ -198,6 +203,7 @@ export function QuoteItemScreenflow({
   initialService = "FRETE",
   itemId,
   onClose,
+  onTermSaved,
   onSave,
 }: Props) {
   const initial = flows.find((flow) => flow.id === initialFlowId);
@@ -214,14 +220,18 @@ export function QuoteItemScreenflow({
   const [batchEnd, setBatchEnd] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const startYear = Number(contractStart?.slice(0, 4) || new Date().getFullYear());
-  const startMonth = Number(contractStart?.slice(5, 7) || 1);
-  const endYear = Number(contractEnd?.slice(0, 4) || startYear);
-  const endMonth = Number(contractEnd?.slice(5, 7) || 12);
+  const [termStart, setTermStart] = useState(contractStart);
+  const [termEnd, setTermEnd] = useState(contractEnd);
+  const [savingTerm, setSavingTerm] = useState(false);
+  const [termSaved, setTermSaved] = useState(!!contractStart && !!contractEnd);
+  const startYear = Number(termStart?.slice(0, 4) || new Date().getFullYear());
+  const startMonth = Number(termStart?.slice(5, 7) || 1);
+  const endYear = Number(termEnd?.slice(0, 4) || startYear);
+  const endMonth = Number(termEnd?.slice(5, 7) || 12);
   const termDays =
-    contractStart && contractEnd
+    termStart && termEnd
       ? Math.round(
-          (Date.parse(`${contractEnd}T00:00:00Z`) - Date.parse(`${contractStart}T00:00:00Z`)) /
+          (Date.parse(`${termEnd}T00:00:00Z`) - Date.parse(`${termStart}T00:00:00Z`)) /
             86400000,
         )
       : 0;
@@ -488,12 +498,17 @@ export function QuoteItemScreenflow({
       ))}
     </select>
   );
-  const stepTitles = [
-    "Fluxo do Cliente",
-    "Reajuste Ferro",
-    "Agendas e Data Base Diesel",
-    "Revisão",
+  // ACS não tem reajuste: a etapa de reajuste só existe para Contrato.
+  const skipReadjustment = instrumentType === "ACS";
+  const allSteps = [
+    { id: 0, title: "Fluxo do Cliente" },
+    { id: 1, title: "Reajuste Ferro" },
+    { id: 2, title: "Agendas e Data Base Diesel" },
+    { id: 3, title: "Revisão" },
   ];
+  const stepList = skipReadjustment ? allSteps.filter((s) => s.id !== 1) : allSteps;
+  const stepTitles = stepList.map((s) => s.title);
+  const stepIndex = stepList.findIndex((s) => s.id === step);
   return (
     <div className="sf-modal-backdrop" onClick={onClose}>
       <div
@@ -521,23 +536,90 @@ export function QuoteItemScreenflow({
           }}
         >
           <b>
-            Etapa {step + 1} de 4 · {stepTitles[step]}
+            Etapa {stepIndex + 1} de {stepList.length} · {stepTitles[stepIndex]}
           </b>
           <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
-            {stepTitles.map((title, i) => (
+            {stepList.map((s, i) => (
               <div
-                key={title}
+                key={s.id}
                 style={{
                   height: 5,
                   flex: 1,
                   borderRadius: 4,
-                  background: i <= step ? "#0176d3" : "#ddd",
+                  background: i <= stepIndex ? "#0176d3" : "#ddd",
                 }}
               />
             ))}
           </div>
         </div>
         <div className="sf-modal-body" style={{ overflow: "auto", padding: 20 }}>
+          {!termSaved && (
+            <div
+              role="status"
+              style={{
+                border: "1px solid #fe9339",
+                background: "#fffaf2",
+                borderRadius: 6,
+                padding: "10px 12px",
+                marginBottom: 14,
+                color: "#b6761c",
+                fontSize: 13,
+              }}
+            >
+              <strong>A Oportunidade não tem vigência definida.</strong> As Agendas precisam de
+              início e fim da vigência — defina aqui mesmo para continuar:
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, color: "#444" }}>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>Início</span>
+                  <input
+                    className="sf-input"
+                    type="date"
+                    value={termStart}
+                    onChange={(e) => setTermStart(e.target.value)}
+                    style={{ padding: 6, width: 150 }}
+                  />
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>Fim</span>
+                  <input
+                    className="sf-input"
+                    type="date"
+                    value={termEnd}
+                    onChange={(e) => setTermEnd(e.target.value)}
+                    style={{ padding: 6, width: 150 }}
+                  />
+                </label>
+                <button
+                  className="sf-btn sf-btn--brand"
+                  disabled={savingTerm}
+                  style={{ alignSelf: "flex-end" }}
+                  onClick={async () => {
+                    setSavingTerm(true);
+                    try {
+                      await updateOpportunityTerm({
+                        data: {
+                          id: opportunityId,
+                          contract_start: termStart,
+                          contract_end: termEnd,
+                        },
+                      });
+                      toast.success("Vigência da Oportunidade atualizada.");
+                      setTermSaved(true);
+                      await onTermSaved?.();
+                    } catch (error) {
+                      toast.error("Não foi possível salvar a vigência", {
+                        description: error instanceof Error ? error.message : undefined,
+                      });
+                    } finally {
+                      setSavingTerm(false);
+                    }
+                  }}
+                >
+                  {savingTerm ? "Salvando…" : "Salvar vigência"}
+                </button>
+              </div>
+            </div>
+          )}
           {step === 0 && (
             <>
               <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
@@ -698,7 +780,7 @@ export function QuoteItemScreenflow({
                     i
                   </button>
                   <small style={{ display: "block", marginTop: 12 }}>
-                  Vigência: {contractStart || "—"} a {contractEnd || "—"} · {termDays} dias · Dia de
+                  Vigência: {termStart || "—"} a {termEnd || "—"} · {termDays} dias · Dia de
                   aplicação: {applicationDay}
                 </small>
                 {requiresAnnualSplit && (
@@ -1096,7 +1178,7 @@ export function QuoteItemScreenflow({
               className="sf-btn"
               onClick={() => {
                 setError("");
-                setStep((s) => s - 1);
+                setStep(skipReadjustment && step === 2 ? 0 : (s) => s - 1);
               }}
               disabled={busy}
             >
@@ -1107,7 +1189,10 @@ export function QuoteItemScreenflow({
             <button
               className="sf-btn sf-btn--brand"
               onClick={() => {
-                if (validateCurrent()) setStep((s) => s + 1);
+                if (validateCurrent()) {
+                  if (skipReadjustment && step === 0) setStep(2);
+                  else setStep((s) => s + 1);
+                }
               }}
             >
               Continuar

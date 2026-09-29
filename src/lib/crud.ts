@@ -294,6 +294,7 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
     const { opportunityId } = input as { opportunityId: string };
     const [opportunity] = await db
       .select({
+        id: opportunities.id,
         account_id: opportunities.account_id,
         instrument_type: opportunities.instrument_type,
         segment: opportunities.segment,
@@ -2039,6 +2040,41 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
   await markQuotePricesStale(staleQuoteId);
   return { ok: true };
 });
+
+/** Quick fix: define a vigência da Oportunidade direto da Cotação ou do screenflow. */
+export const updateOpportunityTerm = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id, contract_start, contract_end } = input as {
+      id: string;
+      contract_start: string;
+      contract_end: string;
+    };
+    if (!id) throw new Error("Oportunidade não informada.");
+    if (!contract_start || !contract_end)
+      throw new Error("Informe o início e o fim da vigência.");
+    const start = new Date(`${contract_start}T00:00:00Z`);
+    const end = new Date(`${contract_end}T00:00:00Z`);
+    if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || end < start)
+      throw new Error("O início da vigência precisa ser antes ou igual ao fim.");
+    const [opportunity] = await db.select().from(opportunities).where(eq(opportunities.id, id));
+    if (!opportunity) throw new Error("Oportunidade não encontrada.");
+    if (opportunity.instrument_type === "ACS") {
+      const limit = new Date(start);
+      limit.setUTCMonth(limit.getUTCMonth() + 12);
+      if (!(end < limit)) throw new Error("ACS exige vigência inferior a 12 meses.");
+    }
+    await db
+      .update(opportunities)
+      .set({
+        contract_start,
+        contract_end,
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(opportunities.id, id));
+    return { ok: true, contract_start, contract_end };
+  },
+);
 
 /** Deletes records from every registered object, then optionally restores demo data. */
 export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
