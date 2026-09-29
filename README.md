@@ -4,7 +4,16 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 > A partir de 2026-09-28, este README é o registro de retomada do projeto: cada ajuste deve atualizar o changelog abaixo e a arquitetura/regras quando elas mudarem. O item mais recente fica sempre no topo.
 
+## Convenção para nomes de commits em lote
+
+Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA_VERSÃO | escopo: descrição curta`. Exemplo: `v4.18.03 → v4.18.04 | docs: padroniza nome dos batches`. Em batches com vários commits, mantenha o mesmo intervalo de versões em todos eles e use uma descrição diferente para cada commit. A versão nova também deve aparecer em `src/lib/version.ts` e no início deste changelog.
+
 ## Changelog
+
+### v4.18.04 — Convenção de nomes para commits em lote
+
+- Define o prefixo obrigatório com versão anterior e nova versão para os títulos dos commits de cada batch.
+- Orienta manter o mesmo intervalo de versões em todos os commits do batch e diferenciar cada título pela descrição da alteração.
 
 ### v4.18.03 — Corrige a versão exibida no preview
 
