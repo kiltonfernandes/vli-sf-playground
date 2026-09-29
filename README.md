@@ -11,7 +11,7 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 - Corrige o Path da Oportunidade, que mantinha **Marcar etapa como concluída** desabilitado em Negociação mesmo com uma Cotação sincronizada.
 - Agora Negociação → Aprovação é liberado quando existe Cotação com status **Sincronizada**; sem ela, o bloqueio explica o que falta. A validação do servidor continua sendo a autoridade.
 - Atualiza a lista relacionada após sincronizar para refletir o estado novo sem recarregar manualmente.
-- Revisão de regressão de ponta a ponta em produção: abrir Nova Cotação na Oportunidade; criar Item/Agenda pelo screenflow; corrigir rateio inválido; concluir e sincronizar. A tela da Oportunidade confirmou Cotação Sincronizada. Próximo passo é avançar Path para Aprovação após esta publicação; Formalização e NetLex seguem pendentes.
+- Revisão de regressão de ponta a ponta em produção: corrigir a Agenda de teste que tinha rateio 0%; concluir e sincronizar a Cotação; avançar o Path de Negociação para Aprovação. O endpoint atual do fluxo foi confirmado. Formalização, decisão de alçada e NetLex seguem pendentes.
 
 ### v3.11.03 — Screenflow de Item e Agenda
 
@@ -21,7 +21,7 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 - Ao adicionar Agendas a um Item existente, mantém o Cliente e o Fluxo fixos; o Faker procura o próximo período ainda sem chave usada. Edição do serviço principal do Item continua disponível.
 - Grava novo Item e todas as Agendas em uma transação única. Se qualquer regra falhar, nada desse envio fica parcialmente salvo e a Cotação mostra toast com a causa.
 - Valida no servidor etapa/segmento/instrumento da Oportunidade, titularidade ferroviária FLOU do Fluxo, vigência (ACS < 12 meses), período dentro da vigência, volume inteiro, tarifa CBS ou líquida, Base Diesel, periodicidade/janela, FRETE, rateio e duplicidade.
-- Revisão de regressão: build de produção; verificar abertura do assistente em Novo Item e Adicionar Agenda, filtro Cliente/Fluxo, seed repetível, grupos múltiplos, erro com toast, gravação atômica e os botões Concluir/Sincronizar. Pendente publicar e repetir o smoke test na produção após o deploy.
+- Revisão de regressão: build de produção e lint sem erros; em produção, conferir abertura do assistente para Novo Item e Adicionar Agenda, Cliente e Fluxo travados no Item existente, cascata, seed repetível, múltiplos grupos e rateio CARGA/FRETE 50/50. O salvamento conjunto/rollback foi validado pelo caminho compilado e pelas regras no servidor; smoke test de gravação do screenflow em registro novo ainda pendente.
 
 ### v3.10.03 — Fluxo de Cotação ponta a ponta
 
