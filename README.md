@@ -4,7 +4,35 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 > A partir de 2026-09-28, este README é o registro de retomada do projeto: cada ajuste deve atualizar o changelog abaixo e a arquitetura/regras quando elas mudarem. O item mais recente fica sempre no topo.
 
+## Convenção para nomes de commits em lote
+
+Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA_VERSÃO | escopo: descrição curta`. Exemplo: `v4.18.03 → v4.18.04 | docs: padroniza nome dos batches`. Em batches com vários commits, mantenha o mesmo intervalo de versões em todos eles e use uma descrição diferente para cada commit. A versão nova também deve aparecer em `src/lib/version.ts` e no início deste changelog.
+
 ## Changelog
+
+### v4.18.04 — Convenção de nomes para commits em lote
+
+- Define o prefixo obrigatório com versão anterior e nova versão para os títulos dos commits de cada batch.
+- Orienta manter o mesmo intervalo de versões em todos os commits do batch e diferenciar cada título pela descrição da alteração.
+
+### v4.18.03 — Corrige a versão exibida no preview
+
+- Incrementa a versão mostrada ao lado de CRM para confirmar a atualização implantada no Vercel.
+- Verificação: conferir o status do novo deployment e a versão do artefato publicado.
+
+### v4.17.03 — Faixa de valores do pipeline e responsividade global
+
+- Limita valores monetários individuais gerados para Oportunidades e Contas a R$ 100–R$ 9.999; atualiza também os valores do factory reset. Totais e consolidados continuam sendo somas sem teto.
+- Adiciona base responsiva compartilhada para telas retrato/paisagem, tablets e celulares: navegação rolável, grades flexíveis, cabeçalhos e ações adaptáveis, tabelas com rolagem própria e modais ajustados à viewport.
+- Verificação: build de produção e revisão em larguras estreitas e orientação paisagem.
+
+### v4.16.03 — Etapa Reajuste Ferro no screenflow da Cotação
+
+- Insere **Reajuste Ferro** entre a seleção do Fluxo e a montagem das Agendas, exibindo percentuais, vigência, dia de aplicação e data do primeiro reajuste configurados na Oportunidade.
+- Para vigências acima de 365 dias, exige percentuais de Diesel + IGP-M + IPCA somando 100% e data do primeiro reajuste dentro da vigência; a regra é verificada na tela, no checklist da Oportunidade e no servidor ao salvar.
+- Identifica a Base Diesel e a Data Base Diesel em cada grupo de Agenda/Fluxo, com o dia de aplicação herdado da Oportunidade.
+- Mantém o cálculo financeiro de reajuste como gap técnico registrado; a geração da cláusula NetLex segue fora desta etapa.
+- Verificação: build de produção aprovado.
 
 ### v4.15.03 — Criação de Agendas em lote por intervalo
 

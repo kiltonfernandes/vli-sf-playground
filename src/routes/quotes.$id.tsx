@@ -427,6 +427,12 @@ function QuotePage() {
           dieselBases={options?.dieselBases ?? []}
           contractStart={options?.opportunity?.contract_start ?? ""}
           contractEnd={options?.opportunity?.contract_end ?? ""}
+          firstReadjustmentDate={options?.opportunity?.first_readjustment_date ?? ""}
+          readjustment={{
+            diesel: Number(options?.opportunity?.diesel_pct ?? 0),
+            igpm: Number(options?.opportunity?.igpm_pct ?? 0),
+            ipca: Number(options?.opportunity?.ipca_pct ?? 0),
+          }}
           integrationTariff={tariffMode}
           applicationDay={applicationDay}
           canChangeTariff={canChangeTariff}
@@ -689,6 +695,15 @@ function getQuoteBusinessRules(
     );
   const opportunity = options?.opportunity;
   const termValid = isQuoteTermValid(opportunity);
+  const termDays = opportunity?.contract_start && opportunity?.contract_end
+    ? Math.round((Date.parse(`${opportunity.contract_end}T00:00:00Z`) - Date.parse(`${opportunity.contract_start}T00:00:00Z`)) / 86400000)
+    : 0;
+  const annualReadjustmentPass = termDays <= 365 || (
+    Math.abs(Number(opportunity?.diesel_pct ?? 0) + Number(opportunity?.igpm_pct ?? 0) + Number(opportunity?.ipca_pct ?? 0) - 100) <= 0.001 &&
+    !!opportunity?.first_readjustment_date &&
+    opportunity.first_readjustment_date >= opportunity.contract_start &&
+    opportunity.first_readjustment_date <= opportunity.contract_end
+  );
   const acsRulesPass =
     opportunity?.instrument_type !== "ACS" ||
     (termValid &&
@@ -703,6 +718,14 @@ function getQuoteBusinessRules(
   const synced = !!quote.is_synced && quote.status === "Sincronizada";
 
   return [
+    {
+      label: "Reajuste anual configurado",
+      passed: annualReadjustmentPass,
+      detail: annualReadjustmentPass
+        ? termDays > 365 ? "Percentuais fecham 100% e a primeira data está na vigência." : "Percentuais anuais não são exigidos para esta vigência."
+        : "Some Diesel, IGP-M e IPCA em 100% e informe a primeira data dentro da vigência.",
+      explanation: "Quando a vigência passa de 365 dias, a Oportunidade precisa ter percentuais de reajuste cuja soma seja 100% e uma data para o primeiro reajuste dentro da vigência. O Playground valida os parâmetros cadastrados; o cálculo financeiro do reajuste ainda não está conectado ao objeto completo de reajustes.",
+    },
     {
       label: "Cliente igual à Conta de gestão",
       passed: accountMatches,

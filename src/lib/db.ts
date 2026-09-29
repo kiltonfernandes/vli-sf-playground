@@ -70,6 +70,7 @@ export function ensureSchema(): Promise<void> {
       close_date text,
       contract_start text,
       contract_end text,
+      first_readjustment_date text,
       application_day integer NOT NULL DEFAULT 10,
       diesel_pct real NOT NULL DEFAULT 0,
       igpm_pct real NOT NULL DEFAULT 0,
@@ -90,6 +91,8 @@ export function ensureSchema(): Promise<void> {
       await client.execute(
         `ALTER TABLE opportunities ADD COLUMN application_day integer NOT NULL DEFAULT 10`,
       );
+    if (!opportunityColumns.rows.some((row) => row.name === "first_readjustment_date"))
+      await client.execute(`ALTER TABLE opportunities ADD COLUMN first_readjustment_date text`);
 
     await client.execute(
       `CREATE TABLE IF NOT EXISTS locations (id text PRIMARY KEY, name text NOT NULL, code text NOT NULL, city text NOT NULL, state text NOT NULL, microregion text NOT NULL, location_type text NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,

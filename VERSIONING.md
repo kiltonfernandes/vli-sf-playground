@@ -10,7 +10,17 @@ Use the three numeric segments as follows. Increment only the segment that match
 | Change to one object                               | Middle segment       | `v1.02.03` → `v1.03.03` |
 | Change across the whole app                        | First segment        | `v1.02.03` → `v2.02.03` |
 
+## Batch commit naming convention
+
+Start each batch commit subject with `vPREVIOUS → vNEW | scope: short description`, for example: `v4.18.03 → v4.18.04 | docs: define batch commit naming`. Use the same version range on every commit in a multi-commit batch, and give each commit a distinct short description. Increment `src/lib/version.ts` and add the new version to the top of the README changelog as part of the batch.
+
 ## Version history
+
+- `v4.18.04` — Define a batch commit subject convention that includes previous and new versions.
+- `v4.18.03` — Increment app version to identify the Vercel preview deployment.
+- `v4.17.03` — Keep individual generated pipeline amounts between 3 and 4 digits and add shared responsive behavior for portrait, landscape, tablet, and mobile viewports.
+
+- `v4.16.03` — Add the Reajuste Ferro step to the Quote screenflow, with annual percentage/date validation and per-flow diesel base details.
 
 - `v4.15.03` — Add batch creation of monthly Schedule groups across a selected date range within the Opportunity term.
 - `v4.14.03` — Add reusable, accessible business-rule explanations and responsive tooltips to Opportunity and Quote checklists.

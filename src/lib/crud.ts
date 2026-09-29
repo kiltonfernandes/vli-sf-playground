@@ -283,7 +283,11 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
         integration_tariff: opportunities.integration_tariff,
         contract_start: opportunities.contract_start,
         contract_end: opportunities.contract_end,
+        first_readjustment_date: opportunities.first_readjustment_date,
         application_day: opportunities.application_day,
+        diesel_pct: opportunities.diesel_pct,
+        igpm_pct: opportunities.igpm_pct,
+        ipca_pct: opportunities.ipca_pct,
       })
       .from(opportunities)
       .where(eq(opportunities.id, opportunityId));
@@ -757,6 +761,25 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     throw new Error(
       "Preencha o início e o fim da vigência na Oportunidade antes de concluir a Cotação.",
     );
+  const contractDays = Math.round(
+    (Date.parse(`${opp.contract_end}T00:00:00Z`) - Date.parse(`${opp.contract_start}T00:00:00Z`)) /
+      86400000,
+  );
+  if (contractDays > 365) {
+    const percentageTotal = Number(opp.diesel_pct) + Number(opp.igpm_pct) + Number(opp.ipca_pct);
+    if (Math.abs(percentageTotal - 100) > 0.001)
+      throw new Error(
+        "Para vigência superior a 365 dias, Diesel + IGP-M + IPCA precisam somar 100%.",
+      );
+    if (!opp.first_readjustment_date)
+      throw new Error("Informe a data do primeiro reajuste na Oportunidade.");
+    const firstDate = Date.parse(`${opp.first_readjustment_date}T00:00:00Z`);
+    if (
+      firstDate < Date.parse(`${opp.contract_start}T00:00:00Z`) ||
+      firstDate > Date.parse(`${opp.contract_end}T00:00:00Z`)
+    )
+      throw new Error("A data do primeiro reajuste precisa estar dentro da vigência do contrato.");
+  }
   if (opp.instrument_type === "ACS") {
     const start = new Date(`${opp.contract_start}T00:00:00Z`),
       end = new Date(`${opp.contract_end}T00:00:00Z`);
@@ -896,7 +919,11 @@ function partitionInteger(total: number, parts: number, f: ReturnType<typeof see
 /** Cadastra um catálogo ferroviário fictício por conta, com seed estável e vínculos reais locais. */
 async function ensureRailCatalog(accountId: string, seed: number) {
   const existing = await db
-    .select({ id: planned_flows.id, modal: planned_flows.modal, origin_system: planned_flows.origin_system })
+    .select({
+      id: planned_flows.id,
+      modal: planned_flows.modal,
+      origin_system: planned_flows.origin_system,
+    })
     .from(planned_flows)
     .where(eq(planned_flows.account_id, accountId));
   const hasEligibleFlows = existing.some(
@@ -1231,11 +1258,14 @@ function applicationDate(day: number, rawValue: unknown, month: number, year: nu
   const date = new Date(Date.UTC(targetYear, targetMonth - 1, day));
   if (
     ![1, 10, 20].includes(day) ||
-    targetMonth < 1 || targetMonth > 12 ||
+    targetMonth < 1 ||
+    targetMonth > 12 ||
     date.getUTCMonth() + 1 !== targetMonth ||
     date.getUTCFullYear() !== targetYear
   )
-    throw new Error("A Data base diesel precisa ter uma data válida e o dia de aplicação da Oportunidade.");
+    throw new Error(
+      "A Data base diesel precisa ter uma data válida e o dia de aplicação da Oportunidade.",
+    );
   return `${String(day).padStart(2, "0")}/${String(targetMonth).padStart(2, "0")}/${targetYear}`;
 }
 
@@ -1378,7 +1408,9 @@ async function validateQuoteSchedule(
         row.diesel_base_date !== d.diesel_base_date,
     )
   )
-    throw new Error("Volume, tarifas, Base Diesel e data precisam ser iguais nas linhas da mesma Agenda.");
+    throw new Error(
+      "Volume, tarifas, Base Diesel e data precisam ser iguais nas linhas da mesma Agenda.",
+    );
   if (duplicates.some((row) => row.id !== recordId)) {
     const matching = await db
       .select()
@@ -1562,6 +1594,28 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
       );
     if (!opp.contract_start || !opp.contract_end)
       throw new Error("Preencha início e fim da vigência na Oportunidade antes de montar Agendas.");
+    const termDays = Math.round(
+      (Date.parse(`${opp.contract_end}T00:00:00Z`) -
+        Date.parse(`${opp.contract_start}T00:00:00Z`)) /
+        86400000,
+    );
+    if (termDays > 365) {
+      const percentageTotal = Number(opp.diesel_pct) + Number(opp.igpm_pct) + Number(opp.ipca_pct);
+      if (Math.abs(percentageTotal - 100) > 0.001)
+        throw new Error(
+          "Para vigência superior a 365 dias, Diesel + IGP-M + IPCA precisam somar 100%.",
+        );
+      if (!opp.first_readjustment_date)
+        throw new Error("Informe a data do primeiro reajuste na Oportunidade.");
+      const firstDate = Date.parse(`${opp.first_readjustment_date}T00:00:00Z`);
+      if (
+        firstDate < Date.parse(`${opp.contract_start}T00:00:00Z`) ||
+        firstDate > Date.parse(`${opp.contract_end}T00:00:00Z`)
+      )
+        throw new Error(
+          "A data do primeiro reajuste precisa estar dentro da vigência do contrato.",
+        );
+    }
     if (![1, 10, 20].includes(Number(opp.application_day)))
       throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
     if (opp.instrument_type === "ACS") {
@@ -1603,7 +1657,9 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
     }
     const savedTariffMode = quote.tariff_mode || opp.integration_tariff;
     if (existingScheduleCount && request.tariffMode !== savedTariffMode)
-      throw new Error("A modalidade de tarifa não pode mudar depois da primeira Agenda da Cotação.");
+      throw new Error(
+        "A modalidade de tarifa não pode mudar depois da primeira Agenda da Cotação.",
+      );
     const [dieselBase] = await db
       .select()
       .from(diesel_bases)
@@ -1792,7 +1848,8 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
         chunk.map(async ({ recordId, data }, localIndex) => {
           const recordData = { ...data };
           if (table === "opportunities") {
-            if (!recordId && recordData.application_day === undefined) recordData.application_day = 10;
+            if (!recordId && recordData.application_day === undefined)
+              recordData.application_day = 10;
             if (recordData.application_day !== undefined)
               recordData.application_day = Number(recordData.application_day);
             await validateOpportunityStage(recordId, recordData);
@@ -1899,8 +1956,8 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
           health: "Verde",
           customer_status: "Cliente",
           risk_level: "Baixo",
-          lifetime_value: 1250000,
-          revenue: 8200000,
+          lifetime_value: 4250,
+          revenue: 8750,
           employees: 450,
           branch_name: "Matriz",
           phone: "(11) 3000-0000",
@@ -1917,8 +1974,8 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
           health: "Amarelo",
           customer_status: "Cliente",
           risk_level: "Médio",
-          lifetime_value: 640000,
-          revenue: 4100000,
+          lifetime_value: 2780,
+          revenue: 6340,
           employees: 220,
           branch_name: "Minas Gerais",
           phone: "(31) 3000-0000",
