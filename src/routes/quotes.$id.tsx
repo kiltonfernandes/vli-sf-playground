@@ -709,6 +709,8 @@ function getQuoteBusinessRules(
       detail: accountMatches
         ? `${quote.account_name}: todos os Itens usam Fluxos desta Conta.`
         : "Adicione um Item com Fluxo da Conta de gestão desta Oportunidade.",
+      explanation:
+        "O cliente da Cotação vem da Conta de gestão da Oportunidade. Cada Item deve apontar para um Fluxo Planejado dessa mesma Conta, mantendo cliente, negociação e operação alinhados.",
     },
     {
       label: "Origem, destino, mercadoria e modal definidos",
@@ -716,6 +718,8 @@ function getQuoteBusinessRules(
       detail: dimensionsComplete
         ? "Os Itens usam Fluxos ferroviários completos."
         : "Selecione um Fluxo ferroviário elegível em cada Item.",
+      explanation:
+        "Cada Item representa um Fluxo com origem, destino, mercadoria e modal definidos. O Fluxo precisa estar elegível para uso ferroviário e associado ao cliente da Oportunidade; o Playground seleciona esses Fluxos automaticamente dentro do catálogo permitido.",
     },
     {
       label: "Volume inteiro e tarifa selecionada preenchidos",
@@ -723,6 +727,8 @@ function getQuoteBusinessRules(
       detail: tariffRulesPass
         ? `Volumes positivos e tarifa ${tariffMode} consistente em todas as linhas.`
         : `Adicione agendas com volume inteiro positivo e somente tarifa ${tariffMode}.`,
+      explanation:
+        "O volume de cada Agenda deve ser um número inteiro maior que zero. Para a Cotação, escolha CBS ou tarifa líquida; todas as linhas devem preencher a modalidade escolhida com valor positivo e deixar a alternativa vazia. Isso mantém a unidade de cálculo uniforme no conjunto.",
     },
     {
       label: "FRETE presente em cada grupo de Agenda",
@@ -730,6 +736,8 @@ function getQuoteBusinessRules(
       detail: freightPass
         ? `${groups.size} grupo(s) conferidos.`
         : "Cada grupo de período e praça precisa conter uma linha FRETE.",
+      explanation:
+        "Cada grupo de Agenda é formado pelo Fluxo, período, divisão e praça. No ferroviário, cada grupo precisa ter uma linha do serviço FRETE; serviços acessórios podem aparecer como linhas adicionais do mesmo grupo, sem repetir o mesmo serviço.",
     },
     {
       label: "Base Diesel e data automática válidas",
@@ -737,6 +745,8 @@ function getQuoteBusinessRules(
       detail: dieselPass
         ? `Base e data compatíveis com o dia ${applicationDay}.`
         : "Informe a Base Diesel e a data correspondente ao período; o dia vem da Oportunidade.",
+      explanation:
+        "A Base Diesel precisa corresponder a uma base cadastrada e aplicável ao Fluxo. A Data Base Diesel é necessária para periodicidade anual ou quando o mesmo Fluxo tiver Agendas em mais de um mês. O dia efetivo é sempre herdado da Oportunidade (1, 10 ou 20), e as linhas do grupo devem compartilhar a mesma data.",
     },
     {
       label: "Rateio fecha a tarifa e soma 100%",
@@ -744,6 +754,8 @@ function getQuoteBusinessRules(
       detail: allocationPass
         ? "Valores e percentuais das linhas acessórias conferidos."
         : "Confira os valores e percentuais dos serviços em cada grupo.",
+      explanation:
+        "Nas linhas acessórias, tarifa CBS e líquida são alternativas; o mesmo vale para os percentuais CBS e líquido. Quando só o valor ou só o percentual é informado, o outro é calculado. Quando ambos são informados, precisam corresponder. A soma dos valores deve fechar a tarifa principal, com ajuste residual de até R$ 0,02, e os percentuais devem totalizar 100% (tolerância de 0,2 ponto percentual). Se FRETE deixar os quatro campos acessórios vazios, as demais linhas ainda precisam cobrir 100% da tarifa.",
     },
     {
       label: "Sem serviço duplicado na chave da Agenda",
@@ -751,6 +763,8 @@ function getQuoteBusinessRules(
       detail: noDuplicates
         ? "Nenhum serviço repetido nesta ou em outra Cotação."
         : "A mesma chave de Agenda já contém esse serviço.",
+      explanation:
+        "A duplicidade é verificada pela combinação funcional do Fluxo, ano e mês, divisão, praça e serviço, inclusive contra outras Cotações. Um serviço só pode aparecer uma vez para essa combinação. Ajuste o período, a praça ou remova a linha repetida.",
     },
     ...(opportunity?.instrument_type === "ACS"
       ? [
@@ -760,6 +774,8 @@ function getQuoteBusinessRules(
             detail: acsRulesPass
               ? "Vigência abaixo de 12 meses e sem tolerâncias ou Take or Pay."
               : "ACS exige vigência abaixo de 12 meses e não aceita tolerâncias nem Take or Pay.",
+            explanation:
+              "No instrumento ACS, a vigência precisa ser menor que 12 meses. Esta modalidade não aceita tolerâncias nem registros de Take or Pay; a Cotação só atende à regra quando não há esses valores ou vínculos.",
           },
         ]
       : []),
@@ -769,6 +785,8 @@ function getQuoteBusinessRules(
       detail: synced
         ? "A sincronização foi concluída na Oportunidade."
         : "Valide e conclua a Cotação; depois sincronize com a Oportunidade.",
+      explanation:
+        "Concluir registra que os dados da Cotação passaram pelas validações disponíveis. Sincronizar vincula esse resultado à Oportunidade; a combinação desses estados libera o avanço para Aprovação quando as demais regras também estiverem atendidas.",
     },
   ];
 }

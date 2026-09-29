@@ -1165,7 +1165,9 @@ body[data-lab-accent] .sf-icon-btn:hover {
   padding: 0 8px;
 }
 .sf-business-rules {
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
+  z-index: 2;
 }
 .sf-business-rules-header {
   display: flex;
@@ -1174,6 +1176,16 @@ body[data-lab-accent] .sf-icon-btn:hover {
   gap: 8px;
 }
 .sf-business-rules-header > span {
+  color: #706e6b;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+}
+.sf-business-rules-heading {
+  display: grid;
+  gap: 2px;
+}
+.sf-business-rules-heading small {
   color: #706e6b;
   font-size: 11px;
   font-weight: 400;
@@ -1194,6 +1206,7 @@ body[data-lab-accent] .sf-icon-btn:hover {
   border: 1px solid;
   border-radius: 4px;
   font-size: 12px;
+  overflow: visible;
 }
 .sf-business-rules-list li.is-passed {
   border-color: #91c9a5;
@@ -1227,8 +1240,64 @@ body[data-lab-accent] .sf-icon-btn:hover {
   gap: 3px;
   min-width: 0;
 }
+.sf-business-rules-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .sf-business-rules-copy strong {
   font-weight: 600;
+}
+.sf-business-rule-help-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.sf-business-rule-help {
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: #fff;
+  color: #5c5c5c;
+  font: 600 11px/1 Arial, sans-serif;
+  cursor: help;
+}
+.sf-business-rule-help:focus-visible {
+  outline: 2px solid #0176d3;
+  outline-offset: 2px;
+}
+.sf-business-rule-tooltip {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  display: none;
+  width: min(340px, calc(100vw - 64px));
+  padding: 10px 12px;
+  border: 1px solid #c9c7c5;
+  border-radius: 5px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  color: #181818;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  text-transform: none;
+}
+.sf-business-rule-help-wrap:hover .sf-business-rule-tooltip,
+.sf-business-rule-help-wrap:focus-within .sf-business-rule-tooltip,
+.sf-business-rule-tooltip.is-open {
+  display: block;
+}
+.sf-business-rules-list li:nth-last-child(-n + 2) .sf-business-rule-tooltip {
+  top: auto;
+  bottom: calc(100% + 8px);
 }
 .sf-business-rules-copy small {
   color: #514f4d;

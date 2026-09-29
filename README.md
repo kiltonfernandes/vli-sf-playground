@@ -6,6 +6,13 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v4.14.03 — Explicações reutilizáveis das regras de negócio
+
+- O checklist compartilhado de regras aceita explicações por regra, título e descrição, para que novas páginas e etapas reutilizem o mesmo comportamento.
+- Cada regra de Oportunidade e Cotação oferece tooltip detalhado com mouse e teclado; o conteúdo explica o critério, seu efeito e como atendê-lo.
+- O posicionamento se adapta a telas menores e às últimas linhas do painel, e os controles têm rótulos acessíveis.
+- Verificação: build de produção aprovado.
+
 ### v4.13.03 — Acompanhamento das regras de negócio
 
 - Troca as orientações estáticas na Oportunidade por um checklist calculado com a Conta, o instrumento, o segmento, a vigência, o dia de aplicação, a etapa e o estado da Cotação.

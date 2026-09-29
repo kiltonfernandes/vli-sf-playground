@@ -99,6 +99,8 @@ function OpportunityRecordPage() {
       label: "Conta de gestão vinculada",
       passed: !!account,
       detail: account?.name ?? "Vincule uma Conta de gestão à Oportunidade.",
+      explanation:
+        "A Conta de gestão identifica o cliente responsável pela negociação. Os Itens da Cotação precisam usar Fluxos Planejados pertencentes a essa mesma Conta; isso evita misturar operações de clientes diferentes.",
     },
     {
       label: "Instrumento aceito para Cotação",
@@ -106,11 +108,15 @@ function OpportunityRecordPage() {
       detail: ["Contrato", "ACS"].includes(opportunity.instrument_type)
         ? opportunity.instrument_type
         : "O fluxo atual aceita Contrato ou ACS.",
+      explanation:
+        "Neste escopo ferroviário, a preparação da Cotação atende aos instrumentos Contrato e ACS. Outros instrumentos, como Aditivo, ainda não fazem parte desta jornada.",
     },
     {
       label: "Segmento ferroviário",
       passed: opportunity.segment === "Ferroviário",
       detail: opportunity.segment ?? "Selecione Ferroviário.",
+      explanation:
+        "A jornada de Item e Agenda disponível neste momento valida operações ferroviárias. O modal da Oportunidade precisa ser Ferroviário para que seus Fluxos, serviços e regras de tarifa sejam compatíveis.",
     },
     {
       label: "Vigência preenchida e válida",
@@ -120,11 +126,15 @@ function OpportunityRecordPage() {
         : opportunity.instrument_type === "ACS"
           ? "Preencha as datas e mantenha a vigência abaixo de 12 meses."
           : "Preencha início e fim da vigência em ordem válida.",
+      explanation:
+        "A data inicial e a final definem o intervalo em que as Agendas podem ocorrer. Para Contrato, informe uma vigência válida com início antes ou no fim. Para ACS, a duração deve ser inferior a 12 meses. As Agendas da Cotação precisam ficar dentro desse intervalo.",
     },
     {
       label: "Dia de aplicação do diesel definido",
       passed: [1, 10, 20].includes(Number(opportunity.application_day)),
       detail: `Dia atual: ${opportunity.application_day ?? "não definido"}`,
+      explanation:
+        "O dia de aplicação aceito é 1, 10 ou 20. Ele determina o dia efetivo da Data Base Diesel nas Agendas; ao montar a data, o Playground usa este valor da Oportunidade em vez do dia digitado.",
     },
     {
       label: "Oportunidade em Negociação",
@@ -133,6 +143,8 @@ function OpportunityRecordPage() {
         STAGES.indexOf(opportunity.stage) >= STAGES.indexOf("Negociação")
           ? `Etapa atual: ${opportunity.stage}`
           : "Avance a Oportunidade para criar a Cotação.",
+      explanation:
+        "A Cotação só pode ser preparada quando a Oportunidade estiver em Negociação ou em uma etapa posterior permitida. Avance a etapa da Oportunidade para habilitar a criação de Itens e Agendas.",
     },
     {
       label: "Cotação concluída e sincronizada",
@@ -140,6 +152,8 @@ function OpportunityRecordPage() {
       detail: hasSyncedQuote
         ? "A Oportunidade pode avançar para Aprovação."
         : "Conclua e sincronize uma Cotação para liberar Aprovação.",
+      explanation:
+        "Para liberar o avanço de Negociação para Aprovação, pelo menos uma Cotação precisa passar pela validação, ser concluída e sincronizada com esta Oportunidade. A sincronização atualiza o estado que o Path usa para permitir a próxima etapa.",
     },
   ];
   const fields: FieldDef[] = [
