@@ -20,7 +20,7 @@ export const opportunitiesGenerator: Generator = (f) => {
     instrument_type: instrument,
     stage: "Prospecção",
     segment,
-    amount: f.number.int({ min: 100_000, max: 25_000_000 }),
+    amount: f.number.int({ min: 100, max: 9999 }),
     close_date: start.toISOString().slice(0, 10),
     contract_start: start.toISOString().slice(0, 10),
     contract_end: end.toISOString().slice(0, 10),
