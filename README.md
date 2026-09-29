@@ -6,6 +6,11 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v4.18.03 — Corrige a versão exibida no preview
+
+- Incrementa a versão mostrada ao lado de CRM para confirmar a atualização implantada no Vercel.
+- Verificação: conferir o status do novo deployment e a versão do artefato publicado.
+
 ### v4.17.03 — Faixa de valores do pipeline e responsividade global
 
 - Limita valores monetários individuais gerados para Oportunidades e Contas a R$ 100–R$ 9.999; atualiza também os valores do factory reset. Totais e consolidados continuam sendo somas sem teto.
