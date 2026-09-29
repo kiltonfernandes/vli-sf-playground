@@ -6,37 +6,29 @@ CRM de estudos em **português do Brasil**, com interface inspirada no Salesforc
 
 ## Changelog
 
+### v3.11.03 — Screenflow de Item e Agenda
+
+- Ao adicionar um Item novo ou Agenda a um Item existente, abre um screenflow de três etapas: Fluxo do Cliente, Agendas e Revisão.
+- Guia Cliente → Origem → Destino → Mercadoria → Modal; o Cliente é fixado pela Conta de gestão da Oportunidade.
+- Permite adicionar múltiplos períodos e serviços no mesmo grupo, exige FRETE e ajuda a ratear tarifas/percentuais até 100%; inclui Faker com seed explícita.
+- Grava novo Item e todas as Agendas em uma transação única. Se qualquer regra falhar, nada desse envio fica parcialmente salvo e a Cotação mostra toast com a causa.
+- Valida no servidor etapa/segmento/instrumento da Oportunidade, titularidade ferroviária FLOU do Fluxo, vigência (ACS < 12 meses), período dentro da vigência, volume inteiro, tarifa CBS ou líquida, Base Diesel, periodicidade/janela, FRETE, rateio e duplicidade.
+- Revisão de regressão: build de produção; verificar abertura do assistente em Novo Item e Adicionar Agenda, filtro Cliente/Fluxo, seed repetível, grupos múltiplos, erro com toast, gravação atômica e os botões Concluir/Sincronizar. Pendente publicar e repetir o smoke test na produção após o deploy.
+
+### v3.10.03 — Fluxo de Cotação ponta a ponta
+
+- Troca o seletor plano do Item por uma montagem em cascata: Cliente → Origem → Destino → Mercadoria → Modal; cada Item representa uma combinação e “Salvar e adicionar outro” agiliza múltiplas ramificações.
+- Corrige o Faker da Agenda: conserva o serviço escolhido no Item, mantém CBS ou tarifa líquida conforme a Oportunidade e gera rateio inicial de 100% que fecha a tarifa.
+- Gera períodos dentro da vigência, procura uma chave livre para o serviço e valida a vigência no servidor já ao salvar, com toast claro se a regra impedir o registro.
+- Mostra erros e sucessos em toast ao concluir/sincronizar a Cotação e documenta o caminho completo, seu ponto de encerramento atual e os módulos ainda pendentes.
+- Revisão de regressão: testar inclusão individual de Quote, cascata e vínculo ao Cliente, salvar Agenda seedada, concluir e sincronizar, atualizar a Oportunidade e checar o bloqueio para Formalização sem Aprovação.
+
 ### v3.09.03 — Corrigir criação de Cotações e regressão antes do deploy
 
 - Nova Cotação e Criar em lote agora explicam por toast que a oportunidade precisa estar em Negociação; em Prospecção, a ação “Avançar e continuar” muda a etapa e abre o formulário escolhido.
 - Erros do servidor ao salvar registros individuais ou em lote são apresentados por toast e continuam visíveis no formulário.
 - Adota uma revisão de regressão antes de cada publicação: conferir o recurso alterado, as regras no servidor e os fluxos adjacentes de leitura, criação, edição e exclusão; para Cotações, conferir aba, Path, vínculo à Oportunidade e criação individual/em lote, incluindo o avanço de etapa.
 - Conferência desta publicação: build de produção, revisão do avanço Prospecção → Negociação e do bloqueio para outras etapas. O smoke test com registros reais do banco de produção depende da sessão do app.
-
-### Regras e validações aplicadas
-
-**Ferroviário · Contrato e ACS**
-
-- **Fluxos planejados**
-  - Pertencem à Conta vinculada à Oportunidade.
-  - Têm origem FLOU.
-- **Itens da Cotação**
-  - Volume é inteiro e positivo.
-  - CBS ou tarifa líquida deve estar preenchida; uma delas é obrigatória.
-- **Agendas**
-  - Cada grupo tem FRETE e Base Diesel.
-  - O rateio de tarifas/percentuais deve fechar o total e somar 100%.
-  - A duplicidade é verificada pelo código de fluxo, ano/mês, divisão, praça e serviço, inclusive entre Cotações.
-- **ACS**
-  - A vigência é inferior a 12 meses.
-  - Não aceita tolerâncias nem Take or Pay.
-- **Etapa da Oportunidade**
-  - Concluir e sincronizar a Cotação libera o avanço para Aprovação.
-- **Criação de Cotação**
-  - A Oportunidade deve ser Ferroviária, de Contrato ou ACS, e estar em Negociação.
-  - Em Prospecção, as ações de criação oferecem avançar para Negociação e continuar no formulário escolhido.
-
-Ao documentar regras futuras, seguir essa hierarquia de bullet points, itens, subitens e detalhes aninhados; registrar explicitamente quais validações já estão implementadas e quais ainda estão pendentes.
 
 ### v3.08.03 — Toast para erros ao salvar Cotações
 
@@ -184,6 +176,58 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - Dados Faker são mockados e reproduzíveis por seed. O gerador não consulta Jetsons, não calcula recomendação real de preço e não representa sincronização com Salesforce.
 
 As regras de negócio completas do processo futuro também devem ser mantidas aqui quando Cotação, Aprovação e integração NetLex forem implementadas. Regras ainda não executadas pelo app devem ser marcadas como pendentes, sem serem descritas como validações ativas.
+
+#### Regras em níveis
+
+**Ferroviário · Contrato e ACS**
+
+- **Cliente**
+  - É sempre a Conta de gestão da Oportunidade.
+  - **Origem**
+    - **Destino**
+      - **Mercadoria**
+        - **Modal**: Ferroviário neste escopo.
+  - Cada nível pode ter várias opções/ramificações. Cada Item persistido aponta para a combinação completa do Fluxo Planejado.
+- **Item e Agenda**
+  - Volume inteiro e positivo; preencher CBS ou tarifa líquida conforme a Oportunidade.
+  - Cada grupo precisa de FRETE, Base Diesel e valores/percentuais de rateio consistentes; o valor fecha a tarifa e os percentuais somam 100%.
+  - A chave de duplicidade usa fluxo, período, divisão e praça; o mesmo serviço não pode repetir, inclusive em outras Cotações.
+- **ACS**
+  - Vigência menor que 12 meses; tolerâncias e Take or Pay zerados.
+- **Avanço**
+  - Concluir e sincronizar a Cotação habilita a Oportunidade para Aprovação.
+
+### Tutorial: da Conta ao ponto final disponível
+
+1. **Criar ou escolher a Conta de gestão**
+   - Abra **Contas** e escolha **Nova** (ou abra uma Conta existente).
+   - Salve os dados da Conta. Os Fluxos Planejados são vinculados a essa Conta.
+2. **Criar a Oportunidade**
+   - Na Conta, em **Listas relacionadas → Oportunidades**, escolha **Novo**; ou use a lista **Oportunidades**.
+   - Selecione a Conta de gestão, tipo **Contrato** ou **ACS**, segmento **Ferroviário**, tarifa **CBS** ou **Líquida**, vigência e partes contratuais.
+   - Salve. A Oportunidade começa em **Prospecção**.
+3. **Avançar para Negociação**
+   - Abra a página da Oportunidade e clique **Nova Cotação** ou **Criar em lote**.
+   - O toast explica o requisito. Em Prospecção, escolha **Avançar e continuar**; a etapa muda para **Negociação** e o formulário abre.
+4. **Criar uma Cotação**
+   - Na aba **Cotações**, crie uma Cotação individual; ou abra **Cotações** e use **Nova Cotação manual**.
+   - Ela fica vinculada à Oportunidade e inicia em **Rascunho**. Para montar toda a massa com seed, use **Gerar Cotação + itens + agendas** na lista Cotações e selecione a Oportunidade.
+5. **Montar Item e Agendas no screenflow**
+   - Dentro da Cotação, escolha **Adicionar Item**. O assistente abre em três etapas: Fluxo do Cliente → Agendas → Revisão.
+   - Selecione Cliente → Origem → Destino → Mercadoria → Modal, nessa ordem. O Cliente vem fixo da Conta de gestão; cada seleção filtra as opções válidas seguintes.
+   - Na etapa **Agendas**, escolha o serviço principal do Item, informe uma seed do Faker e adicione quantos grupos de período precisar.
+   - Em cada grupo, confira período dentro da vigência, divisão, praça, volume inteiro, tarifa conforme CBS/Líquida, Base Diesel e data base. Inclua serviços; FRETE é obrigatório e o rateio deve fechar tarifa e 100%.
+   - Use **Adicionar período** para outras agendas do mesmo Fluxo. O botão **Gerar com Faker** deriva dados repetíveis da seed informada e mantém o período dentro da vigência.
+   - Na etapa **Revisão**, confira o resumo e escolha **Salvar Item e Agendas**. O sistema grava tudo em uma transação; se alguma regra falhar, o toast explica o motivo e não deixa um Item incompleto.
+   - Para acrescentar agendas a um Item já existente, expanda-o e escolha **Adicionar Agenda**: o mesmo screenflow abre com o Fluxo fixado e associa os grupos ao Item.
+6. **Concluir e sincronizar**
+   - Clique **Validar e concluir**. Se houver regra pendente, o toast identifica o problema; corrija os dados e tente novamente.
+   - Após concluir, clique **Sincronizar com Oportunidade**. O status passa para **Sincronizada**.
+7. **Onde o fluxo termina hoje**
+   - Volte à Oportunidade. Com a Cotação sincronizada, o Path permite avançar de **Negociação** para **Aprovação**.
+   - **Aprovação é o ponto final implementado atualmente.** Formalização/NetLex, Contrato vigente e fechamento ainda não existem no playground; por isso o Path bloqueia **Aprovação → Formalização** e **Formalização → Fechado**.
+
+Ao registrar novas regras ou corrigir o fluxo, manter a hierarquia de bullets e subtópicos e indicar o que está ativo, o que está pendente e em que etapa aparece cada validação.
 
 ## Funcionalidades existentes
 

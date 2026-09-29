@@ -12,6 +12,8 @@ Use the three numeric segments as follows. Increment only the segment that match
 
 ## Version history
 
+- `v3.11.03` — Replace separate Item and Agenda forms with a guided, atomic Item + Agenda screenflow, including multiple periods/services, deterministic Faker seed and server-side validation.
+- `v3.10.03` — Add cascading Customer → Origin → Destination → Merchandise → Modal selection; fix seeded Schedule generation to respect service, tariff mode, allocation totals and Opportunity validity; show completion/sync errors as toasts.
 - `v3.09.03` — Let users advance an Opportunity from Prospecting to Negotiation from the Quote actions, then open the requested individual or bulk form; document a regression review before each deployment.
 - `v3.08.03` — Show toast notifications for individual and bulk record save errors, including Quote validation failures.
 - `v3.07.03` — Add a dedicated Quotes tab as the first tab on eligible Opportunity records, with a full list and individual/bulk CRUD.

@@ -1,0 +1,697 @@
+import { useMemo, useState } from "react";
+
+type Flow = {
+  id: string;
+  code: string;
+  account_id: string;
+  origin_id: string;
+  origin_code: string;
+  origin_name: string;
+  destination_id: string;
+  destination_code: string;
+  destination_name: string;
+  merchandise_id: string;
+  merchandise: string;
+  modal: string;
+};
+type AgendaGroup = {
+  year: number;
+  month: number;
+  frequency: string;
+  period_window: string;
+  division: string;
+  plaza: string;
+  volume: number;
+  tariff: number;
+  diesel_base_id: string;
+  diesel_base_date: string;
+  services: Array<{ service: string; percent: number }>;
+};
+type Props = {
+  accountName: string;
+  flows: Flow[];
+  dieselBases: Array<{ id: string; name: string }>;
+  contractStart: string;
+  contractEnd: string;
+  integrationTariff: string;
+  initialFlowId?: string;
+  initialService?: string;
+  itemId?: string;
+  onClose: () => void;
+  onSave: (payload: {
+    flowId: string;
+    itemService: string;
+    groups: AgendaGroup[];
+  }) => Promise<boolean>;
+};
+
+const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
+const WINDOWS = [
+  "Mês",
+  "1ª Dezena",
+  "2ª Dezena",
+  "3ª Dezena",
+  "1ª Quinzena",
+  "2ª Quinzena",
+  "1ª Semana",
+  "2ª Semana",
+  "3ª Semana",
+  "4ª Semana",
+  "5ª Semana",
+];
+const inputStyle = {
+  width: "100%",
+  padding: "8px 10px",
+  border: "1px solid #c9c9c9",
+  borderRadius: 4,
+  background: "white",
+} as const;
+const labelStyle = {
+  display: "grid",
+  gap: 5,
+  marginBottom: 12,
+  fontSize: 12,
+  fontWeight: 600,
+} as const;
+function unique<T>(items: T[], key: (item: T) => string) {
+  return [...new Map(items.map((item) => [key(item), item])).values()];
+}
+
+export function QuoteItemScreenflow({
+  accountName,
+  flows,
+  dieselBases,
+  contractStart,
+  contractEnd,
+  integrationTariff,
+  initialFlowId,
+  initialService = "FRETE",
+  itemId,
+  onClose,
+  onSave,
+}: Props) {
+  const initial = flows.find((flow) => flow.id === initialFlowId);
+  const [step, setStep] = useState(0);
+  const [originId, setOriginId] = useState(initial?.origin_id ?? "");
+  const [destinationId, setDestinationId] = useState(initial?.destination_id ?? "");
+  const [merchandiseId, setMerchandiseId] = useState(initial?.merchandise_id ?? "");
+  const [modal, setModal] = useState(initial?.modal ?? "");
+  const [itemService, setItemService] = useState(initialService);
+  const [seed, setSeed] = useState(790043);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const startYear = Number(contractStart?.slice(0, 4) || new Date().getFullYear());
+  const startMonth = Number(contractStart?.slice(5, 7) || 1);
+  const endYear = Number(contractEnd?.slice(0, 4) || startYear);
+  const endMonth = Number(contractEnd?.slice(5, 7) || 12);
+  const yearMonths = useMemo(() => {
+    const result: Array<{ year: number; month: number }> = [];
+    for (let y = startYear; y <= endYear; y++)
+      for (let m = y === startYear ? startMonth : 1; m <= (y === endYear ? endMonth : 12); m++)
+        result.push({ year: y, month: m });
+    return result;
+  }, [startYear, startMonth, endYear, endMonth]);
+  const selectedFlow = flows.find(
+    (flow) =>
+      flow.origin_id === originId &&
+      flow.destination_id === destinationId &&
+      flow.merchandise_id === merchandiseId &&
+      flow.modal === modal,
+  );
+  const origins = unique(flows, (f) => f.origin_id);
+  const destinations = unique(
+    flows.filter((f) => f.origin_id === originId),
+    (f) => f.destination_id,
+  );
+  const merchandiseOptions = unique(
+    flows.filter((f) => f.origin_id === originId && f.destination_id === destinationId),
+    (f) => f.merchandise_id,
+  );
+  const modals = unique(
+    flows.filter(
+      (f) =>
+        f.origin_id === originId &&
+        f.destination_id === destinationId &&
+        f.merchandise_id === merchandiseId,
+    ),
+    (f) => f.modal,
+  );
+  const [groups, setGroups] = useState<AgendaGroup[]>(() => {
+    const tariff = 400;
+    const cbs = integrationTariff === "CBS";
+    return [
+      {
+        year: startYear,
+        month: startMonth,
+        frequency: "Mensal",
+        period_window: "Mês",
+        division: "Todas",
+        plaza: "TODAS_PRACAS_NACIONAL",
+        volume: 1000,
+        tariff,
+        diesel_base_id: dieselBases[0]?.id ?? "",
+        diesel_base_date: `${String(startMonth).padStart(2, "0")}/${startYear}`,
+        services: [{ service: "FRETE", percent: 100 }],
+      },
+    ];
+  });
+  function updateGroup(index: number, patch: Partial<AgendaGroup>) {
+    setGroups((old) => old.map((g, i) => (i === index ? { ...g, ...patch } : g)));
+  }
+  function toggleService(index: number, service: string) {
+    setGroups((old) =>
+      old.map((g, i) => {
+        if (i !== index) return g;
+        const selected = g.services.map((x) => x.service);
+        const next =
+          service === "FRETE"
+            ? selected
+            : selected.includes(service)
+              ? selected.filter((x) => x !== service)
+              : [...selected, service];
+        if (!next.includes("FRETE")) next.unshift("FRETE");
+        const percent = 100 / next.length;
+        return {
+          ...g,
+          services: next.map((name, n) => ({
+            service: name,
+            percent: n === next.length - 1 ? 100 - percent * (next.length - 1) : percent,
+          })),
+        };
+      }),
+    );
+  }
+  function addGroup() {
+    const last = groups.at(-1)!;
+    const nextPeriod =
+      yearMonths.find((p) => p.year * 100 + p.month > last.year * 100 + last.month) ??
+      yearMonths[0];
+    setGroups((old) => [
+      ...old,
+      {
+        ...last,
+        year: nextPeriod.year,
+        month: nextPeriod.month,
+        diesel_base_date: `${String(nextPeriod.month).padStart(2, "0")}/${nextPeriod.year}`,
+        services: last.services.map((s) => ({ ...s })),
+      },
+    ]);
+  }
+  function generateGroup(index: number) {
+    const group = groups[index];
+    const available = yearMonths.find(
+      (period) => period.year * 100 + period.month >= group.year * 100 + group.month,
+    );
+    if (!available) {
+      setError("Não há períodos disponíveis dentro da vigência do Contrato.");
+      return;
+    }
+    const seeded = Math.abs(Math.imul(seed + index * 7919, 2654435761) >>> 0);
+    updateGroup(index, {
+      ...available,
+      volume: 1000 + (seeded % 9000),
+      tariff: 100 + ((Math.imul(seeded, 1097) >>> 0) % 9900) / 100,
+      diesel_base_date: `${String(available.month).padStart(2, "0")}/${available.year}`,
+    });
+    setError("");
+  }
+  function validateCurrent() {
+    setError("");
+    if (step === 0 && !selectedFlow) {
+      setError("Complete Cliente, Origem, Destino, Mercadoria e Modal para continuar.");
+      return false;
+    }
+    if (step === 1 && (!itemService || !groups.length)) {
+      setError("Escolha o serviço do Item e adicione ao menos um grupo de Agenda.");
+      return false;
+    }
+    if (
+      step === 1 &&
+      groups.some(
+        (g) =>
+          !Number.isInteger(g.volume) ||
+          g.volume <= 0 ||
+          !Number.isFinite(g.tariff) ||
+          g.tariff <= 0 ||
+          !g.diesel_base_id ||
+          Math.abs(g.services.reduce((s, x) => s + x.percent, 0) - 100) > 0.2,
+      )
+    ) {
+      setError("Revise volume, tarifa, Base Diesel e rateio de serviços de cada grupo.");
+      return false;
+    }
+    return true;
+  }
+  async function save() {
+    if (!validateCurrent() || !selectedFlow) return;
+    setBusy(true);
+    try {
+      if (await onSave({ flowId: selectedFlow.id, itemService, groups })) onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+  const select = (
+    value: string,
+    onChange: (value: string) => void,
+    options: Array<{ value: string; label: string }>,
+    disabled = false,
+  ) => (
+    <select
+      style={inputStyle}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+  const stepTitles = ["Fluxo do Cliente", "Agendas", "Revisão"];
+  return (
+    <div className="sf-modal-backdrop" onClick={onClose}>
+      <div
+        className="sf-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Fluxo guiado de Item e Agenda"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(920px, 96vw)",
+          maxHeight: "92vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div className="sf-modal-header">
+          <h2>{itemId ? "Adicionar Agendas ao Item" : "Criar Item e Agendas da Cotação"}</h2>
+        </div>
+        <div
+          style={{
+            padding: "12px 20px",
+            borderBottom: "1px solid #eee",
+            color: "#444",
+            fontSize: 13,
+          }}
+        >
+          <b>
+            Etapa {step + 1} de 3 · {stepTitles[step]}
+          </b>
+          <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+            {stepTitles.map((title, i) => (
+              <div
+                key={title}
+                style={{
+                  height: 5,
+                  flex: 1,
+                  borderRadius: 4,
+                  background: i <= step ? "#0176d3" : "#ddd",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="sf-modal-body" style={{ overflow: "auto", padding: 20 }}>
+          {step === 0 && (
+            <>
+              <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
+                O Cliente vem da Conta de Gestão da Oportunidade. Escolha cada nível; as opções
+                seguintes acompanham sua seleção.
+              </p>
+              <label style={labelStyle}>
+                👤 Cliente
+                <select style={inputStyle} value={accountName} disabled>
+                  <option>{accountName}</option>
+                </select>
+              </label>
+              <label style={labelStyle}>
+                📍 Origem
+                {select(
+                  originId,
+                  (v) => {
+                    setOriginId(v);
+                    setDestinationId("");
+                    setMerchandiseId("");
+                    setModal("");
+                  },
+                  [
+                    { value: "", label: "— Selecione —" },
+                    ...origins.map((f) => ({
+                      value: f.origin_id,
+                      label: `${f.origin_code} · ${f.origin_name}`,
+                    })),
+                  ],
+                )}
+              </label>
+              <label style={labelStyle}>
+                🏁 Destino
+                {select(
+                  destinationId,
+                  (v) => {
+                    setDestinationId(v);
+                    setMerchandiseId("");
+                    setModal("");
+                  },
+                  [
+                    { value: "", label: "— Selecione —" },
+                    ...destinations.map((f) => ({
+                      value: f.destination_id,
+                      label: `${f.destination_code} · ${f.destination_name}`,
+                    })),
+                  ],
+                  !originId,
+                )}
+              </label>
+              <label style={labelStyle}>
+                📦 Mercadoria
+                {select(
+                  merchandiseId,
+                  (v) => {
+                    setMerchandiseId(v);
+                    setModal("");
+                  },
+                  [
+                    { value: "", label: "— Selecione —" },
+                    ...merchandiseOptions.map((f) => ({
+                      value: f.merchandise_id,
+                      label: f.merchandise,
+                    })),
+                  ],
+                  !destinationId,
+                )}
+              </label>
+              <label style={labelStyle}>
+                🚆 Modal
+                {select(
+                  modal,
+                  setModal,
+                  [
+                    { value: "", label: "— Selecione —" },
+                    ...modals.map((f) => ({ value: f.modal, label: f.modal })),
+                  ],
+                  !merchandiseId,
+                )}
+              </label>
+              {!flows.length && (
+                <p role="status">Não há Fluxos Planejados ferroviários para esta Conta.</p>
+              )}
+            </>
+          )}
+          {step === 1 && (
+            <>
+              <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
+                Adicione os períodos que desejar. Os serviços do mesmo período são rateados para
+                fechar 100%; FRETE é obrigatório.
+              </p>
+              {!itemId && (
+                <label style={labelStyle}>
+                  Serviço principal do Item
+                  {select(
+                    itemService,
+                    setItemService,
+                    SERVICES.map((s) => ({ value: s, label: s })),
+                  )}
+                </label>
+              )}
+              <label style={{ ...labelStyle, maxWidth: 220 }}>
+                Seed do Faker
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="1"
+                  value={seed}
+                  onChange={(e) => setSeed(Number(e.target.value) || 1)}
+                />
+              </label>
+              {groups.map((g, index) => (
+                <section
+                  key={index}
+                  style={{
+                    border: "1px solid #ddd",
+                    borderRadius: 6,
+                    padding: 14,
+                    marginBottom: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 10,
+                    }}
+                  >
+                    <b>Grupo de Agenda {index + 1}</b>
+                    <button className="sf-btn" type="button" onClick={() => generateGroup(index)}>
+                      Gerar com Faker
+                    </button>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    <label style={labelStyle}>
+                      Ano
+                      {select(
+                        String(g.year),
+                        (v) =>
+                          updateGroup(index, {
+                            year: Number(v),
+                            diesel_base_date: `${String(g.month).padStart(2, "0")}/${v}`,
+                          }),
+                        unique(yearMonths, (p) => String(p.year)).map((p) => ({
+                          value: String(p.year),
+                          label: String(p.year),
+                        })),
+                      )}
+                    </label>
+                    <label style={labelStyle}>
+                      Mês
+                      {select(
+                        String(g.month),
+                        (v) =>
+                          updateGroup(index, {
+                            month: Number(v),
+                            diesel_base_date: `${String(v).padStart(2, "0")}/${g.year}`,
+                          }),
+                        yearMonths
+                          .filter((p) => p.year === g.year)
+                          .map((p) => ({
+                            value: String(p.month),
+                            label: String(p.month).padStart(2, "0"),
+                          })),
+                      )}
+                    </label>
+                    <label style={labelStyle}>
+                      Periodicidade
+                      {select(
+                        g.frequency,
+                        (v) => updateGroup(index, { frequency: v }),
+                        ["Mensal", "Anual"].map((v) => ({ value: v, label: v })),
+                      )}
+                    </label>
+                    <label style={labelStyle}>
+                      Período
+                      {select(
+                        g.period_window,
+                        (v) => updateGroup(index, { period_window: v }),
+                        WINDOWS.map((v) => ({ value: v, label: v })),
+                      )}
+                    </label>
+                    <label style={labelStyle}>
+                      Divisão
+                      <input
+                        style={inputStyle}
+                        value={g.division}
+                        onChange={(e) => updateGroup(index, { division: e.target.value })}
+                      />
+                    </label>
+                    <label style={labelStyle}>
+                      Praça
+                      <input
+                        style={inputStyle}
+                        value={g.plaza}
+                        onChange={(e) => updateGroup(index, { plaza: e.target.value })}
+                      />
+                    </label>
+                    <label style={labelStyle}>
+                      Volume inteiro
+                      <input
+                        style={inputStyle}
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={g.volume}
+                        onChange={(e) => updateGroup(index, { volume: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label style={labelStyle}>
+                      Tarifa {integrationTariff === "CBS" ? "CBS" : "líquida"}
+                      <input
+                        style={inputStyle}
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={g.tariff}
+                        onChange={(e) => updateGroup(index, { tariff: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label style={labelStyle}>
+                      Base Diesel
+                      {select(g.diesel_base_id, (v) => updateGroup(index, { diesel_base_id: v }), [
+                        { value: "", label: "— Selecione —" },
+                        ...dieselBases.map((b) => ({ value: b.id, label: b.name })),
+                      ])}
+                    </label>
+                    <label style={labelStyle}>
+                      Data base diesel (MM/AAAA)
+                      <input
+                        style={inputStyle}
+                        placeholder="MM/AAAA"
+                        value={g.diesel_base_date}
+                        onChange={(e) => updateGroup(index, { diesel_base_date: e.target.value })}
+                      />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <b style={{ fontSize: 12 }}>Serviços e rateio</b>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "8px 0" }}>
+                      {SERVICES.map((s) => (
+                        <label key={s} style={{ fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={g.services.some((x) => x.service === s)}
+                            disabled={s === "FRETE"}
+                            onChange={() => toggleService(index, s)}
+                          />{" "}
+                          {s}
+                        </label>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {g.services.map((s) => (
+                        <label key={s.service} style={{ fontSize: 12 }}>
+                          {s.service} %{" "}
+                          <input
+                            style={{ ...inputStyle, width: 80, padding: 5 }}
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={s.percent}
+                            onChange={(e) =>
+                              updateGroup(index, {
+                                services: g.services.map((x) =>
+                                  x.service === s.service
+                                    ? { ...x, percent: Number(e.target.value) }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <small
+                      style={{
+                        color:
+                          Math.abs(g.services.reduce((sum, s) => sum + s.percent, 0) - 100) > 0.2
+                            ? "#ba0517"
+                            : "#2e844a",
+                      }}
+                    >
+                      Total do rateio:{" "}
+                      {g.services.reduce((sum, s) => sum + s.percent, 0).toFixed(2)}% (deve fechar
+                      100%)
+                    </small>
+                  </div>
+                  {groups.length > 1 && (
+                    <button
+                      className="sf-btn"
+                      type="button"
+                      style={{ marginTop: 10 }}
+                      onClick={() => setGroups((old) => old.filter((_, i) => i !== index))}
+                    >
+                      Remover grupo
+                    </button>
+                  )}
+                </section>
+              ))}
+              <button className="sf-btn" type="button" onClick={addGroup}>
+                + Adicionar período
+              </button>
+            </>
+          )}
+          {step === 2 && (
+            <>
+              <h3>Confira antes de salvar</h3>
+              <ul>
+                <li>Cliente: {accountName}</li>
+                <li>
+                  Fluxo: {selectedFlow?.origin_code} → {selectedFlow?.destination_code} ·{" "}
+                  {selectedFlow?.merchandise} · {selectedFlow?.modal}
+                </li>
+                <li>Serviço principal do Item: {itemService}</li>
+                <li>
+                  {groups.length} grupo(s), {groups.reduce((n, g) => n + g.services.length, 0)}{" "}
+                  linha(s) de Agenda
+                </li>
+                <li>
+                  Vigência permitida: {contractStart} a {contractEnd}
+                </li>
+                <li>Tarifa configurada pela Oportunidade: {integrationTariff}</li>
+                <li>FRETE incluído e rateio de cada grupo validado em 100%</li>
+              </ul>
+              <p>Item e Agendas serão gravados como uma operação única.</p>
+            </>
+          )}
+          {error && (
+            <div
+              role="alert"
+              style={{ padding: 10, color: "#ba0517", background: "#fef1ee", borderRadius: 4 }}
+            >
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="sf-modal-footer">
+          <button className="sf-btn" onClick={onClose} disabled={busy}>
+            Cancelar
+          </button>
+          {step > 0 && (
+            <button
+              className="sf-btn"
+              onClick={() => {
+                setError("");
+                setStep((s) => s - 1);
+              }}
+              disabled={busy}
+            >
+              Voltar
+            </button>
+          )}
+          {step < 2 ? (
+            <button
+              className="sf-btn sf-btn--brand"
+              onClick={() => {
+                if (validateCurrent()) setStep((s) => s + 1);
+              }}
+            >
+              Continuar
+            </button>
+          ) : (
+            <button className="sf-btn sf-btn--brand" disabled={busy} onClick={() => void save()}>
+              {busy ? "Salvando Item e Agendas…" : "Salvar Item e Agendas"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

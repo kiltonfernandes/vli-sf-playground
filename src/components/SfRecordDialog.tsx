@@ -21,6 +21,11 @@ type Props = {
   onSaved?: () => void;
   /** Called right before insert/update to derive extra/computed fields. */
   transform?: (form: Record<string, any>) => Record<string, any>;
+  /** Optional seed-aware adjustment for values constrained by parent records. */
+  generateTransform?: (
+    form: Record<string, any>,
+    generated: Record<string, any>,
+  ) => Record<string, any>;
   /** When provided, the dialog updates this record instead of inserting a new one. */
   recordId?: string;
 };
@@ -33,6 +38,7 @@ export function SfRecordDialog({
   onClose,
   onSaved,
   transform,
+  generateTransform,
   recordId,
 }: Props) {
   const [form, setForm] = useState<Record<string, any>>(defaults);
@@ -71,7 +77,30 @@ export function SfRecordDialog({
   const canGenerate = !recordId && !!generators[table];
   function generate() {
     const rec = generateRecord(table, seed, fields);
-    if (rec) setForm((f) => ({ ...f, ...rec }));
+    if (rec) {
+      try {
+        if (table === "quote_schedules") {
+          const usesCbs = Number(form.tariff_cbs) > 0 && Number(form.tariff_net) <= 0;
+          const tariff = Number(rec.tariff_net ?? rec.tariff_cbs ?? 0);
+          // Keep the valid contract period and the parent Item's service selected by the user.
+          rec.year = form.year;
+          rec.month = form.month;
+          rec.service = form.service || "FRETE";
+          rec.tariff_cbs = usesCbs ? tariff : "";
+          rec.tariff_net = usesCbs ? "" : tariff;
+          rec.accessory_cbs = usesCbs ? tariff : "";
+          rec.accessory_cbs_pct = usesCbs ? 100 : "";
+          rec.accessory_net = usesCbs ? "" : tariff;
+          rec.accessory_net_pct = usesCbs ? "" : 100;
+        }
+        const constrained = generateTransform ? generateTransform(form, rec) : {};
+        setForm((f) => ({ ...f, ...rec, ...constrained }));
+      } catch (error) {
+        toast.error("Não foi possível gerar os dados", {
+          description: error instanceof Error ? error.message : "Tente outra seed.",
+        });
+      }
+    }
     setSeed((s) => s + 1);
   }
 

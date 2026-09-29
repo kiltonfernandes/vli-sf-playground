@@ -1,16 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   completeQuote,
   deleteRecord,
   getQuoteFull,
   listQuoteOptions,
   saveRecord,
+  saveQuoteItemScreenflow,
   syncQuote,
 } from "@/lib/crud";
 import { SfShell } from "@/components/SfShell";
 import { SfRecordDialog, SfDeleteButton, type FieldDef } from "@/components/SfRecordDialog";
+import { QuoteItemScreenflow } from "@/components/QuoteItemScreenflow";
 import { fmtMoney } from "@/lib/format";
 
 const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
@@ -25,7 +28,6 @@ function QuotePage() {
   const [open, setOpen] = useState<Record<string, boolean>>({ items: true }),
     [newItem, setNewItem] = useState(false),
     [scheduleItem, setScheduleItem] = useState<any>(null),
-    [editItem, setEditItem] = useState<any>(null),
     [editSchedule, setEditSchedule] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
@@ -55,23 +57,7 @@ function QuotePage() {
     );
   const q = data.quote,
     items = data.items as any[];
-  const flowLabels = new Map(
-    (options?.flows ?? []).map((flow: any) => [
-      `${flow.route} · ${flow.merchandise} · ${flow.code}`,
-      flow.id,
-    ]),
-  );
   const baseLabels = new Map((options?.dieselBases ?? []).map((base: any) => [base.name, base.id]));
-  const itemFields: FieldDef[] = [
-    {
-      name: "flow_label",
-      label: "Fluxo planejado",
-      type: "select",
-      options: [...flowLabels.keys()],
-      required: true,
-    },
-    { name: "service", label: "Serviço", type: "select", options: SERVICES, required: true },
-  ];
   const scheduleFields: FieldDef[] = [
     { name: "year", label: "Ano", type: "number", required: true },
     { name: "month", label: "Mês (1–12)", type: "number", required: true },
@@ -126,6 +112,7 @@ function QuotePage() {
   ];
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["quote-full", id] });
+    await qc.invalidateQueries({ queryKey: ["quote-options"] });
     await qc.invalidateQueries({ queryKey: ["quotes"] });
     await qc.invalidateQueries({ queryKey: ["quote-items"] });
     await qc.invalidateQueries({ queryKey: ["quote-schedules"] });
@@ -137,13 +124,21 @@ function QuotePage() {
       if (action === "complete") await completeQuote({ data: { id } });
       else await syncQuote({ data: { id } });
       await refresh();
-      setMessage(
+      const success =
         action === "complete"
           ? "Cotação concluída. Agora pode sincronizar com a Oportunidade."
-          : "Cotação sincronizada com a Oportunidade.",
-      );
+          : "Cotação sincronizada com a Oportunidade.";
+      setMessage(success);
+      toast.success(success);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Não foi possível concluir a ação.");
+      const error = e instanceof Error ? e.message : "Não foi possível concluir a ação.";
+      setMessage(error);
+      toast.error(
+        action === "complete"
+          ? "Não foi possível concluir a Cotação"
+          : "Não foi possível sincronizar a Cotação",
+        { description: error },
+      );
     } finally {
       setBusy(false);
     }
@@ -234,16 +229,20 @@ function QuotePage() {
         <Section
           id="items"
           title="Itens da Cotação"
-          subtitle={`${items.length} itens, agrupados por fluxo e serviço`}
+          subtitle={`${items.length} itens, agrupados por Cliente, Origem, Destino, Mercadoria e Modal`}
         >
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-            <button className="sf-btn sf-btn--brand" onClick={() => setNewItem(true)}>
+            <button
+              className="sf-btn sf-btn--brand"
+              onClick={() => setNewItem(true)}
+              disabled={!options}
+            >
               + Adicionar Item
             </button>
           </div>
           {!items.length && (
             <p style={{ color: "#706e6b" }}>
-              Nenhum Item. Adicione um fluxo planejado para começar a montar a Cotação manualmente.
+              Nenhum Item. Adicione uma combinação de Cliente, Origem, Destino, Mercadoria e Modal.
             </p>
           )}
           <div style={{ display: "grid", gap: 10 }}>
@@ -252,7 +251,8 @@ function QuotePage() {
                 <summary>
                   <span>›</span>
                   <strong>
-                    {item.route} · {item.merchandise_name} · {item.service}
+                    {q.account_name} · {item.route} · {item.merchandise_name} · Ferroviário ·{" "}
+                    {item.service}
                   </strong>
                   <small>
                     {item.schedules.length} agendas · {item.unit}
@@ -264,16 +264,6 @@ function QuotePage() {
                   >
                     Abrir registro
                   </Link>
-                  <button
-                    className="sf-link"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setEditItem(item);
-                    }}
-                  >
-                    Editar
-                  </button>
                 </summary>
                 <div style={{ padding: 12 }}>
                   <div
@@ -367,19 +357,59 @@ function QuotePage() {
           title="Regras e validações aplicadas"
           subtitle="Ferroviário · Contrato e ACS"
         >
-          <ul style={{ margin: 0, lineHeight: 1.8 }}>
-            <li>Fluxos pertencem à Conta da oportunidade e têm origem FLOU.</li>
-            <li>Volume é inteiro e positivo; CBS ou tarifa líquida, com uma delas preenchida.</li>
+          <ul style={{ margin: 0, lineHeight: 1.8, paddingLeft: 22 }}>
             <li>
-              Cada grupo de agenda tem FRETE, Base Diesel e rateio de tarifa/percentual que fecha o
-              total e soma 100%.
+              <strong>Cliente</strong>
+              <ul>
+                <li>
+                  É a Conta de gestão da Oportunidade.
+                  <ul>
+                    <li>Os Fluxos Planejados precisam pertencer a essa Conta e ter origem FLOU.</li>
+                  </ul>
+                </li>
+                <li>
+                  <strong>Origem</strong>
+                  <ul>
+                    <li>
+                      <strong>Destino</strong>
+                      <ul>
+                        <li>
+                          <strong>Mercadoria</strong>
+                          <ul>
+                            <li>
+                              <strong>Modal</strong> — neste escopo, Ferroviário.
+                            </li>
+                          </ul>
+                        </li>
+                      </ul>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
             </li>
             <li>
-              Duplicidade é verificada por código de fluxo, ano/mês, divisão, praça e serviço,
-              inclusive entre cotações.
+              <strong>Itens e agendas</strong>
+              <ul>
+                <li>Volume é inteiro e positivo; CBS ou tarifa líquida deve estar preenchida.</li>
+                <li>Cada grupo tem FRETE, Base Diesel e rateio que fecha o total e soma 100%.</li>
+                <li>
+                  Duplicidade usa código de fluxo, ano/mês, divisão, praça e serviço, inclusive
+                  entre Cotações.
+                </li>
+              </ul>
             </li>
-            <li>ACS tem vigência inferior a 12 meses e não aceita tolerâncias nem Take or Pay.</li>
-            <li>Concluir e sincronizar libera o avanço da Oportunidade para Aprovação.</li>
+            <li>
+              <strong>ACS</strong>
+              <ul>
+                <li>Vigência inferior a 12 meses; não aceita tolerâncias nem Take or Pay.</li>
+              </ul>
+            </li>
+            <li>
+              <strong>Oportunidade</strong>
+              <ul>
+                <li>Concluir e sincronizar libera o avanço para Aprovação.</li>
+              </ul>
+            </li>
           </ul>
         </Section>
         <div
@@ -428,56 +458,42 @@ function QuotePage() {
           </div>
         </div>
       </div>
-      {newItem && (
-        <SfRecordDialog
-          title="Adicionar Item da Cotação"
-          table="quote_line_items"
-          fields={itemFields}
-          defaults={{ flow_label: "", service: "FRETE" }}
-          transform={(form) => {
-            const { flow_label, ...rest } = form;
-            return {
-              ...rest,
-              quote_id: id,
-              planned_flow_id: flowLabels.get(flow_label),
-              volume_total: 0,
-              revenue_total: 0,
-              top_eligible: 0,
-            };
+      {(newItem || scheduleItem) && (
+        <QuoteItemScreenflow
+          accountName={q.account_name}
+          flows={options?.flows ?? []}
+          dieselBases={options?.dieselBases ?? []}
+          contractStart={options?.opportunity?.contract_start ?? ""}
+          contractEnd={options?.opportunity?.contract_end ?? ""}
+          integrationTariff={options?.opportunity?.integration_tariff ?? "CBS"}
+          initialFlowId={scheduleItem?.flow_id}
+          initialService={scheduleItem?.service}
+          itemId={scheduleItem?.id}
+          onClose={() => {
+            setNewItem(false);
+            setScheduleItem(null);
           }}
-          onClose={() => setNewItem(false)}
-          onSaved={refresh}
+          onSave={async ({ flowId, itemService, groups }) => {
+            try {
+              const result = await saveQuoteItemScreenflow({
+                data: { quoteId: id, itemId: scheduleItem?.id, flowId, itemService, groups },
+              });
+              await refresh();
+              toast.success(
+                scheduleItem ? "Agendas adicionadas ao Item" : "Item e Agendas salvos",
+                { description: `${result.scheduleCount} linhas de Agenda criadas.` },
+              );
+              return true;
+            } catch (error) {
+              toast.error("Não foi possível salvar o Item e as Agendas", {
+                description: error instanceof Error ? error.message : "Tente novamente.",
+              });
+              return false;
+            }
+          }}
         />
       )}
-      {editItem && (
-        <SfRecordDialog
-          title="Editar Item da Cotação"
-          table="quote_line_items"
-          recordId={editItem.id}
-          fields={itemFields}
-          defaults={{
-            flow_label:
-              [...flowLabels.keys()].find(
-                (label) => flowLabels.get(label) === editItem.planned_flow_id,
-              ) ?? "",
-            service: editItem.service,
-          }}
-          transform={(form) => {
-            const { flow_label, ...rest } = form;
-            return {
-              ...rest,
-              quote_id: id,
-              planned_flow_id: flowLabels.get(flow_label),
-              volume_total: editItem.volume_total,
-              revenue_total: editItem.revenue_total,
-              top_eligible: editItem.top_eligible,
-            };
-          }}
-          onClose={() => setEditItem(null)}
-          onSaved={refresh}
-        />
-      )}
-      {(scheduleItem || editSchedule) && (
+      {editSchedule && (
         <SfRecordDialog
           title={
             editSchedule
@@ -500,22 +516,22 @@ function QuotePage() {
                     "",
                 }
               : {
-                  year: 2026,
-                  month: 10,
+                  year: Number(options?.opportunity?.contract_start?.slice(0, 4) ?? 2026),
+                  month: Number(options?.opportunity?.contract_start?.slice(5, 7) ?? 10),
                   frequency: "Mensal",
                   period_window: "Mês",
                   division: "Todas",
                   plaza: "TODAS_PRACAS_NACIONAL",
                   volume: 1000,
                   tariff_cbs: options?.opportunity?.integration_tariff === "CBS" ? 400 : "",
-                  tariff_net: options?.opportunity?.integration_tariff === "CBS" ? 0 : 400,
+                  tariff_net: options?.opportunity?.integration_tariff === "CBS" ? "" : 400,
                   diesel_label: "ELDORADO",
-                  diesel_base_date: "10/2026",
+                  diesel_base_date: `${String(options?.opportunity?.contract_start?.slice(5, 7) ?? "10").padStart(2, "0")}/${options?.opportunity?.contract_start?.slice(0, 4) ?? "2026"}`,
                   service: scheduleItem?.service ?? "FRETE",
                   accessory_cbs: options?.opportunity?.integration_tariff === "CBS" ? 400 : "",
                   accessory_cbs_pct: options?.opportunity?.integration_tariff === "CBS" ? 100 : "",
-                  accessory_net: options?.opportunity?.integration_tariff === "CBS" ? 0 : 400,
-                  accessory_net_pct: options?.opportunity?.integration_tariff === "CBS" ? 0 : 100,
+                  accessory_net: options?.opportunity?.integration_tariff === "CBS" ? "" : 400,
+                  accessory_net_pct: options?.opportunity?.integration_tariff === "CBS" ? "" : 100,
                   tolerance_vli_tariff: 0,
                   tolerance_client_tariff: 0,
                   tolerance_vli_volume: 0,
@@ -531,6 +547,48 @@ function QuotePage() {
               diesel_base_id: baseLabels.get(diesel_label),
               schedule_key: "",
             };
+          }}
+          generateTransform={(form) => {
+            const parentItem = editSchedule?.item ?? scheduleItem;
+            const flow = (options?.flows ?? []).find(
+              (entry: any) => entry.id === parentItem.flow_id,
+            );
+            if (!flow) throw new Error("Não foi possível localizar o Fluxo Planejado deste Item.");
+            const start = options?.opportunity?.contract_start;
+            const end = options?.opportunity?.contract_end;
+            if (!start || !end)
+              throw new Error("Preencha a vigência da Oportunidade antes de gerar Agendas.");
+            const firstMonth = Number(start.slice(0, 4) + start.slice(5, 7));
+            const lastMonth = Number(end.slice(0, 4) + end.slice(5, 7));
+            const used = new Set(
+              (options?.usedSchedules ?? []).map(
+                (row: any) => `${row.schedule_key}|${row.service}`,
+              ),
+            );
+            const division = String(form.division || "Todas");
+            const plaza = String(form.plaza || "TODAS_PRACAS_NACIONAL");
+            const service = String(form.service || "FRETE");
+            const current = Number(form.year) * 100 + Number(form.month);
+            for (
+              let period = Math.max(firstMonth, current);
+              period <= lastMonth;
+              period = period % 100 === 12 ? period + 89 : period + 1
+            ) {
+              const year = Math.floor(period / 100);
+              const month = period % 100;
+              const key = `${flow.code}|${year}${String(month).padStart(2, "0")}|${division}|${plaza}`;
+              if (!used.has(`${key}|${service}`)) {
+                return {
+                  year,
+                  month,
+                  service,
+                  diesel_base_date: `${String(month).padStart(2, "0")}/${year}`,
+                };
+              }
+            }
+            throw new Error(
+              "Não há um período livre para esse serviço dentro da vigência da Oportunidade.",
+            );
           }}
           onClose={() => {
             setScheduleItem(null);

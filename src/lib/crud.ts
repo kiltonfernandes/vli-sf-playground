@@ -277,6 +277,9 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
         instrument_type: opportunities.instrument_type,
         segment: opportunities.segment,
         stage: opportunities.stage,
+        integration_tariff: opportunities.integration_tariff,
+        contract_start: opportunities.contract_start,
+        contract_end: opportunities.contract_end,
       })
       .from(opportunities)
       .where(eq(opportunities.id, opportunityId));
@@ -287,7 +290,10 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
         id: planned_flows.id,
         code: planned_flows.code,
         modal: planned_flows.modal,
+        account_id: planned_flows.account_id,
+        origin_id: planned_flows.origin_id,
         origin_system: planned_flows.origin_system,
+        merchandise_id: planned_flows.merchandise_id,
         merchandise: merchandise.name,
         unit: merchandise.unit,
         origin_code: locations.code,
@@ -316,6 +322,9 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
     return {
       flows: options,
       dieselBases: await db.select().from(diesel_bases).orderBy(asc(diesel_bases.name)),
+      usedSchedules: await db
+        .select({ schedule_key: quote_schedules.schedule_key, service: quote_schedules.service })
+        .from(quote_schedules),
       opportunity,
     };
   },
@@ -1268,6 +1277,13 @@ async function validateQuoteSchedule(
     throw new Error("A oportunidade vinculada precisa estar em Negociação.");
   if (opp.segment !== "Ferroviário" || !["Contrato", "ACS"].includes(opp.instrument_type))
     throw new Error("Esta agenda atende somente Ferroviário de Contrato e ACS.");
+  if (!opp.contract_start || !opp.contract_end)
+    throw new Error("Preencha início e fim da vigência na Oportunidade antes de criar Agendas.");
+  const period = year * 100 + month;
+  const contractStart = Number(opp.contract_start.slice(0, 4) + opp.contract_start.slice(5, 7));
+  const contractEnd = Number(opp.contract_end.slice(0, 4) + opp.contract_end.slice(5, 7));
+  if (period < contractStart || period > contractEnd)
+    throw new Error("O período da Agenda deve estar dentro da vigência da Oportunidade.");
   if (
     !flow ||
     flow.account_id !== opp.account_id ||
@@ -1421,6 +1437,236 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
   }
   return { ok: true };
 });
+
+/** Valida e grava o Item e seus grupos de Agenda numa única transação. */
+export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const request = input as {
+      quoteId: string;
+      itemId?: string;
+      flowId: string;
+      itemService: string;
+      groups: Array<{
+        year: number;
+        month: number;
+        frequency: string;
+        period_window: string;
+        division: string;
+        plaza: string;
+        volume: number;
+        tariff: number;
+        diesel_base_id: string;
+        diesel_base_date: string;
+        services: Array<{ service: string; percent: number }>;
+      }>;
+    };
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, request.quoteId));
+    if (!quote || quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível editar uma Cotação em Rascunho.");
+    const [opp] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, quote.opportunity_id));
+    if (
+      !opp ||
+      opp.stage !== "Negociação" ||
+      opp.segment !== "Ferroviário" ||
+      !["Contrato", "ACS"].includes(opp.instrument_type)
+    )
+      throw new Error(
+        "A Oportunidade precisa ser Ferroviária, de Contrato/ACS e estar em Negociação.",
+      );
+    if (!opp.contract_start || !opp.contract_end)
+      throw new Error("Preencha início e fim da vigência na Oportunidade antes de montar Agendas.");
+    if (opp.instrument_type === "ACS") {
+      const start = new Date(`${opp.contract_start}T00:00:00Z`);
+      const limit = new Date(start);
+      limit.setMonth(limit.getMonth() + 12);
+      if (new Date(`${opp.contract_end}T00:00:00Z`) >= limit)
+        throw new Error("A vigência ACS deve ser inferior a 12 meses.");
+    }
+    const [flow] = await db
+      .select()
+      .from(planned_flows)
+      .where(eq(planned_flows.id, request.flowId));
+    if (
+      !flow ||
+      flow.account_id !== opp.account_id ||
+      flow.modal !== "Ferroviário" ||
+      flow.origin_system !== "FLOU"
+    )
+      throw new Error(
+        "O Fluxo precisa pertencer ao Cliente da Oportunidade, ter origem FLOU e modal Ferroviário.",
+      );
+    if (!RAIL_SERVICES.includes(request.itemService))
+      throw new Error("Selecione um serviço ferroviário válido para o Item.");
+    if (!request.groups.length) throw new Error("Adicione ao menos um grupo de Agenda.");
+    if (!["CBS", "Líquida", "Liquida"].includes(String(opp.integration_tariff)))
+      throw new Error("Defina na Oportunidade se a tarifa de integração será CBS ou líquida.");
+    const [dieselBase] = await db
+      .select()
+      .from(diesel_bases)
+      .where(eq(diesel_bases.id, request.groups[0].diesel_base_id));
+    if (!dieselBase) throw new Error("Selecione uma Base Diesel válida.");
+    const startMonth = Number(opp.contract_start.slice(0, 4) + opp.contract_start.slice(5, 7));
+    const endMonth = Number(opp.contract_end.slice(0, 4) + opp.contract_end.slice(5, 7));
+    const draftKeys = new Set<string>();
+    const rowsToInsert: Array<Record<string, unknown>> = [];
+    for (const group of request.groups) {
+      const period = group.year * 100 + group.month;
+      if (
+        !Number.isInteger(group.year) ||
+        !Number.isInteger(group.month) ||
+        group.month < 1 ||
+        group.month > 12 ||
+        period < startMonth ||
+        period > endMonth
+      )
+        throw new Error("O período de cada Agenda deve estar dentro da vigência da Oportunidade.");
+      if (!Number.isInteger(group.volume) || group.volume <= 0)
+        throw new Error("O volume ferroviário deve ser um número inteiro positivo.");
+      if (!Number.isFinite(group.tariff) || group.tariff <= 0)
+        throw new Error("Informe uma tarifa maior que zero.");
+      if (!group.diesel_base_id || group.diesel_base_id !== request.groups[0].diesel_base_id)
+        throw new Error("Use uma única Base Diesel por Fluxo nesta Cotação.");
+      if (!["Mensal", "Anual"].includes(group.frequency))
+        throw new Error("Periodicidade inválida na Agenda.");
+      if (
+        ![
+          "Mês",
+          "1ª Dezena",
+          "2ª Dezena",
+          "3ª Dezena",
+          "1ª Quinzena",
+          "2ª Quinzena",
+          "1ª Semana",
+          "2ª Semana",
+          "3ª Semana",
+          "4ª Semana",
+          "5ª Semana",
+        ].includes(group.period_window)
+      )
+        throw new Error("Período inválido na Agenda.");
+      if (
+        !/^\d{2}\/\d{4}$/.test(group.diesel_base_date) ||
+        Number(group.diesel_base_date.slice(0, 2)) < 1 ||
+        Number(group.diesel_base_date.slice(0, 2)) > 12
+      )
+        throw new Error("Informe a Data base diesel no formato MM/AAAA.");
+      if (!group.services.some((entry) => entry.service === "FRETE"))
+        throw new Error("Cada grupo precisa incluir o serviço FRETE.");
+      if (group.services.some((entry) => !RAIL_SERVICES.includes(entry.service)))
+        throw new Error("O grupo contém um serviço ferroviário inválido.");
+      if (
+        group.services.some(
+          (entry) =>
+            !Number.isFinite(Number(entry.percent)) ||
+            Number(entry.percent) < 0 ||
+            Number(entry.percent) > 100,
+        )
+      )
+        throw new Error("Cada percentual de rateio deve ficar entre 0 e 100.");
+      if (new Set(group.services.map((entry) => entry.service)).size !== group.services.length)
+        throw new Error("Não repita o mesmo serviço dentro de um grupo de Agenda.");
+      const percentTotal = group.services.reduce((sum, entry) => sum + Number(entry.percent), 0);
+      if (Math.abs(percentTotal - 100) > 0.2)
+        throw new Error("O rateio percentual do grupo precisa somar 100%.");
+      const scheduleKey = `${flow.code}|${group.year}${String(group.month).padStart(2, "0")}|${group.division}|${group.plaza}`;
+      if (draftKeys.has(scheduleKey))
+        throw new Error(
+          "Cada período precisa ser um grupo único; una os serviços do mesmo período no mesmo grupo.",
+        );
+      draftKeys.add(scheduleKey);
+      const existing = await db
+        .select()
+        .from(quote_schedules)
+        .where(eq(quote_schedules.schedule_key, scheduleKey));
+      const duplicate = existing.some((row) =>
+        group.services.some((entry) => row.service === entry.service),
+      );
+      if (duplicate)
+        throw new Error("Já existe Agenda para este Fluxo, período, divisão, praça e serviço.");
+      if (existing.length)
+        throw new Error(
+          "Este grupo de Agenda já tem linhas salvas. Edite o grupo existente para ajustar o rateio.",
+        );
+      const cbs = opp.integration_tariff === "CBS";
+      const cents = Math.round(group.tariff * 100);
+      const pctUnits = group.services.map((entry) => Math.round(Number(entry.percent) * 100));
+      const pctDiff = 10000 - pctUnits.reduce((sum, value) => sum + value, 0);
+      pctUnits[pctUnits.length - 1] += pctDiff;
+      const shares = group.services.map((_, index) =>
+        Math.floor((cents * pctUnits[index]) / 10000),
+      );
+      shares[shares.length - 1] += cents - shares.reduce((sum, value) => sum + value, 0);
+      group.services.forEach((entry, index) =>
+        rowsToInsert.push({
+          quote_line_item_id: "",
+          schedule_key: scheduleKey,
+          year: group.year,
+          month: group.month,
+          frequency: group.frequency,
+          period_window: group.period_window,
+          division: group.division,
+          plaza: group.plaza,
+          volume: group.volume,
+          tariff_cbs: cbs ? cents / 100 : null,
+          tariff_net: cbs ? 0 : cents / 100,
+          diesel_base_id: group.diesel_base_id,
+          diesel_base_date: group.diesel_base_date,
+          service: entry.service,
+          accessory_cbs: cbs ? shares[index] / 100 : null,
+          accessory_cbs_pct: cbs ? pctUnits[index] / 100 : null,
+          accessory_net: cbs ? null : shares[index] / 100,
+          accessory_net_pct: cbs ? null : pctUnits[index] / 100,
+          tolerance_vli_volume: 0,
+          tolerance_client_volume: 0,
+          tolerance_vli_tariff: 0,
+          tolerance_client_tariff: 0,
+        }),
+      );
+    }
+    const now = new Date().toISOString();
+    const itemId = request.itemId ?? crypto.randomUUID();
+    if (request.itemId) {
+      const [existingItem] = await db
+        .select()
+        .from(quote_line_items)
+        .where(eq(quote_line_items.id, request.itemId));
+      if (
+        !existingItem ||
+        existingItem.quote_id !== request.quoteId ||
+        existingItem.planned_flow_id !== request.flowId
+      )
+        throw new Error("O Item selecionado não pertence a esta Cotação e a este Fluxo.");
+    }
+    await db.transaction(async (tx) => {
+      if (!request.itemId) {
+        await tx.insert(quote_line_items).values({
+          id: itemId,
+          quote_id: request.quoteId,
+          planned_flow_id: request.flowId,
+          service: request.itemService,
+          volume_total: 0,
+          revenue_total: 0,
+          top_eligible: 0,
+          created_at: now,
+          updated_at: now,
+        });
+      }
+      for (const row of rowsToInsert)
+        await tx.insert(quote_schedules).values({
+          ...row,
+          quote_line_item_id: itemId,
+          id: crypto.randomUUID(),
+          created_at: now,
+          updated_at: now,
+        } as typeof quote_schedules.$inferInsert);
+    });
+    return { itemId, scheduleCount: rowsToInsert.length };
+  },
+);
 
 /** Saves up to 100 records in one server call, used by bulk create and update. */
 export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(

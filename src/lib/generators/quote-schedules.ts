@@ -11,7 +11,7 @@ export const quoteSchedulesGenerator: Generator = (f) => ({
   tariff_net: Number(f.number.float({ min: 180, max: 520, fractionDigits: 2 }).toFixed(2)),
   diesel_label: "ELDORADO",
   accessory_net: 0,
-  accessory_net_pct: 0,
+  accessory_net_pct: 100,
   tolerance_vli_tariff: 0,
   tolerance_client_tariff: 0,
   tolerance_vli_volume: 0,
