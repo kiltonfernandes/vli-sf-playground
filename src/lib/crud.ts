@@ -12,6 +12,10 @@ import {
   quotes,
   quote_line_items,
   quote_schedules,
+  approvers,
+  recommended_prices,
+  quote_approvals,
+  app_settings,
   TABLES,
   type TableName,
 } from "./schema";
@@ -27,7 +31,7 @@ type SaveInput = {
 /** Painel inicial: top contas por LTV + contagem de contatos. */
 export const homeDashboard = createServerFn({ method: "GET" }).handler(async () => {
   await ensureSchema();
-  const [top, contactRows] = await Promise.all([
+  const [top, contactRows, approvalRows] = await Promise.all([
     db
       .select({
         id: accounts.id,
@@ -40,8 +44,16 @@ export const homeDashboard = createServerFn({ method: "GET" }).handler(async () 
       .from(accounts)
       .orderBy(desc(accounts.lifetime_value)),
     db.select({ id: contacts.id }).from(contacts),
+    db
+      .select({ id: quote_approvals.id })
+      .from(quote_approvals)
+      .where(eq(quote_approvals.status, "Pendente")),
   ]);
-  return { accounts: top, contactCount: contactRows.length };
+  return {
+    accounts: top,
+    contactCount: contactRows.length,
+    pendingApprovals: approvalRows.length,
+  };
 });
 
 export const listOpportunities = createServerFn({ method: "GET" }).handler(async () => {
@@ -166,6 +178,9 @@ export const listQuotes = createServerFn({ method: "GET" }).handler(async () => 
       tariff_mode: quotes.tariff_mode,
       status: quotes.status,
       is_synced: quotes.is_synced,
+      price_status: quotes.price_status,
+      max_discount_pct: quotes.max_discount_pct,
+      alcada_level: quotes.alcada_level,
       seed: quotes.seed,
       created_at: quotes.created_at,
       updated_at: quotes.updated_at,
@@ -202,6 +217,9 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
       tariff_mode: quotes.tariff_mode,
       status: quotes.status,
       is_synced: quotes.is_synced,
+      price_status: quotes.price_status,
+      max_discount_pct: quotes.max_discount_pct,
+      alcada_level: quotes.alcada_level,
       seed: quotes.seed,
       created_at: quotes.created_at,
       updated_at: quotes.updated_at,
@@ -450,8 +468,35 @@ export const listReferenceRecords = createServerFn({ method: "GET" }).handler(
   async ({ data: input }) => {
     await ensureSchema();
     const { table } = input as { table: string };
-    if (!["locations", "merchandise", "diesel_bases", "planned_flows"].includes(table))
+    if (
+      ![
+        "locations",
+        "merchandise",
+        "diesel_bases",
+        "planned_flows",
+        "approvers",
+        "recommended_prices",
+      ].includes(table)
+    )
       throw new Error("Cadastro ferroviário inválido.");
+    if (table === "recommended_prices") {
+      return db
+        .select({
+          id: recommended_prices.id,
+          planned_flow_id: recommended_prices.planned_flow_id,
+          flow_code: planned_flows.code,
+          service: recommended_prices.service,
+          year: recommended_prices.year,
+          month: recommended_prices.month,
+          unit_price: recommended_prices.unit_price,
+          source: recommended_prices.source,
+          created_at: recommended_prices.created_at,
+          updated_at: recommended_prices.updated_at,
+        })
+        .from(recommended_prices)
+        .innerJoin(planned_flows, eq(recommended_prices.planned_flow_id, planned_flows.id))
+        .orderBy(asc(planned_flows.code), asc(recommended_prices.year), asc(recommended_prices.month));
+    }
     const target = TABLES[table as TableName] as any;
     return db
       .select()
@@ -464,8 +509,40 @@ export const getReferenceRecord = createServerFn({ method: "GET" }).handler(
   async ({ data: input }) => {
     await ensureSchema();
     const { table, id } = input as { table: string; id: string };
-    if (!["locations", "merchandise", "diesel_bases", "planned_flows"].includes(table))
+    if (
+      ![
+        "locations",
+        "merchandise",
+        "diesel_bases",
+        "planned_flows",
+        "approvers",
+        "recommended_prices",
+      ].includes(table)
+    )
       throw new Error("Cadastro ferroviário inválido.");
+    if (table === "recommended_prices") {
+      const [record] = await db
+        .select({
+          id: recommended_prices.id,
+          planned_flow_id: recommended_prices.planned_flow_id,
+          flow_code: planned_flows.code,
+          service: recommended_prices.service,
+          year: recommended_prices.year,
+          month: recommended_prices.month,
+          unit_price: recommended_prices.unit_price,
+          source: recommended_prices.source,
+          created_at: recommended_prices.created_at,
+          updated_at: recommended_prices.updated_at,
+        })
+        .from(recommended_prices)
+        .innerJoin(planned_flows, eq(recommended_prices.planned_flow_id, planned_flows.id))
+        .where(eq(recommended_prices.id, id));
+      if (!record) return null;
+      return {
+        ...record,
+        name: `${record.flow_code} · ${record.service} · ${String(record.month).padStart(2, "0")}/${record.year}`,
+      };
+    }
     const target = TABLES[table as TableName] as any;
     const [record] = await db.select().from(target).where(eq(target.id, id));
     if (!record) return null;
@@ -615,6 +692,8 @@ export const syncQuote = createServerFn({ method: "POST" }).handler(async ({ dat
   const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!quote) throw new Error("Cotação não encontrada.");
   if (quote.status !== "Concluída") throw new Error("Conclua a Cotação antes de sincronizar.");
+  if (!["Ok", "Aprovada"].includes(quote.price_status))
+    throw new Error("Valide os preços da Cotação antes de sincronizar.");
   const [opportunity] = await db
     .select()
     .from(opportunities)
@@ -897,6 +976,17 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     )
   )
     throw new Error("ACS não pode ter Take or Pay.");
+  const priceCheck = await computeQuotePriceComparison(id);
+  if (priceCheck.rows.some((row) => row.missing))
+    throw new Error(
+      "Preço recomendado não encontrado no Jetsons para um ou mais Itens. Gere os preços recomendados ausentes na Cotação e valide novamente.",
+    );
+  if (priceCheck.price_status === "Pendente alçada") {
+    await upsertOpenApproval(id, priceCheck);
+    throw new Error(
+      `Desvio de preço de ${priceCheck.max_discount_pct.toFixed(2)}% exige alçada ${priceCheck.alcada_level}. A solicitação foi enviada para a fila de Aprovação.`,
+    );
+  }
   await db
     .update(quotes)
     .set({ status: "Concluída", updated_at: new Date().toISOString() })
@@ -1153,6 +1243,7 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
           );
       }
     });
+    await ensureRecommendedPricesForQuote(quoteId, seed);
     return {
       id: quoteId,
       quote_number: quoteNum,
@@ -1549,6 +1640,10 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
     // Sempre gera o id no servidor — nunca confia no payload do cliente.
     await db.insert(t).values({ id: crypto.randomUUID(), ...values, created_at: now } as never);
   }
+  if (table === "quote_line_items" || table === "quote_schedules") {
+    const quoteId = await quoteIdForRecord(table, recordId, data as Record<string, unknown>);
+    await markQuotePricesStale(quoteId);
+  }
   return { ok: true };
 });
 
@@ -1824,6 +1919,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
           updated_at: now,
         } as typeof quote_schedules.$inferInsert);
     });
+    await markQuotePricesStale(request.quoteId);
     return { itemId, scheduleCount: rowsToInsert.length };
   },
 );
@@ -1886,6 +1982,14 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
         }),
       );
     }
+    if (table === "quote_line_items" || table === "quote_schedules") {
+      const quoteIds = new Set<string>();
+      for (const { recordId, data } of records) {
+        const quoteId = await quoteIdForRecord(table, recordId, data);
+        if (quoteId) quoteIds.add(quoteId);
+      }
+      for (const quoteId of quoteIds) await markQuotePricesStale(quoteId);
+    }
     return { ok: true, count: records.length };
   },
 );
@@ -1916,6 +2020,10 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
   const { table, id } = input as { table: TableName; id: string };
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
+  const staleQuoteId =
+    table === "quote_line_items" || table === "quote_schedules"
+      ? await quoteIdForRecord(table, id, undefined)
+      : "";
   if (table === "accounts") {
     await db
       .delete(opportunities)
@@ -1928,6 +2036,7 @@ export const deleteRecord = createServerFn({ method: "POST" }).handler(async ({ 
     .where(
       id ? eq((t as typeof t & { id: never }).id, id) : isNull((t as typeof t & { id: never }).id),
     );
+  await markQuotePricesStale(staleQuoteId);
   return { ok: true };
 });
 
@@ -1942,6 +2051,12 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
     for (const table of Object.values(TABLES).reverse() as any[]) {
       await db.delete(table);
     }
+    const resetNow = new Date().toISOString();
+    await db.insert(app_settings).values([
+      { key: "alcada_gg_pct", value: "5", updated_at: resetNow },
+      { key: "alcada_diretoria_pct", value: "7", updated_at: resetNow },
+      { key: "current_approver_id", value: "", updated_at: resetNow },
+    ]);
 
     if (mode === "factory") {
       const now = new Date().toISOString();
@@ -2016,8 +2131,686 @@ export const resetPlaygroundData = createServerFn({ method: "POST" }).handler(
           updated_at: now,
         },
       ]);
+      await db.insert(approvers).values([
+        {
+          id: crypto.randomUUID(),
+          name: "Marina Duarte",
+          level: "Diretoria",
+          email: "marina.duarte@example.com",
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: crypto.randomUUID(),
+          name: "Ricardo Nunes",
+          level: "Gerente Geral",
+          email: "ricardo.nunes@example.com",
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: crypto.randomUUID(),
+          name: "Fernanda Lopes",
+          level: "Gerente Geral",
+          email: "fernanda.lopes@example.com",
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
     }
 
     return { ok: true, mode };
   },
 );
+
+// ===== Margem/Alçada: validação de preço contra o recomendado (Jetsons mock) =====
+
+/** Lê limiares configurados e o aprovador logado. */
+async function readAppSettings() {
+  const rows = await db.select().from(app_settings);
+  const map = new Map(rows.map((row) => [row.key, row.value]));
+  const gg = Number(map.get("alcada_gg_pct") ?? 5);
+  const dir = Number(map.get("alcada_diretoria_pct") ?? 7);
+  const approverId = map.get("current_approver_id") ?? "";
+  const [approver] = approverId
+    ? await db.select().from(approvers).where(eq(approvers.id, approverId))
+    : [];
+  return {
+    thresholds: { gg, dir },
+    currentApprover: approver ?? null,
+  };
+}
+
+type PriceComparison = {
+  quote_id: string;
+  tariff_mode: string;
+  price_status: string;
+  alcada_level: string;
+  max_discount_pct: number;
+  thresholds: { gg: number; dir: number };
+  approved: boolean;
+  open_approval: boolean;
+  rows: Array<{
+    item_id: string;
+    service: string;
+    flow_code: string;
+    route: string;
+    volume_total: number;
+    practiced_total: number;
+    recommended_total: number | null;
+    deviation_pct: number | null;
+    missing: boolean;
+    missing_periods: string[];
+  }>;
+};
+
+/** Compara preço praticado x preço recomendado de cada Item e calcula a alçada da Cotação. */
+async function computeQuotePriceComparison(quoteId: string): Promise<PriceComparison> {
+  const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!quote) throw new Error("Cotação não encontrada.");
+  const [opp] = await db
+    .select()
+    .from(opportunities)
+    .where(eq(opportunities.id, quote.opportunity_id));
+  const tariffMode = quote.tariff_mode || opp?.integration_tariff || "Líquida";
+  const useCbs = tariffMode === "CBS";
+  const items = await db
+    .select()
+    .from(quote_line_items)
+    .where(eq(quote_line_items.quote_id, quoteId));
+  const flowIds = [...new Set(items.map((item) => item.planned_flow_id))];
+  const flows = flowIds.length
+    ? await db.select().from(planned_flows).where(inArray(planned_flows.id, flowIds))
+    : [];
+  const flowById = new Map(flows.map((flow) => [flow.id, flow]));
+  const locationIds = flows.flatMap((flow) => [flow.origin_id, flow.destination_id]);
+  const locationRows = locationIds.length
+    ? await db.select().from(locations).where(inArray(locations.id, locationIds))
+    : [];
+  const locationById = new Map(locationRows.map((location) => [location.id, location]));
+  const prices = flowIds.length
+    ? await db
+        .select()
+        .from(recommended_prices)
+        .where(inArray(recommended_prices.planned_flow_id, flowIds))
+    : [];
+  const priceMap = new Map(
+    prices.map((price) => [
+      `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`,
+      price,
+    ]),
+  );
+  const rows: PriceComparison["rows"] = [];
+  for (const item of items) {
+    const schedules = await db
+      .select()
+      .from(quote_schedules)
+      .where(eq(quote_schedules.quote_line_item_id, item.id))
+      .orderBy(asc(quote_schedules.year), asc(quote_schedules.month));
+    const flow = flowById.get(item.planned_flow_id);
+    let practiced = 0,
+      recommended = 0,
+      found = 0,
+      volumeTotal = 0;
+    const missingPeriods: string[] = [];
+    for (const schedule of schedules) {
+      const unit = Number(
+        useCbs
+          ? (schedule.accessory_cbs ?? schedule.tariff_cbs ?? 0)
+          : (schedule.accessory_net ?? schedule.tariff_net ?? 0),
+      );
+      practiced += unit * schedule.volume;
+      volumeTotal += schedule.volume;
+      const price = priceMap.get(
+        `${item.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`,
+      );
+      if (price) {
+        recommended += price.unit_price * schedule.volume;
+        found++;
+      } else missingPeriods.push(`${String(schedule.month).padStart(2, "0")}/${schedule.year}`);
+    }
+    const origin = locationById.get(flow?.origin_id ?? "");
+    const destination = locationById.get(flow?.destination_id ?? "");
+    rows.push({
+      item_id: item.id,
+      service: item.service,
+      flow_code: flow?.code ?? "?",
+      route: `${origin?.code ?? "?"} → ${destination?.code ?? "?"}`,
+      volume_total: volumeTotal,
+      practiced_total: practiced,
+      recommended_total: found > 0 ? recommended : null,
+      deviation_pct: found > 0 && recommended > 0 ? ((practiced - recommended) / recommended) * 100 : null,
+      missing: schedules.length > 0 && found < schedules.length,
+      missing_periods: missingPeriods,
+    });
+  }
+  const { thresholds } = await readAppSettings();
+  const discounts = rows
+    .map((row) => (row.deviation_pct === null ? 0 : Math.max(0, -row.deviation_pct)))
+    .filter((value) => value > 0);
+  const maxDiscount = discounts.length ? Math.max(...discounts) : 0;
+  const exceedsDir = rows.some(
+    (row) => row.deviation_pct !== null && -row.deviation_pct > thresholds.dir,
+  );
+  const exceedsGg = rows.some(
+    (row) => row.deviation_pct !== null && -row.deviation_pct > thresholds.gg,
+  );
+  const alcadaLevel = exceedsDir ? "Diretoria" : exceedsGg ? "Gerente Geral" : "Sem alçada";
+  const anyMissing = rows.some((row) => row.missing);
+  const approved = quote.price_status === "Aprovada";
+  const priceStatus = approved
+    ? "Aprovada"
+    : anyMissing
+      ? "Não validada"
+      : alcadaLevel === "Sem alçada"
+        ? "Ok"
+        : "Pendente alçada";
+  const openApprovals = await db
+    .select({ id: quote_approvals.id, status: quote_approvals.status })
+    .from(quote_approvals)
+    .where(eq(quote_approvals.quote_id, quoteId));
+  if (!approved)
+    await db
+      .update(quotes)
+      .set({
+        price_status: priceStatus,
+        max_discount_pct: maxDiscount,
+        alcada_level: approved ? quote.alcada_level : alcadaLevel,
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(quotes.id, quoteId));
+  return {
+    quote_id: quoteId,
+    tariff_mode: tariffMode,
+    price_status: priceStatus,
+    alcada_level: approved ? quote.alcada_level : alcadaLevel,
+    max_discount_pct: maxDiscount,
+    thresholds,
+    approved,
+    open_approval:
+      openApprovals.some((approval) => approval.status === "Pendente") &&
+      priceStatus === "Pendente alçada",
+    rows,
+  };
+}
+
+/** Marca os preços da Cotação como desatualizados após editar itens ou agendas. */
+async function markQuotePricesStale(quoteId: string) {
+  if (!quoteId) return;
+  await db
+    .update(quotes)
+    .set({ price_status: "Não validada", updated_at: new Date().toISOString() })
+    .where(eq(quotes.id, quoteId));
+}
+
+async function quoteIdForRecord(table: string, recordId: string | null | undefined, data: Record<string, unknown> | undefined) {
+  if (table === "quote_line_items") return String(data?.quote_id ?? "");
+  if (table === "quote_schedules") {
+    if (data?.quote_line_item_id) {
+      const [item] = await db
+        .select({ quote_id: quote_line_items.quote_id })
+        .from(quote_line_items)
+        .where(eq(quote_line_items.id, String(data.quote_line_item_id)));
+      return item?.quote_id ?? "";
+    }
+    if (recordId) {
+      const [row] = await db
+        .select({ quote_id: quote_line_items.quote_id })
+        .from(quote_schedules)
+        .innerJoin(quote_line_items, eq(quote_schedules.quote_line_item_id, quote_line_items.id))
+        .where(eq(quote_schedules.id, recordId));
+      return row?.quote_id ?? "";
+    }
+  }
+  return "";
+}
+
+/** Valida os preços da Cotação contra o recomendado e devolve o comparativo por Item. */
+export const validateQuotePrices = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id } = input as { id: string };
+    const result = await computeQuotePriceComparison(id);
+    if (result.price_status === "Ok")
+      await db
+        .update(quote_approvals)
+        .set({ status: "Cancelada", updated_at: new Date().toISOString() })
+        .where(eq(quote_approvals.quote_id, id));
+    return result;
+  },
+);
+
+/** Cria/atualiza a solicitação de alçada aberta de uma Cotação. */
+async function upsertOpenApproval(quoteId: string, result: PriceComparison) {
+  const now = new Date().toISOString();
+  const open = await db
+    .select()
+    .from(quote_approvals)
+    .where(eq(quote_approvals.quote_id, quoteId));
+  for (const approval of open)
+    if (approval.status === "Pendente")
+      await db
+        .update(quote_approvals)
+        .set({ status: "Cancelada", updated_at: now })
+        .where(eq(quote_approvals.id, approval.id));
+  await db.insert(quote_approvals).values({
+    id: crypto.randomUUID(),
+    quote_id: quoteId,
+    alcada_level: result.alcada_level,
+    status: "Pendente",
+    max_discount_pct: result.max_discount_pct,
+    requested_at: now,
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+/** Envia a Cotação (com desvio acima do limite) para a fila de aprovação de alçada. */
+export const submitQuoteForApproval = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id } = input as { id: string };
+    const result = await computeQuotePriceComparison(id);
+    if (result.price_status !== "Pendente alçada")
+      throw new Error("Somente cotações com desvio acima do limite podem ser enviadas.");
+    await upsertOpenApproval(id, result);
+    return {
+      ok: true,
+      alcada_level: result.alcada_level,
+      max_discount_pct: result.max_discount_pct,
+    };
+  },
+);
+
+/** Gera (Faker, seed da Cotação) os preços recomendados ausentes de cada Item. */
+export const generateMissingRecommendedPrices = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id } = input as { id: string };
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    const f = seededFaker(Number(quote.seed) + 7);
+    const items = await db
+      .select()
+      .from(quote_line_items)
+      .where(eq(quote_line_items.quote_id, id));
+    const [opp] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, quote.opportunity_id));
+    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+    const prices = await db
+      .select()
+      .from(recommended_prices)
+      .where(
+        items.length
+          ? inArray(recommended_prices.planned_flow_id, items.map((item) => item.planned_flow_id))
+          : eq(recommended_prices.planned_flow_id, ""),
+      );
+    const priceMap = new Map(
+      prices.map((price) => [
+        `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`,
+        price,
+      ]),
+    );
+    const now = new Date().toISOString();
+    let created = 0;
+    for (const item of items) {
+      const schedules = await db
+        .select()
+        .from(quote_schedules)
+        .where(eq(quote_schedules.quote_line_item_id, item.id));
+      for (const schedule of schedules) {
+        const key = `${item.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`;
+        if (priceMap.has(key)) continue;
+        const practicedUnit = Number(
+          useCbs
+            ? (schedule.accessory_cbs ?? schedule.tariff_cbs ?? 0)
+            : (schedule.accessory_net ?? schedule.tariff_net ?? 0),
+        );
+        // Desvio semeado entre -12% e +5% para simular cenários de alçada.
+        const delta = f.number.float({ min: -0.12, max: 0.05 });
+        const unitPrice = Number((practicedUnit * (1 + delta)).toFixed(2));
+        if (unitPrice <= 0) continue;
+        await db.insert(recommended_prices).values({
+          id: crypto.randomUUID(),
+          planned_flow_id: item.planned_flow_id,
+          service: schedule.service,
+          year: schedule.year,
+          month: schedule.month,
+          unit_price: unitPrice,
+          source: "Jetsons (mock)",
+          created_at: now,
+          updated_at: now,
+        });
+        priceMap.set(key, { unit_price: unitPrice } as never);
+        created++;
+      }
+    }
+    return { ok: true, created };
+  },
+);
+
+/** Aplica o preço recomendado em todos os grupos de agenda da Cotação. */
+export const applyRecommendedPrices = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id } = input as { id: string };
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    if (quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível aplicar preços em uma Cotação em Rascunho.");
+    const result = await computeQuotePriceComparison(id);
+    if (result.rows.some((row) => row.missing))
+      throw new Error("Gere os preços recomendados ausentes antes de aplicar.");
+    const items = await db
+      .select()
+      .from(quote_line_items)
+      .where(eq(quote_line_items.quote_id, id));
+    const prices = await db
+      .select()
+      .from(recommended_prices)
+      .where(
+        inArray(
+          recommended_prices.planned_flow_id,
+          items.map((item) => item.planned_flow_id),
+        ),
+      );
+    const priceMap = new Map(
+      prices.map((price) => [
+        `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`,
+        price,
+      ]),
+    );
+    const [opp] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, quote.opportunity_id));
+    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+    const groups = new Map<string, Array<typeof quote_schedules.$inferSelect>>();
+    for (const item of items) {
+      const schedules = await db
+        .select()
+        .from(quote_schedules)
+        .where(eq(quote_schedules.quote_line_item_id, item.id));
+      for (const schedule of schedules)
+        groups.set(schedule.schedule_key, [...(groups.get(schedule.schedule_key) ?? []), schedule]);
+    }
+    const now = new Date().toISOString();
+    for (const group of groups.values()) {
+      const shares = group.map((schedule) => {
+        const item = items.find((entry) => entry.id === schedule.quote_line_item_id);
+        const price = item
+          ? priceMap.get(`${item.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`)
+          : undefined;
+        return Math.max(1, Math.round(Number(price?.unit_price ?? 0) * 100));
+      });
+      const totalCents = shares.reduce((sum, share) => sum + share, 0);
+      await Promise.all(
+        group.map((schedule, index) => {
+          const pct = Number(((shares[index] / totalCents) * 100).toFixed(2));
+          return db
+            .update(quote_schedules)
+            .set({
+              ...(useCbs
+                ? {
+                    tariff_cbs: totalCents / 100,
+                    accessory_cbs: shares[index] / 100,
+                    accessory_cbs_pct: pct,
+                  }
+                : {
+                    tariff_net: totalCents / 100,
+                    accessory_net: shares[index] / 100,
+                    accessory_net_pct: pct,
+                  }),
+              updated_at: now,
+            })
+            .where(eq(quote_schedules.id, schedule.id));
+        }),
+      );
+    }
+    await markQuotePricesStale(id);
+    const fresh = await computeQuotePriceComparison(id);
+    return { ok: true, result: fresh };
+  },
+);
+
+/** Lista aprovadores cadastrados. */
+export const listApprovers = createServerFn({ method: "GET" }).handler(async () => {
+  await ensureSchema();
+  return db.select().from(approvers).orderBy(asc(approvers.name));
+});
+
+/** Limiares de alçada e aprovador logado. */
+export const getAppSettings = createServerFn({ method: "GET" }).handler(async () => {
+  await ensureSchema();
+  const settings = await readAppSettings();
+  return {
+    thresholds: settings.thresholds,
+    currentApprover: settings.currentApprover,
+  };
+});
+
+/** Loga (ou desloga) o aprovador atual do playground. */
+export const setCurrentApprover = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id } = input as { id: string };
+    if (id) {
+      const [approver] = await db.select().from(approvers).where(eq(approvers.id, id));
+      if (!approver) throw new Error("Aprovador não encontrado.");
+    }
+    await db
+      .insert(app_settings)
+      .values({ key: "current_approver_id", value: id, updated_at: new Date().toISOString() })
+      .onConflictDoUpdate({
+        target: app_settings.key,
+        set: { value: id, updated_at: new Date().toISOString() },
+      });
+    return { ok: true };
+  },
+);
+
+/** Atualiza os limiares de alçada (percentuais sem alçada e Diretoria). */
+export const updateAlcadaThresholds = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { gg, dir } = input as { gg: number; dir: number };
+    const ggValue = Number(gg),
+      dirValue = Number(dir);
+    if (
+      !Number.isFinite(ggValue) ||
+      !Number.isFinite(dirValue) ||
+      ggValue <= 0 ||
+      dirValue <= 0 ||
+      ggValue >= dirValue ||
+      dirValue > 100
+    )
+      throw new Error("Os limiares precisam ser positivos, com Gerente Geral abaixo da Diretoria.");
+    const now = new Date().toISOString();
+    for (const [key, value] of [
+      ["alcada_gg_pct", String(ggValue)],
+      ["alcada_diretoria_pct", String(dirValue)],
+    ] as const)
+      await db
+        .insert(app_settings)
+        .values({ key, value, updated_at: now })
+        .onConflictDoUpdate({ target: app_settings.key, set: { value, updated_at: now } });
+    return { ok: true, thresholds: { gg: ggValue, dir: dirValue } };
+  },
+);
+
+type ApprovalSummary = {
+  id: string;
+  quote_id: string;
+  quote_number: string;
+  quote_name: string;
+  opportunity_id: string;
+  opportunity_name: string;
+  account_id: string;
+  account_name: string;
+  alcada_level: string;
+  status: string;
+  max_discount_pct: number;
+  requested_at: string;
+  decided_at: string | null;
+  decided_by_name: string | null;
+  decision_note: string | null;
+  can_decide: boolean;
+};
+
+async function approvalRows(where: any): Promise<ApprovalSummary[]> {
+  const { currentApprover } = await readAppSettings();
+  const rows = await db
+    .select({
+      id: quote_approvals.id,
+      quote_id: quote_approvals.quote_id,
+      quote_number: quotes.quote_number,
+      quote_name: quotes.name,
+      opportunity_id: opportunities.id,
+      opportunity_name: opportunities.name,
+      account_id: accounts.id,
+      account_name: accounts.name,
+      alcada_level: quote_approvals.alcada_level,
+      status: quote_approvals.status,
+      max_discount_pct: quote_approvals.max_discount_pct,
+      requested_at: quote_approvals.requested_at,
+      decided_at: quote_approvals.decided_at,
+      decided_by_name: quote_approvals.decided_by_name,
+      decision_note: quote_approvals.decision_note,
+    })
+    .from(quote_approvals)
+    .innerJoin(quotes, eq(quote_approvals.quote_id, quotes.id))
+    .innerJoin(opportunities, eq(quotes.opportunity_id, opportunities.id))
+    .innerJoin(accounts, eq(opportunities.account_id, accounts.id))
+    .where(where)
+    .orderBy(desc(quote_approvals.requested_at))
+    .limit(100);
+  return rows.map((row) => ({
+    ...row,
+    can_decide:
+      !!currentApprover &&
+      (row.status !== "Pendente" ||
+        (currentApprover.level === "Diretoria" ? true : currentApprover.level === row.alcada_level)),
+  }));
+}
+
+/** Fila de aprovação: pendências e histórico com o aprovador logado. */
+export const listApprovals = createServerFn({ method: "GET" }).handler(async () => {
+  await ensureSchema();
+  const settings = await readAppSettings();
+  const pending = await approvalRows(eq(quote_approvals.status, "Pendente"));
+  const decided = await approvalRows(
+    inArray(quote_approvals.status, ["Aprovada", "Rejeitada", "Cancelada"]),
+  );
+  return { pending, decided, currentApprover: settings.currentApprover, thresholds: settings.thresholds };
+});
+
+/** Detalhe de uma solicitação de alçada. */
+export const getApprovalFull = createServerFn({ method: "GET" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id } = input as { id: string };
+    const [row] = await approvalRows(eq(quote_approvals.id, id));
+    return row ?? null;
+  },
+);
+
+/** Decide uma solicitação de alçada como o aprovador logado. */
+export const decideQuoteApproval = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id, decision, note } = input as { id: string; decision: string; note?: string };
+    if (decision !== "Aprovada" && decision !== "Rejeitada")
+      throw new Error("Decisão inválida.");
+    const [approval] = await db
+      .select()
+      .from(quote_approvals)
+      .where(eq(quote_approvals.id, id));
+    if (!approval) throw new Error("Solicitação de alçada não encontrada.");
+    if (approval.status !== "Pendente")
+      throw new Error("Esta solicitação já foi decidida.");
+    const { currentApprover } = await readAppSettings();
+    if (!currentApprover)
+      throw new Error("Logue como aprovador em Configurações para decidir alçadas.");
+    if (
+      approval.alcada_level === "Diretoria" &&
+      currentApprover.level !== "Diretoria"
+    )
+      throw new Error("Esta alçada exige um aprovador da Diretoria.");
+    const now = new Date().toISOString();
+    await db
+      .update(quote_approvals)
+      .set({
+        status: decision,
+        decided_at: now,
+        decided_by: currentApprover.id,
+        decided_by_name: currentApprover.name,
+        decision_note: note ?? null,
+        updated_at: now,
+      })
+      .where(eq(quote_approvals.id, id));
+    await db
+      .update(quotes)
+      .set({ price_status: decision, updated_at: now })
+      .where(eq(quotes.id, approval.quote_id));
+    return { ok: true, decision, decided_by: currentApprover.name };
+  },
+);
+
+/** Garante preços recomendados (Jetsons mock) para todos os serviços/períodos da Cotação. */
+async function ensureRecommendedPricesForQuote(quoteId: string, seed: number) {
+  const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!quote) return;
+  const f = seededFaker(Number(seed) + 7);
+  const items = await db
+    .select()
+    .from(quote_line_items)
+    .where(eq(quote_line_items.quote_id, quoteId));
+  if (!items.length) return;
+  const [opp] = await db
+    .select()
+    .from(opportunities)
+    .where(eq(opportunities.id, quote.opportunity_id));
+  const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+  const prices = await db
+    .select()
+    .from(recommended_prices)
+    .where(
+      inArray(recommended_prices.planned_flow_id, items.map((item) => item.planned_flow_id)),
+    );
+  const priceMap = new Set(
+    prices.map((price) => `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`),
+  );
+  const now = new Date().toISOString();
+  for (const item of items) {
+    const schedules = await db
+      .select()
+      .from(quote_schedules)
+      .where(eq(quote_schedules.quote_line_item_id, item.id));
+    for (const schedule of schedules) {
+      const key = `${item.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`;
+      if (priceMap.has(key)) continue;
+      const practicedUnit = Number(
+        useCbs
+          ? (schedule.accessory_cbs ?? schedule.tariff_cbs ?? 0)
+          : (schedule.accessory_net ?? schedule.tariff_net ?? 0),
+      );
+      const delta = f.number.float({ min: -0.12, max: 0.05 });
+      const unitPrice = Number((practicedUnit * (1 + delta)).toFixed(2));
+      if (unitPrice <= 0) continue;
+      await db.insert(recommended_prices).values({
+        id: crypto.randomUUID(),
+        planned_flow_id: item.planned_flow_id,
+        service: schedule.service,
+        year: schedule.year,
+        month: schedule.month,
+        unit_price: unitPrice,
+        source: "Jetsons (mock)",
+        created_at: now,
+        updated_at: now,
+      });
+      priceMap.add(key);
+    }
+  }
+}
