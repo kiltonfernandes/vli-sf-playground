@@ -16,6 +16,8 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v8.21.17` — Add a Salesforce-style approval tracking view with process history and direct access from the approval queue and the quote status button.
+
 - `v8.21.16` — Expose the first-readjustment date in the Opportunity creation form so long-term opportunities can satisfy the existing validation rule.
 
 - `v8.21.15` — Randomize Take or Pay tolerances per Agenda when creating a batch, while keeping all-zero batches without Take or Pay.

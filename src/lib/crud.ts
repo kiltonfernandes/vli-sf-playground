@@ -4063,6 +4063,7 @@ type PriceComparison = {
   thresholds: { gg: number; dir: number };
   approved: boolean;
   open_approval: boolean;
+  approval_id: string | null;
   /** Detalhe de cada Agenda da Cotação para o comparativo visual por linha. */
   schedules: Array<{
     schedule_id: string;
@@ -4267,6 +4268,7 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
     open_approval:
       openApprovals.some((approval) => approval.status === "Pendente") &&
       priceStatus === "Pendente alçada",
+    approval_id: openApprovals.find((approval) => approval.status === "Pendente")?.id ?? null,
     schedules: scheduleRows,
     rows,
   };

@@ -1996,13 +1996,17 @@ function PricePanel({
             {result.price_status === "Pendente alçada" && (
               <button
                 className="sf-btn sf-btn--brand"
-                disabled={busy || result.open_approval}
+                disabled={busy}
                 title={
                   result.open_approval
-                    ? "Já existe uma solicitação aberta na fila de Aprovação"
+                    ? "Abre o acompanhamento da solicitação na fila de Aprovação"
                     : "Envia os preços desta Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
                 }
                 onClick={async () => {
+                  if (result.open_approval && result.approval_id) {
+                    navigate({ to: "/approvals/$id", params: { id: result.approval_id } });
+                    return;
+                  }
                   setBusy(true);
                   try {
                     await submitQuoteForApproval({ data: { id: result.quote_id } });

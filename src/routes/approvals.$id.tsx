@@ -97,6 +97,13 @@ function ApprovalDetailPage() {
             </>
           )}
         </div>
+        <div className="sf-card" style={{ padding: 16 }}>
+          <strong>Histórico do processo</strong>
+          <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+            <TimelineItem title="Solicitação enviada" detail={`Cotação encaminhada para ${approval.alcada_level}.`} date={approval.requested_at} done />
+            <TimelineItem title={approval.status === "Pendente" ? "Aguardando decisão" : `Solicitação ${approval.status.toLowerCase()}`} detail={approval.status === "Pendente" ? "O responsável pela aprovação ainda precisa registrar a decisão." : `${approval.decided_by_name ?? "Perfil Aprovador"} registrou a decisão.`} date={approval.decided_at ?? approval.requested_at} done={approval.status !== "Pendente"} current={approval.status === "Pendente"} />
+          </div>
+        </div>
         {approval.status === "Pendente" && (
           <div className="sf-card" style={{ padding: 16 }}>
             <strong>Registrar decisão</strong>
@@ -148,6 +155,19 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, fontSize: 14 }}>
       <span style={{ color: "#706e6b" }}>{label}</span>
       <span>{children}</span>
+    </div>
+  );
+}
+
+function TimelineItem({ title, detail, date, done, current }: { title: string; detail: string; date: string | null; done: boolean; current?: boolean }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "18px 1fr", gap: 10 }}>
+      <span style={{ color: done ? "#2e844a" : "#706e6b", fontSize: 16 }}>{done ? "●" : "○"}</span>
+      <div>
+        <div style={{ fontWeight: 600 }}>{title}{current ? " · etapa atual" : ""}</div>
+        <div style={{ fontSize: 12, color: "#706e6b" }}>{detail}</div>
+        <div style={{ fontSize: 11, color: "#706e6b", marginTop: 3 }}>{fmtDate(date)}</div>
+      </div>
     </div>
   );
 }

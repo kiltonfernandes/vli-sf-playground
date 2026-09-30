@@ -180,6 +180,9 @@ function ApprovalsPage() {
                   <td>{Number(row.max_discount_pct).toFixed(2)}%</td>
                   <td>{fmtDate(row.requested_at)}</td>
                   <td>
+                    <Link className="sf-btn" to="/approvals/$id" params={{ id: row.id }}>
+                      Acompanhar
+                    </Link>{" "}
                     <button
                       className="sf-btn sf-btn--brand"
                       disabled={!row.can_decide}
