@@ -10,6 +10,14 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v6.20.07 — Embaralhar aditivo (shuffle com regras de data)
+
+- **Botão “🔀 Embaralhar aditivo”** no painel Motor de aditivo da Cotação (só em Rascunho). Um clique volta a Cotação à linha de base do contrato vigente (Agendas, vigência e reajuste) e sorteia, com uma seed interna (não exibida), um cenário novo: **pelo menos 60% das Agendas são alteradas ou excluídas** (excluir ≈ 25–40% delas) e **≈ 30% de Agendas novas são incluídas**. “Agenda” = um Fluxo em um mês (todas as linhas de serviço juntas). Pede confirmação se já houver mudanças.
+- **Alterar** sorteia volume, tarifa (±3–10%, com o rateio refeito para fechar a tarifa) e/ou Data Base Diesel. **Incluir** prorroga os Fluxos ativos no fim do contrato e, com 3+ Agendas novas e Fluxo elegível, inclui também um Fluxo novo.
+- **Regras de data garantidas** (`src/lib/addendum-shuffle.ts`): (1) nunca repete Fluxo + mês + divisão + praça, nem de uma Agenda marcada como Excluir; (2) Agenda nova não fica antes do início da vigência nem em mês já decorrido, e depois do fim prorroga a vigência até o último dia do último mês novo (cláusula de prazo); (3) Data Base Diesel sempre `DD/MM/AAAA` com o dia de aplicação da Oportunidade, no mês da Agenda ou no anterior e igual em todas as linhas da mesma Agenda (Fluxo novo usa a data da primeira Agenda); (4) Agenda nova herda periodicidade, janela, divisão, praça, Base Diesel e tolerâncias do Fluxo; (5) meses já decorridos só são alterados/excluídos se faltarem Agendas futuras para os 60%; (6) vigência acima de 365 dias configura o reajuste anual (Diesel + IGP-M + IPCA = 100% e primeiro reajuste) quando ainda não existir.
+- A validação de preços e a alçada continuam valendo: Agendas Alteradas/Incluídas com desvio acima do limite exigem aprovação.
+- Verificação: build de produção aprovado; simulação de 2.100 sorteios do planejador (60%+ de mudanças, sem colisão de mês, rateio fechando 100%, datas válidas) e E2E local com vários sorteios seguidos e “Validar e concluir” passando em todas as validações estruturais (o único bloqueio foi a alçada de preço).
+
 ### v6.19.07 — Aditivo, Assinatura no NetLex e Paths estilizados
 
 - **Aditivo implementado**: um Contrato em **Assinatura** no NetLex gera “+ Nova oportunidade de aditivo”. A Oportunidade aditiva herda partes, vigência, reajustes e tarifa; a Cotação nasce com as Agendas vigentes do contrato como **Manter**. Editar volume, preço, Base Diesel ou tolerância vira **Alterar**; “Excluir no aditivo” marca **Excluir**; Agendas novas (inclusive depois do fim original) entram como **Incluir**. Vários aditivos por contrato são permitidos; **ACS nunca gera aditivo**.

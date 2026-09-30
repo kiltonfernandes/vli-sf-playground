@@ -16,6 +16,7 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v6.20.07` — Add the “Embaralhar aditivo” shuffle to addendum Quotes: seeded scenario with at least 60% of the baseline Schedules changed or deleted and about 30% new Schedules, enforcing the app's date rules (unique Flow+month, no past or pre-term months, term extension for Schedules after the end, valid diesel base dates, annual readjustment when the term exceeds 365 days).
 - `v6.19.07` — Implement contract addenda end to end (baseline Schedules as Keep, Change/Delete/Include operations, generated clauses, multiple addenda per contract, ACS excluded), add the NetLex Assinatura status with addendum materialization and version history, style the Quote and NetLex Paths, group Quote Schedules by period, and allow free end months in batch Schedule creation.
 - `v5.19.07` — Widen the Jetsons comparison modal, simplify approval to the Vendas/Aprovador profiles, let approved prices pass the Opportunity gate, and add an approval-gated NetLex contract snapshot with an initial-status preview.
 - `v5.19.06` — Add deterministic Jetsons market prices, show them across the five-level Quote grouping, edit prices by Schedule, and govern approval by the worst individual Schedule so a large discount cannot be diluted by an Item average. Allow alternate Quotes to reuse the same Flow periods, refresh Quote status after inline edits, and add an X close button to toast notifications.

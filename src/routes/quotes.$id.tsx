@@ -11,6 +11,7 @@ import {
   saveRecord,
   saveQuoteItemScreenflow,
   setAddendumScheduleExclusion,
+  shuffleAddendumQuote,
   submitQuoteForApproval,
   syncQuote,
   updateOpportunityTerm,
@@ -498,7 +499,17 @@ function QuotePage() {
             }}
           />
         </Section>
-        {isAddendum && addendum && <AddendumPanel addendum={addendum} />}
+        {isAddendum && addendum && (
+          <AddendumPanel
+            addendum={addendum}
+            quoteId={id}
+            editable={editable}
+            onChanged={async () => {
+              await refresh();
+              await qc.invalidateQueries({ queryKey: ["opportunities"] });
+            }}
+          />
+        )}
         <Section
           id="items"
           title="Itens da Cotação"
@@ -1945,9 +1956,47 @@ function PeriodGroups({
   );
 }
 
-function AddendumPanel({ addendum }: { addendum: any }) {
+function AddendumPanel({
+  addendum,
+  quoteId,
+  editable,
+  onChanged,
+}: {
+  addendum: any;
+  quoteId: string;
+  editable: boolean;
+  onChanged: () => Promise<void>;
+}) {
   const summary = addendum.summary ?? {};
+  const [shuffling, setShuffling] = useState(false);
   const fmt = (iso: string | null | undefined) => (iso ? iso.split("-").reverse().join("/") : "—");
+  const hasChanges =
+    addendum.termChanged || summary.Incluir + summary.Alterar + summary.Excluir > 0;
+  async function shuffle() {
+    if (
+      hasChanges &&
+      !window.confirm(
+        "Embaralhar descarta as mudanças atuais deste aditivo (Agendas, vigência e reajuste) e sorteia um cenário novo a partir do contrato vigente. Continuar?",
+      )
+    )
+      return;
+    setShuffling(true);
+    try {
+      const result = (await shuffleAddendumQuote({ data: { quoteId } })) as any;
+      await onChanged();
+      toast.success("Aditivo embaralhado", {
+        description: `${result.modified} de ${result.baseline} Agendas modificadas (${result.altered} alteradas, ${result.excluded} excluídas) e ${result.included} Agendas novas${
+          result.extendedEnd ? ` · vigência prorrogada até ${fmt(result.extendedEnd)}` : ""
+        }${result.readjustmentConfigured ? " · reajuste anual configurado (vigência acima de 365 dias)" : ""}.`,
+      });
+    } catch (error) {
+      toast.error("Não foi possível embaralhar o aditivo", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setShuffling(false);
+    }
+  }
   return (
     <section className="sf-card" style={{ padding: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -1980,6 +2029,14 @@ function AddendumPanel({ addendum }: { addendum: any }) {
               {operation}: {summary[operation] ?? 0}
             </span>
           ))}
+          <button
+            className="sf-btn"
+            disabled={!editable || shuffling}
+            title="Sorteia mudanças automáticas: pelo menos 60% das Agendas são alteradas ou excluídas e cerca de 30% de Agendas novas são incluídas, respeitando as regras de data"
+            onClick={shuffle}
+          >
+            {shuffling ? "Embaralhando…" : "🔀 Embaralhar aditivo"}
+          </button>
         </div>
       </div>
       <p style={{ fontSize: 12, color: "#514f4d", margin: "10px 0 6px" }}>

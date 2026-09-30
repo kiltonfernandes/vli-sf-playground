@@ -21,7 +21,8 @@ import {
   type TableName,
 } from "./schema";
 import { asc as ascending } from "drizzle-orm";
-import { seededFaker } from "./generators/core";
+import { randomSeed, seededFaker } from "./generators/core";
+import { planAddendumShuffle, type ShuffleGroup } from "./addendum-shuffle";
 import { jetsonsUnitPrice, type JetsonsEndpoint } from "./jetsons";
 import {
   buildAddendumClauses,
@@ -1060,6 +1061,284 @@ export const setAddendumScheduleExclusion = createServerFn({ method: "POST" })
         .where(eq(quote_schedules.id, row.id));
     await markQuotePricesStale(quoteId);
     return { ok: true };
+  });
+
+/**
+ * Aditivo: embaralha as Agendas com uma seed nova. Volta tudo à linha de base
+ * (Agendas, vigência e reajuste do contrato vigente) e sorteia um cenário em
+ * que pelo menos 60% das Agendas mudam (alterar/excluir) e cerca de 30% são
+ * incluídas. As regras de data estão documentadas em `addendum-shuffle.ts`.
+ */
+export const shuffleAddendumQuote = createServerFn({ method: "POST" })
+  .inputValidator((data: { quoteId: string; seed?: number }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const { quoteId, seed: requestedSeed } = input as { quoteId: string; seed?: number };
+    const seed = Number.isInteger(requestedSeed) ? Number(requestedSeed) : randomSeed();
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+    if (!quote || quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível embaralhar uma Cotação em Rascunho.");
+    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, quote.opportunity_id));
+    if (!opp || opp.instrument_type !== "Aditivo" || !opp.base_contract_id)
+      throw new Error("O shuffle existe somente para Cotações de aditivo.");
+    if (opp.stage !== "Negociação") throw new Error("A oportunidade vinculada precisa estar em Negociação.");
+    if (![1, 10, 20].includes(Number(opp.application_day)))
+      throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
+    const [base] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, opp.base_contract_id));
+    if (!base) throw new Error("Contrato original não encontrado.");
+    const baseDoc = parseContractDocument(base.document_json);
+    const baseStart = String(baseDoc.term?.start ?? opp.contract_start ?? "");
+    const baseEnd = String(baseDoc.term?.end ?? opp.contract_end ?? "");
+    if (!baseStart || !baseEnd) throw new Error("O contrato original precisa ter início e fim de vigência.");
+    const monthOf = (iso: string) => Number(iso.slice(0, 4)) * 100 + Number(iso.slice(5, 7));
+
+    const items = await db.select().from(quote_line_items).where(eq(quote_line_items.quote_id, quoteId));
+    const rows = await quoteScheduleRows(quoteId);
+    const baselineRows = rows.filter((row) => row.base_snapshot);
+    if (!baselineRows.length) throw new Error("A Cotação não tem Agendas do contrato vigente.");
+    const itemById = new Map(items.map((item) => [item.id, item]));
+
+    // Valores de cada linha da base, como no contrato vigente.
+    const restored = new Map<string, Partial<typeof quote_schedules.$inferInsert>>();
+    for (const row of baselineRows) {
+      const snap = parseSnapshot(row.base_snapshot) ?? {};
+      const num = (value: unknown) => (value === null || value === undefined ? null : Number(value));
+      restored.set(row.id, {
+        volume: Number(snap.volume ?? row.volume),
+        tariff_cbs: num(snap.tariff_cbs),
+        tariff_net: Number(snap.tariff_net ?? 0),
+        accessory_cbs: num(snap.accessory_cbs),
+        accessory_cbs_pct: num(snap.accessory_cbs_pct),
+        accessory_net: num(snap.accessory_net),
+        accessory_net_pct: num(snap.accessory_net_pct),
+        diesel_base_date: snap.diesel_base_date === null || snap.diesel_base_date === undefined ? null : String(snap.diesel_base_date),
+        tolerance_vli_volume: num(snap.tolerance_vli_volume),
+        tolerance_client_volume: num(snap.tolerance_client_volume),
+        tolerance_vli_tariff: num(snap.tolerance_vli_tariff),
+        tolerance_client_tariff: num(snap.tolerance_client_tariff),
+      });
+    }
+    const groupMap = new Map<string, ShuffleGroup>();
+    for (const row of baselineRows) {
+      const item = itemById.get(row.quote_line_item_id);
+      if (!item) continue;
+      const values = restored.get(row.id) as Record<string, any>;
+      const group =
+        groupMap.get(row.schedule_key) ??
+        ({ key: row.schedule_key, flowId: item.planned_flow_id, year: row.year, month: row.month, rows: [] } as ShuffleGroup);
+      group.rows.push({
+        id: row.id,
+        itemId: item.id,
+        service: row.service,
+        diesel_base_id: row.diesel_base_id,
+        frequency: row.frequency,
+        period_window: row.period_window,
+        division: row.division,
+        plaza: row.plaza,
+        ...values,
+      } as ShuffleGroup["rows"][number]);
+      groupMap.set(row.schedule_key, group);
+    }
+
+    // Preço recomendado do Jetsons (mock) e Fluxos ainda fora da Cotação.
+    const [locationRows, merchandiseRows, accountFlows] = await Promise.all([
+      db.select().from(locations),
+      db.select().from(merchandise),
+      db.select().from(planned_flows).where(eq(planned_flows.account_id, opp.account_id)),
+    ]);
+    const locationById = new Map(locationRows.map((row) => [row.id, row]));
+    const merchandiseById = new Map(merchandiseRows.map((row) => [row.id, row]));
+    const flowById = new Map(accountFlows.map((row) => [row.id, row]));
+    const quoteFlowIds = new Set(items.map((item) => item.planned_flow_id));
+    const dieselBaseId = baselineRows[0].diesel_base_id;
+    const newFlows = accountFlows
+      .filter((flow) => flow.modal === "Ferroviário" && flow.origin_system === "FLOU" && !quoteFlowIds.has(flow.id))
+      .map((flow) => ({ flowId: flow.id, dieselBaseId }));
+    const recommended = (flowId: string, service: string, year: number, month: number) => {
+      const flow = flowById.get(flowId);
+      const origin = locationById.get(flow?.origin_id ?? "");
+      const destination = locationById.get(flow?.destination_id ?? "");
+      if (!flow || !origin || !destination) throw new Error("Fluxo sem origem/destino cadastrados.");
+      return jetsonsUnitPrice({
+        origin: origin as JetsonsEndpoint,
+        destination: destination as JetsonsEndpoint,
+        merchandise: merchandiseById.get(flow.merchandise_id)?.name ?? "",
+        service,
+        year,
+        month,
+      });
+    };
+
+    const today = new Date();
+    const plan = planAddendumShuffle({
+      seed,
+      groups: [...groupMap.values()],
+      tariffMode: quote.tariff_mode || opp.integration_tariff,
+      applicationDay: Number(opp.application_day),
+      startPeriod: monthOf(baseStart),
+      endPeriod: monthOf(baseEnd),
+      todayPeriod: today.getUTCFullYear() * 100 + today.getUTCMonth() + 1,
+      newFlows,
+      recommended,
+    });
+
+    // Vigência: início e fim voltam ao contrato; agenda depois do fim prorroga.
+    let newEnd = baseEnd;
+    if (plan.lastPeriod > monthOf(baseEnd)) {
+      const year = Math.floor(plan.lastPeriod / 100),
+        month = plan.lastPeriod % 100;
+      newEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    }
+    const readjustment = baseDoc.readjustment as Record<string, any> | undefined;
+    let dieselPct = Number(readjustment?.dieselPct ?? opp.diesel_pct);
+    let igpmPct = Number(readjustment?.igpmPct ?? opp.igpm_pct);
+    let ipcaPct = Number(readjustment?.ipcaPct ?? opp.ipca_pct);
+    let firstReadjustment: string | null = readjustment?.firstReadjustmentDate ?? opp.first_readjustment_date ?? null;
+    let readjustmentConfigured = false;
+    const termDays = Math.round(
+      (Date.parse(`${newEnd}T00:00:00Z`) - Date.parse(`${baseStart}T00:00:00Z`)) / 86400000,
+    );
+    if (termDays > 365) {
+      // Vigência acima de 365 dias exige reajuste anual (Diesel + IGP-M + IPCA = 100%).
+      const outOfTerm =
+        !firstReadjustment || firstReadjustment < baseStart || firstReadjustment > newEnd;
+      if (Math.abs(dieselPct + igpmPct + ipcaPct - 100) > 0.001 || outOfTerm) {
+        if (Math.abs(dieselPct + igpmPct + ipcaPct - 100) > 0.001) {
+          dieselPct = 50;
+          igpmPct = 25;
+          ipcaPct = 25;
+        }
+        if (outOfTerm) {
+          const start = new Date(`${baseStart}T00:00:00Z`);
+          firstReadjustment = new Date(
+            Date.UTC(start.getUTCFullYear() + 1, start.getUTCMonth(), start.getUTCDate()),
+          )
+            .toISOString()
+            .slice(0, 10);
+        }
+        readjustmentConfigured = true;
+      }
+    }
+
+    const now = new Date().toISOString();
+    await db.transaction(async (tx) => {
+      // 1. Volta à linha de base.
+      const addedIds = rows.filter((row) => !row.base_snapshot).map((row) => row.id);
+      if (addedIds.length) await tx.delete(quote_schedules).where(inArray(quote_schedules.id, addedIds));
+      for (const row of baselineRows)
+        await tx
+          .update(quote_schedules)
+          .set({ ...restored.get(row.id), operation: "Manter", updated_at: now })
+          .where(eq(quote_schedules.id, row.id));
+      const baselineItemIds = new Set(baselineRows.map((row) => row.quote_line_item_id));
+      const orphanItems = items.filter((item) => !baselineItemIds.has(item.id)).map((item) => item.id);
+      if (orphanItems.length) await tx.delete(quote_line_items).where(inArray(quote_line_items.id, orphanItems));
+
+      // 2. Excluir.
+      for (const key of plan.excludedKeys) {
+        const group = groupMap.get(key);
+        if (!group) continue;
+        await tx
+          .update(quote_schedules)
+          .set({ operation: "Excluir", updated_at: now })
+          .where(inArray(quote_schedules.id, group.rows.map((row) => row.id)));
+      }
+
+      // 3. Alterar.
+      for (const entry of plan.altered)
+        for (const { rowId, patch } of entry.patches)
+          if (Object.keys(patch).length)
+            await tx
+              .update(quote_schedules)
+              .set({ ...patch, updated_at: now })
+              .where(eq(quote_schedules.id, rowId));
+
+      // 4. Incluir.
+      const createdItems = new Map<string, string>();
+      for (const group of plan.created) {
+        const flow = flowById.get(group.flowId);
+        if (!flow) continue;
+        const scheduleKey = `${flow.code}|${group.year}${String(group.month).padStart(2, "0")}|${group.division}|${group.plaza}`;
+        for (const entry of group.rows) {
+          let itemId = entry.itemId;
+          if (!itemId) {
+            const itemKey = `${group.flowId}|${entry.service}`;
+            itemId = createdItems.get(itemKey) ?? null;
+            if (!itemId) {
+              itemId = crypto.randomUUID();
+              createdItems.set(itemKey, itemId);
+              await tx.insert(quote_line_items).values({
+                id: itemId,
+                quote_id: quoteId,
+                planned_flow_id: group.flowId,
+                service: entry.service,
+                volume_total: 0,
+                revenue_total: 0,
+                top_eligible: 0,
+                created_at: now,
+                updated_at: now,
+              });
+            }
+          }
+          await tx.insert(quote_schedules).values({
+            id: crypto.randomUUID(),
+            quote_line_item_id: itemId,
+            schedule_key: scheduleKey,
+            year: group.year,
+            month: group.month,
+            frequency: group.frequency,
+            period_window: group.period_window,
+            division: group.division,
+            plaza: group.plaza,
+            volume: group.volume,
+            tariff_cbs: entry.tariff_cbs,
+            tariff_net: entry.tariff_net,
+            diesel_base_id: group.diesel_base_id,
+            diesel_base_date: group.diesel_base_date,
+            service: entry.service,
+            accessory_cbs: entry.accessory_cbs,
+            accessory_cbs_pct: entry.accessory_cbs_pct,
+            accessory_net: entry.accessory_net,
+            accessory_net_pct: entry.accessory_net_pct,
+            tolerance_vli_volume: entry.tolerance_vli_volume,
+            tolerance_client_volume: entry.tolerance_client_volume,
+            tolerance_vli_tariff: entry.tolerance_vli_tariff,
+            tolerance_client_tariff: entry.tolerance_client_tariff,
+            operation: "Incluir",
+            base_snapshot: null,
+            created_at: now,
+            updated_at: now,
+          } as typeof quote_schedules.$inferInsert);
+        }
+      }
+
+      // 5. Vigência e reajuste.
+      await tx
+        .update(opportunities)
+        .set({
+          contract_start: baseStart,
+          contract_end: newEnd,
+          diesel_pct: dieselPct,
+          igpm_pct: igpmPct,
+          ipca_pct: ipcaPct,
+          first_readjustment_date: firstReadjustment,
+          updated_at: now,
+        })
+        .where(eq(opportunities.id, opp.id));
+    });
+    await ensureRecommendedPricesForQuote(quoteId);
+    await markQuotePricesStale(quoteId);
+    const modified = plan.excludedKeys.length + plan.altered.length;
+    return {
+      ok: true,
+      baseline: plan.baselineGroups,
+      modified,
+      excluded: plan.excludedKeys.length,
+      altered: plan.altered.length,
+      included: plan.created.length,
+      extendedEnd: newEnd !== baseEnd ? newEnd : null,
+      readjustmentConfigured,
+    };
   });
 
 /** Agendas do contrato vigente não são apagadas: no aditivo elas são marcadas como Excluir. */
