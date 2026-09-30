@@ -244,7 +244,6 @@ export function QuoteItemScreenflow({
   const [takeOrPay, setTakeOrPay] = useState<TakeOrPayConfig>(initialTakeOrPayConfig ?? {
     auditDate: "", billingDate: "", compensationMode: "individual", calculationBasis: "volume", pairs: [], groups: [],
   });
-  const [savingTakeOrPay, setSavingTakeOrPay] = useState(false);
   const [termSaved, setTermSaved] = useState(!!contractStart && !!contractEnd);
   const startYear = Number(termStart?.slice(0, 4) || new Date().getFullYear());
   const startMonth = Number(termStart?.slice(5, 7) || 1);
@@ -544,7 +543,12 @@ export function QuoteItemScreenflow({
     if (!validateCurrent() || !selectedFlow) return;
     setBusy(true);
     try {
-      if (await onSave({ flowId: selectedFlow.id, itemService, tariffMode, groups })) onClose();
+      if (await onSave({ flowId: selectedFlow.id, itemService, tariffMode, groups })) {
+        if (onTakeOrPaySave) await onTakeOrPaySave(hasTolerance ? takeOrPay : null);
+        onClose();
+      }
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar as condições comerciais.");
     } finally {
       setBusy(false);
     }
@@ -1442,24 +1446,13 @@ export function QuoteItemScreenflow({
             <button
               className="sf-btn sf-btn--brand"
               disabled={savingTakeOrPay}
-              onClick={() => void (async () => {
+              onClick={() => {
                 if (!validateCurrent()) return;
-                if (step === 3 && onTakeOrPaySave) {
-                  setSavingTakeOrPay(true);
-                  try {
-                    await onTakeOrPaySave(hasTolerance ? takeOrPay : null);
-                  } catch (saveError) {
-                    setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar as condições comerciais.");
-                    setSavingTakeOrPay(false);
-                    return;
-                  }
-                  setSavingTakeOrPay(false);
-                }
                 if (skipReadjustment && step === 0) setStep(2);
                 else setStep((s) => s + 1);
-              })()}
+              }}
             >
-              {savingTakeOrPay ? "Salvando condições…" : "Continuar"}
+              Continuar
             </button>
           ) : (
             <button className="sf-btn sf-btn--brand" disabled={busy} onClick={() => void save()}>
