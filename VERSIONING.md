@@ -16,6 +16,8 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v8.21.14` — Fix the Take or Pay screenflow runtime crash caused by a stale loading-state reference on the Continue button.
+
 - `v8.21.13` — Persist Agenda tolerances before saving the linked Take or Pay configuration, keeping the new commercial-conditions step atomic from the user's perspective.
 
 - `v8.21.12` — Add Take or Pay as a guided Commercial Conditions step in the Item and Agenda screenflow, with green/red business-rule mapping and persistence to the Opportunity.

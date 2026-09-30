@@ -1445,7 +1445,6 @@ export function QuoteItemScreenflow({
           {step < 4 ? (
             <button
               className="sf-btn sf-btn--brand"
-              disabled={savingTakeOrPay}
               onClick={() => {
                 if (!validateCurrent()) return;
                 if (skipReadjustment && step === 0) setStep(2);
