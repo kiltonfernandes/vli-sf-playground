@@ -18,6 +18,7 @@ import {
   submitQuoteForApproval,
   syncQuote,
   updateOpportunityTerm,
+  updateOpportunityTakeOrPay,
   updateScheduleTariff,
   validateQuotePrices,
 } from "@/lib/crud";
@@ -28,6 +29,7 @@ import { fmtMoney } from "@/lib/format";
 import { BusinessRulesChecklist, type BusinessRule } from "@/components/BusinessRulesChecklist";
 import { SfPath } from "@/components/SfPath";
 import { FIELD_LABELS } from "@/lib/addendum";
+import { parseTakeOrPayConfig } from "@/lib/take-or-pay";
 
 const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
 export const Route = createFileRoute("/quotes/$id")({
@@ -749,6 +751,7 @@ function QuotePage() {
             ipca: Number(options?.opportunity?.ipca_pct ?? 0),
           }}
           integrationTariff={tariffMode}
+          initialTakeOrPayConfig={parseTakeOrPayConfig(options?.opportunity?.take_or_pay_config)}
           applicationDay={applicationDay}
           canChangeTariff={canChangeTariff}
           usedSchedules={(options?.usedSchedules ?? []).filter((row: any) => row.quote_id === id)}
@@ -764,6 +767,13 @@ function QuotePage() {
             await refresh();
             await qc.invalidateQueries({ queryKey: ["quote-full", id] });
             await qc.invalidateQueries({ queryKey: ["opportunities"] });
+          }}
+          onTakeOrPaySave={async (config) => {
+            if (options?.opportunity?.instrument_type === "Contrato") {
+              await updateOpportunityTakeOrPay({ data: { id: options.opportunity.id, config } });
+              await qc.invalidateQueries({ queryKey: ["quote-full", id] });
+              await qc.invalidateQueries({ queryKey: ["opportunity-full", options.opportunity.id] });
+            }
           }}
           onSave={async ({ flowId, itemService, tariffMode: selectedTariffMode, groups }) => {
             try {

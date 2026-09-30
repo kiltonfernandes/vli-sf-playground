@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { saveRecord, updateOpportunityReadjustment, updateOpportunityTerm } from "@/lib/crud";
 import { contractDurationDays, readjustmentRuleError } from "@/lib/business-rules";
+import { takeOrPayRuleError, type TakeOrPayConfig } from "@/lib/take-or-pay";
 import { toast } from "sonner";
 
 type Flow = {
@@ -55,6 +56,8 @@ type Props = {
   itemId?: string;
   onClose: () => void;
   onTermSaved?: () => Promise<void> | void;
+  initialTakeOrPayConfig?: TakeOrPayConfig | null;
+  onTakeOrPaySave?: (config: TakeOrPayConfig | null) => Promise<void>;
   onSave: (payload: {
     flowId: string;
     itemService: string;
@@ -212,6 +215,8 @@ export function QuoteItemScreenflow({
   itemId,
   onClose,
   onTermSaved,
+  initialTakeOrPayConfig,
+  onTakeOrPaySave,
   onSave,
 }: Props) {
   const initial = flows.find((flow) => flow.id === initialFlowId);
@@ -236,6 +241,10 @@ export function QuoteItemScreenflow({
   const [ipcaPct, setIpcaPct] = useState(readjustment.ipca);
   const [firstDate, setFirstDate] = useState(firstReadjustmentDate);
   const [savingReadjustment, setSavingReadjustment] = useState(false);
+  const [takeOrPay, setTakeOrPay] = useState<TakeOrPayConfig>(initialTakeOrPayConfig ?? {
+    auditDate: "", billingDate: "", compensationMode: "individual", calculationBasis: "volume", pairs: [], groups: [],
+  });
+  const [savingTakeOrPay, setSavingTakeOrPay] = useState(false);
   const [termSaved, setTermSaved] = useState(!!contractStart && !!contractEnd);
   const startYear = Number(termStart?.slice(0, 4) || new Date().getFullYear());
   const startMonth = Number(termStart?.slice(5, 7) || 1);
@@ -316,6 +325,12 @@ export function QuoteItemScreenflow({
       },
     ];
   });
+  const hasTolerance = instrumentType === "Contrato" && groups.some((group) =>
+    [group.tolerance_vli_volume, group.tolerance_client_volume, group.tolerance_vli_tariff, group.tolerance_client_tariff].some((value) => value > 0),
+  );
+  const takeOrPayError = instrumentType === "ACS" || !hasTolerance
+    ? null
+    : takeOrPayRuleError(takeOrPay, true, new Set(flows.map((flow) => flow.id)));
   function updateGroup(index: number, patch: Partial<AgendaGroup>) {
     setGroups((old) => old.map((g, i) => (i === index ? { ...g, ...patch } : g)));
   }
@@ -519,6 +534,10 @@ export function QuoteItemScreenflow({
       setError("Revise volume, tarifa, Base Diesel, tolerâncias e rateio de serviços de cada grupo.");
       return false;
     }
+    if (step === 3 && instrumentType === "Contrato" && takeOrPayError) {
+      setError(takeOrPayError);
+      return false;
+    }
     return true;
   }
   async function save() {
@@ -555,7 +574,8 @@ export function QuoteItemScreenflow({
     { id: 0, title: "Fluxo do Cliente" },
     { id: 1, title: "Reajuste Ferro" },
     { id: 2, title: "Agendas e Data Base Diesel" },
-    { id: 3, title: "Revisão" },
+    { id: 3, title: "Condições comerciais" },
+    { id: 4, title: "Revisão" },
   ];
   const stepList = skipReadjustment ? allSteps.filter((s) => s.id !== 1) : allSteps;
   const stepTitles = stepList.map((s) => s.title);
@@ -1318,6 +1338,53 @@ export function QuoteItemScreenflow({
           )}
           {step === 3 && (
             <>
+              <h3>Condições comerciais</h3>
+              <p style={{ color: "#444" }}>Complete as regras comerciais antes da revisão final.</p>
+              {instrumentType === "ACS" ? (
+                <div role="status" style={{ padding: 12, borderRadius: 4, background: "#f3f9fe", color: "#124d73" }}>
+                  <strong>Take or Pay não aplicável</strong><br />ACS não aceita tolerâncias nem configuração de Take or Pay.
+                </div>
+              ) : (
+                <>
+                  <section style={{ border: "1px solid #c9c9c9", borderRadius: 6, padding: 14, marginBottom: 16 }}>
+                    <h4 style={{ margin: "0 0 8px" }}>Mapa de regras do Take or Pay</h4>
+                    {[{
+                      label: "Tolerâncias das Agendas",
+                      passed: hasTolerance,
+                      detail: hasTolerance ? "Existe tolerância positiva em volume ou tarifa." : "Nenhuma tolerância positiva foi informada.",
+                    }, {
+                      label: "Configuração do Take or Pay",
+                      passed: !hasTolerance || (!!takeOrPay.auditDate && !!takeOrPay.billingDate),
+                      detail: hasTolerance ? "Informe as datas e a regra de compensação." : "Sem tolerâncias, fica como não aplicável.",
+                    }, {
+                      label: "Modelo e base de compensação",
+                      passed: !hasTolerance || (!!takeOrPay.compensationMode && !!takeOrPay.calculationBasis),
+                      detail: "Define como a regra será registrada no Contrato.",
+                    }, {
+                      label: "Validação do conjunto",
+                      passed: !takeOrPayError,
+                      detail: takeOrPayError ?? "Todos os dados estão consistentes.",
+                    }].map((rule) => (
+                      <div key={rule.label} style={{ display: "flex", gap: 9, padding: "8px 0", borderTop: "1px solid #eee" }}>
+                        <span style={{ color: rule.passed ? "#2e844a" : "#ba0517", fontWeight: 800 }}>{rule.passed ? "✓" : "!"}</span>
+                        <span><strong>{rule.label}</strong><br /><small>{rule.detail}</small></span>
+                      </div>
+                    ))}
+                  </section>
+                  <label style={labelStyle}>Data de apuração<input style={inputStyle} type="date" value={takeOrPay.auditDate} onChange={(event) => setTakeOrPay({ ...takeOrPay, auditDate: event.target.value })} /></label>
+                  <label style={labelStyle}>Data de faturamento<input style={inputStyle} type="date" value={takeOrPay.billingDate} onChange={(event) => setTakeOrPay({ ...takeOrPay, billingDate: event.target.value })} /></label>
+                  <label style={labelStyle}>Modelo de compensação<select style={inputStyle} value={takeOrPay.compensationMode} onChange={(event) => setTakeOrPay({ ...takeOrPay, compensationMode: event.target.value as TakeOrPayConfig["compensationMode"] })}>
+                    <option value="individual">Fluxos individuais</option><option value="all-flows">Todos os fluxos em conjunto</option><option value="flow-pairs">Pares de fluxos</option><option value="groups">Grupos de fluxos</option>
+                  </select></label>
+                  <label style={labelStyle}>Base de compensação<select style={inputStyle} value={takeOrPay.calculationBasis} onChange={(event) => setTakeOrPay({ ...takeOrPay, calculationBasis: event.target.value as TakeOrPayConfig["calculationBasis"] })}>
+                    <option value="volume">Volume</option><option value="tariff">Tarifa</option><option value="both">Volume e tarifa</option>
+                  </select></label>
+                </>
+              )}
+            </>
+          )}
+          {step === 4 && (
+            <>
               <h3>Confira antes de salvar</h3>
               <ul>
                 <li>Cliente: {accountName}</li>
@@ -1371,17 +1438,28 @@ export function QuoteItemScreenflow({
               Voltar
             </button>
           )}
-          {step < 3 ? (
+          {step < 4 ? (
             <button
               className="sf-btn sf-btn--brand"
-              onClick={() => {
-                if (validateCurrent()) {
-                  if (skipReadjustment && step === 0) setStep(2);
-                  else setStep((s) => s + 1);
+              disabled={savingTakeOrPay}
+              onClick={() => void (async () => {
+                if (!validateCurrent()) return;
+                if (step === 3 && onTakeOrPaySave) {
+                  setSavingTakeOrPay(true);
+                  try {
+                    await onTakeOrPaySave(hasTolerance ? takeOrPay : null);
+                  } catch (saveError) {
+                    setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar as condições comerciais.");
+                    setSavingTakeOrPay(false);
+                    return;
+                  }
+                  setSavingTakeOrPay(false);
                 }
-              }}
+                if (skipReadjustment && step === 0) setStep(2);
+                else setStep((s) => s + 1);
+              })()}
             >
-              Continuar
+              {savingTakeOrPay ? "Salvando condições…" : "Continuar"}
             </button>
           ) : (
             <button className="sf-btn sf-btn--brand" disabled={busy} onClick={() => void save()}>
