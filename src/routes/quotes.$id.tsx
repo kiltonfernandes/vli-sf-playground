@@ -1601,6 +1601,7 @@ function PricePanel({
   onCompleted: () => Promise<void>;
 }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [bulkMode, setBulkMode] = useState<"delta_pct" | "target_deviation">("delta_pct");
   const [bulkPct, setBulkPct] = useState("5");

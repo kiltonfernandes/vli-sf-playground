@@ -16,6 +16,8 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v8.21.20` — Fix the price-validation modal approval action by connecting its direct route handler to the approval workspace.
+
 - `v8.21.19` — Ensure the “Na fila de aprovação” action always opens the approval workspace, including while the detailed approval identifier is still unavailable.
 
 - `v8.21.17` — Add a Salesforce-style approval tracking view with process history and direct access from the approval queue and the quote status button.
