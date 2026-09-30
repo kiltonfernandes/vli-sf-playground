@@ -16,6 +16,12 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v8.21.10` — Remove the premature Take or Pay checkbox from Opportunity creation and editing; the configuration now starts only from the Opportunity panel after Agenda tolerances exist.
+
+- `v8.21.09` — Add “Validar e concluir” to the Jetsons price-validation modal, beside the recommended-price and revalidation actions.
+
+- `v8.21.08` — Show all four Take or Pay tolerance fields in each Contract Agenda screenflow group, persist their values with server-side range checks, and keep them unavailable for ACS.
+
 - `v8.21.07` — Add end-to-end Take or Pay setup, validation, Contract and addendum clauses; prohibit ACS Take or Pay; persist review/billing dates and compensation rules while keeping financial settlement external.
 
 - `v7.21.07` — Make Ferro readjustment values editable with shared client/server rules; align diesel base dates to the Schedule month or previous month; repair single-service price edits by recalculating the full group allocation; add four Opportunity/Quote-specific contract clauses; update the README's current flow and addendum documentation.

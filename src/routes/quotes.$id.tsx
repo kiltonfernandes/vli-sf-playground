@@ -811,6 +811,10 @@ function QuotePage() {
           canEdit={q.status === "Rascunho" && !q.is_synced}
           onClose={() => setPricePanel(null)}
           onRefreshed={(fresh) => setPricePanel(fresh)}
+          onCompleted={async () => {
+            await refresh();
+            setPricePanel(null);
+          }}
         />
       )}
       {editSchedule && (
@@ -1578,11 +1582,13 @@ function PricePanel({
   canEdit,
   onClose,
   onRefreshed,
+  onCompleted,
 }: {
   result: any;
   canEdit: boolean;
   onClose: () => void;
   onRefreshed: (fresh: any) => void;
+  onCompleted: () => Promise<void>;
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -2023,6 +2029,34 @@ function PricePanel({
               }}
             >
               {busy ? "Revalidando…" : "Revalidar"}
+            </button>
+            <button
+              className="sf-btn sf-btn--brand"
+              disabled={busy || !canEdit}
+              title={
+                canEdit
+                  ? "Confere as regras finais e conclui esta Cotação"
+                  : "Disponível somente em uma Cotação em Rascunho"
+              }
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await completeQuote({ data: { id: result.quote_id } });
+                  await invalidateAll();
+                  await onCompleted();
+                  toast.success("Cotação concluída", {
+                    description: "Agora você pode sincronizar com a Oportunidade.",
+                  });
+                } catch (error) {
+                  toast.error("Não foi possível concluir a Cotação", {
+                    description: error instanceof Error ? error.message : "Tente novamente.",
+                  });
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? "Concluindo…" : "Validar e concluir"}
             </button>
           </div>
         </div>

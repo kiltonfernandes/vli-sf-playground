@@ -3307,6 +3307,10 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         tariff: number;
         diesel_base_id: string;
         diesel_base_date: string;
+        tolerance_vli_volume: number;
+        tolerance_client_volume: number;
+        tolerance_vli_tariff: number;
+        tolerance_client_tariff: number;
         services: Array<{ service: string; percent: number }>;
       }>;
     };
@@ -3422,6 +3426,20 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         throw new Error("O volume ferroviário deve ser um número inteiro positivo.");
       if (!Number.isFinite(group.tariff) || group.tariff <= 0)
         throw new Error("Informe uma tarifa maior que zero.");
+      const tolerances = [
+        group.tolerance_vli_volume,
+        group.tolerance_client_volume,
+        group.tolerance_vli_tariff,
+        group.tolerance_client_tariff,
+      ].map(Number);
+      if (
+        tolerances.some(
+          (value) => !Number.isInteger(value) || value < 0 || value > 100,
+        )
+      )
+        throw new Error("Cada tolerância deve ser um número inteiro entre 0% e 100%.");
+      if (opp.instrument_type === "ACS" && tolerances.some((value) => value > 0))
+        throw new Error("ACS não aceita tolerâncias nem Take or Pay.");
       if (!group.diesel_base_id || group.diesel_base_id !== request.groups[0].diesel_base_id)
         throw new Error("Use uma única Base Diesel por Fluxo nesta Cotação.");
       if (!["Mensal", "Anual"].includes(group.frequency))
@@ -3515,10 +3533,10 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
           accessory_cbs_pct: cbs ? pctUnits[index] / 100 : null,
           accessory_net: cbs ? null : shares[index] / 100,
           accessory_net_pct: cbs ? null : pctUnits[index] / 100,
-          tolerance_vli_volume: 0,
-          tolerance_client_volume: 0,
-          tolerance_vli_tariff: 0,
-          tolerance_client_tariff: 0,
+          tolerance_vli_volume: tolerances[0],
+          tolerance_client_volume: tolerances[1],
+          tolerance_vli_tariff: tolerances[2],
+          tolerance_client_tariff: tolerances[3],
           operation: isAddendum ? "Incluir" : null,
         }),
       );

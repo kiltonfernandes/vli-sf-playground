@@ -28,6 +28,10 @@ type AgendaGroup = {
   tariff: number;
   diesel_base_id: string;
   diesel_base_date: string;
+  tolerance_vli_volume: number;
+  tolerance_client_volume: number;
+  tolerance_vli_tariff: number;
+  tolerance_client_tariff: number;
   services: Array<{ service: string; percent: number }>;
 };
 type Props = {
@@ -304,6 +308,10 @@ export function QuoteItemScreenflow({
         tariff,
         diesel_base_id: dieselBases[0]?.id ?? "",
         diesel_base_date: applicationDate(applicationDay, startMonth, startYear),
+        tolerance_vli_volume: 0,
+        tolerance_client_volume: 0,
+        tolerance_vli_tariff: 0,
+        tolerance_client_tariff: 0,
         services: [{ service: "FRETE", percent: 100 }],
       },
     ];
@@ -499,10 +507,16 @@ export function QuoteItemScreenflow({
           !Number.isFinite(g.tariff) ||
           g.tariff <= 0 ||
           !g.diesel_base_id ||
+          [
+            g.tolerance_vli_volume,
+            g.tolerance_client_volume,
+            g.tolerance_vli_tariff,
+            g.tolerance_client_tariff,
+          ].some((value) => !Number.isInteger(value) || value < 0 || value > 100) ||
           Math.abs(g.services.reduce((s, x) => s + x.percent, 0) - 100) > 0.2,
       )
     ) {
-      setError("Revise volume, tarifa, Base Diesel e rateio de serviços de cada grupo.");
+      setError("Revise volume, tarifa, Base Diesel, tolerâncias e rateio de serviços de cada grupo.");
       return false;
     }
     return true;
@@ -1171,6 +1185,68 @@ export function QuoteItemScreenflow({
                       />
                     </label>
                   </div>
+                  {instrumentType === "Contrato" ? (
+                    <section
+                      style={{
+                        marginTop: 12,
+                        padding: 12,
+                        border: "1px solid #91c8f6",
+                        borderRadius: 4,
+                        background: "#f3f9fe",
+                      }}
+                    >
+                      <b style={{ fontSize: 13 }}>Take or Pay · tolerâncias da Agenda</b>
+                      <p style={{ margin: "5px 0 10px", fontSize: 12, color: "#444" }}>
+                        Qualquer percentual acima de zero exige a configuração de Take or Pay na
+                        Oportunidade antes de avançar. Informe as quatro tolerâncias; use zero
+                        quando aquela dimensão não fizer parte do acordo.
+                      </p>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit,minmax(165px,1fr))",
+                          gap: 10,
+                        }}
+                      >
+                        {([
+                          ["Tolerância volume VLI", "tolerance_vli_volume"],
+                          ["Tolerância volume cliente", "tolerance_client_volume"],
+                          ["Tolerância tarifa VLI", "tolerance_vli_tariff"],
+                          ["Tolerância tarifa cliente", "tolerance_client_tariff"],
+                        ] as const).map(([label, field]) => (
+                          <label key={field} style={labelStyle}>
+                            {label} (%)
+                            <input
+                              aria-label={label}
+                              style={inputStyle}
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={g[field]}
+                              onChange={(event) =>
+                                updateGroup(index, { [field]: Number(event.target.value) })
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+                  ) : instrumentType === "ACS" ? (
+                    <p
+                      style={{
+                        margin: "12px 0 0",
+                        padding: 10,
+                        borderRadius: 4,
+                        color: "#8a6d00",
+                        background: "#fff8e1",
+                        fontSize: 12,
+                      }}
+                    >
+                      ACS não aceita tolerâncias nem Take or Pay. Por isso, esses campos não são
+                      exibidos nesta Agenda.
+                    </p>
+                  ) : null}
                   <div style={{ marginTop: 8 }}>
                     <b style={{ fontSize: 12 }}>Serviços e rateio</b>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "8px 0" }}>
