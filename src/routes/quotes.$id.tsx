@@ -2003,8 +2003,12 @@ function PricePanel({
                     : "Envia os preços desta Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
                 }
                 onClick={async () => {
-                  if (result.open_approval && result.approval_id) {
-                    navigate({ to: "/approvals/$id", params: { id: result.approval_id } });
+                  if (result.open_approval) {
+                    if (result.approval_id) {
+                      navigate({ to: "/approvals/$id", params: { id: result.approval_id } });
+                    } else {
+                      navigate({ to: "/approvals" });
+                    }
                     return;
                   }
                   setBusy(true);
