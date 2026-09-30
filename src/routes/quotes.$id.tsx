@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { isDieselBaseDateApplicable } from "@/lib/business-rules";
 import {
   applyRecommendedPrices,
   bulkAdjustQuotePrices,
@@ -981,19 +982,11 @@ function getQuoteBusinessRules(
     hasSchedules &&
     schedules.every((row) => {
       if (!row.diesel_base_id || !row.diesel_base_date) return false;
-      const value = String(row.diesel_base_date);
-      const full = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      const monthYear = value.match(/^(\d{2})\/(\d{4})$/);
-      if (full)
-        return (
-          Number(full[1]) === applicationDay &&
-          Number(full[2]) === Number(row.month) &&
-          Number(full[3]) === Number(row.year)
-        );
-      return (
-        !!monthYear &&
-        Number(monthYear[1]) === Number(row.month) &&
-        Number(monthYear[2]) === Number(row.year)
+      return isDieselBaseDateApplicable(
+        row.diesel_base_date,
+        applicationDay,
+        Number(row.month),
+        Number(row.year),
       );
     });
   const allocationPass =
@@ -2242,4 +2235,3 @@ function AddendumPanel({
     </section>
   );
 }
-

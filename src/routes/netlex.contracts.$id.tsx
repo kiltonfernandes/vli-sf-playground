@@ -112,6 +112,23 @@ function NetlexContractPage() {
     usesCbs ? schedule.tariffCbs : schedule.tariffNet;
   const serviceTariff = (schedule: Record<string, any>) =>
     (usesCbs ? schedule.accessoryCbs : schedule.accessoryNet) ?? groupTariff(schedule);
+  const scheduleGroups = new Set(
+    schedules.map((schedule) => `${schedule.item.flowCode}|${schedule.period}|${schedule.plaza}|${schedule.division}`),
+  );
+  const projectedAmount = schedules.reduce(
+    (sum, schedule) => sum + Number(schedule.volume ?? 0) * Number(serviceTariff(schedule) ?? 0),
+    0,
+  );
+  const dieselEntries = [
+    ...new Map(
+      schedules
+        .filter((schedule) => schedule.dieselBaseDate)
+        .map((schedule) => [
+          `${schedule.item.flowCode}|${schedule.period}|${schedule.dieselBaseDate}`,
+          schedule,
+        ]),
+    ).values(),
+  ];
 
   return (
     <SfShell>
@@ -444,11 +461,72 @@ function NetlexContractPage() {
               )}
             </section>
 
+            <section className="sf-netlex-clause">
+              <h3>7. Identificação da operação contratada</h3>
+              <p>
+                Esta minuta registra a oportunidade <strong>{doc.opportunity?.name ?? "—"}</strong>,
+                instrumento <strong>{doc.opportunity?.instrumentType ?? kind}</strong>, do segmento
+                <strong> {doc.opportunity?.segment ?? "—"}</strong>, vinculada à Conta de gestão
+                <strong> {parties.customerAccount ?? "—"}</strong> e à Cotação
+                <strong> {commercial.quoteNumber ?? "—"}</strong>. As partes indicadas na cláusula
+                1 e os fluxos ferroviários listados nesta minuta formam o escopo comercial desta
+                versão.
+              </p>
+            </section>
+
+            <section className="sf-netlex-clause">
+              <h3>8. Composição tarifária e referência de volume</h3>
+              <p>
+                A Cotação usa a base tarifária <strong>{commercial.tariffBasis ?? "—"}</strong> e
+                registra <strong>{scheduleGroups.size}</strong> grupos de Agenda em
+                <strong> {schedules.length}</strong> linhas de serviço. A soma de referência de
+                volume multiplicado pela tarifa unitária das linhas é
+                <strong> {fmtMoney(projectedAmount)}</strong>, calculada a partir dos períodos,
+                serviços e valores apresentados na cláusula 4. Esse total resume os dados da
+                Cotação e não acrescenta condições de faturamento ausentes do cadastro.
+              </p>
+            </section>
+
+            <section className="sf-netlex-clause">
+              <h3>9. Data Base Diesel por fluxo</h3>
+              <p>
+                Para os grupos abaixo, a Data Base Diesel registrada acompanha o dia de aplicação
+                <strong> {term.applicationDay ?? "—"}</strong> e o período de cada Agenda. A data
+                aplicável a cada fluxo é:
+              </p>
+              <ul className="sf-clause-list">
+                {dieselEntries.map((schedule, index) => (
+                  <li key={`diesel-${index}`}>
+                    <strong>
+                      {schedule.item.origin} → {schedule.item.destination} · {schedule.item.merchandise} · {schedule.period}
+                    </strong>
+                    Serviço {schedule.service}, praça {schedule.plaza}: Data Base Diesel
+                    {" "}<strong>{schedule.dieselBaseDate}</strong>.
+                  </li>
+                ))}
+              </ul>
+              {!dieselEntries.length && <p className="sf-netlex-empty">Nenhuma data-base registrada na Cotação.</p>}
+            </section>
+
+            <section className="sf-netlex-clause">
+              <h3>10. Registro das condições e alterações</h3>
+              <p>
+                As condições comerciais desta versão foram extraídas da Cotação
+                <strong> {commercial.quoteNumber ?? "—"}</strong> e da oportunidade
+                <strong> {doc.opportunity?.name ?? "—"}</strong>, com vigência de
+                <strong> {fmtDate(term.start)}</strong> a <strong>{fmtDate(term.end)}</strong>.
+                Alterações posteriores de fluxo, período, volume, tarifa, reajuste ou tolerância
+                devem ser formalizadas em uma nova Cotação e, quando aplicável, em aditivo
+                vinculado ao contrato. Assuntos jurídicos não representados pelos dados da
+                Oportunidade e da Cotação permanecem para complementação no NetLex.
+              </p>
+            </section>
+
             </>
           )}
 
           <section className="sf-netlex-clause">
-            <h3>{isAddendum ? "6" : "7"}. Complementos jurídicos</h3>
+            <h3>{isAddendum ? "6" : "11"}. Complementos jurídicos</h3>
             <p>{String(doc.manualCompletionNote ?? "Campos complementares não informados.")}</p>
           </section>
 

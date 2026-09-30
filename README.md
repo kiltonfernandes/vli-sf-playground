@@ -10,6 +10,14 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v7.21.07 — Validações alinhadas, rateio reparado e quatro novas cláusulas
+
+- **Reajuste Ferro editável**: Diesel, IGP-M, IPCA e a data do primeiro reajuste podem ser ajustados dentro do screenflow. Os campos aceitam apenas percentuais de 0% a 100%; acima de 365 dias, a soma deve fechar 100% e a primeira data precisa ficar dentro da vigência. A interface e o servidor aplicam as mesmas regras antes de gravar na Oportunidade.
+- **Data Base Diesel**: a validação agora aceita o mês da Agenda ou o mês imediatamente anterior, com o dia 1, 10 ou 20 vindo da Oportunidade e uma data igual em todas as linhas daquele grupo. O checklist, a gravação da Agenda e a conclusão da Cotação usam a mesma regra. O shuffle define a data válida por Agenda, inclusive quando inclui um Fluxo novo ou atravessa dezembro/janeiro.
+- **Rateio após editar preço**: a edição de uma linha recalcula a tarifa do grupo pela soma dos serviços e redistribui os percentuais em centavos; antes, a alteração deixava as linhas irmãs com a tarifa antiga e a Cotação falhava ao concluir. Se ainda houver dados antigos inválidos, o aviso agora identifica período, soma, tarifa total e percentual.
+- **Minuta de Contrato/ACS**: entram quatro novas cláusulas numeradas 7–10, compostas com os dados cadastrados na Oportunidade e na Cotação: identificação do escopo, composição tarifária e referência de volume, Data Base Diesel por fluxo e regras de registro de alterações. “Complementos jurídicos” passa para a seção 11. O texto continua sendo uma minuta demonstrativa, e os dados ausentes ficam indicados para complementação no NetLex.
+- **Verificação**: build de produção aprovado; regras de reajuste e datas conferidas para mês atual/anterior, virada de ano e valores fora da vigência; 20 datas de um shuffle simulado passaram na validação e todos os grupos incluídos fecharam valor e rateio.
+
 ### v6.21.07 — Cotação: Período por padrão, edição de preços em massa e aditivo em um clique
 
 - **Agrupar por Período primeiro**: as Agendas da Cotação agora abrem agrupadas por **Período**; **Estrutura** virou a segunda opção do seletor.
@@ -21,7 +29,7 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 - **Botão “🔀 Embaralhar aditivo”** no painel Motor de aditivo da Cotação (só em Rascunho). Um clique volta a Cotação à linha de base do contrato vigente (Agendas, vigência e reajuste) e sorteia, com uma seed interna (não exibida), um cenário novo: **pelo menos 60% das Agendas são alteradas ou excluídas** (excluir ≈ 25–40% delas) e **≈ 30% de Agendas novas são incluídas**. “Agenda” = um Fluxo em um mês (todas as linhas de serviço juntas). Pede confirmação se já houver mudanças.
 - **Alterar** sorteia volume, tarifa (±3–10%, com o rateio refeito para fechar a tarifa) e/ou Data Base Diesel. **Incluir** prorroga os Fluxos ativos no fim do contrato e, com 3+ Agendas novas e Fluxo elegível, inclui também um Fluxo novo.
-- **Regras de data garantidas** (`src/lib/addendum-shuffle.ts`): (1) nunca repete Fluxo + mês + divisão + praça, nem de uma Agenda marcada como Excluir; (2) Agenda nova não fica antes do início da vigência nem em mês já decorrido, e depois do fim prorroga a vigência até o último dia do último mês novo (cláusula de prazo); (3) Data Base Diesel sempre `DD/MM/AAAA` com o dia de aplicação da Oportunidade, no mês da Agenda ou no anterior e igual em todas as linhas da mesma Agenda (Fluxo novo usa a data da primeira Agenda); (4) Agenda nova herda periodicidade, janela, divisão, praça, Base Diesel e tolerâncias do Fluxo; (5) meses já decorridos só são alterados/excluídos se faltarem Agendas futuras para os 60%; (6) vigência acima de 365 dias configura o reajuste anual (Diesel + IGP-M + IPCA = 100% e primeiro reajuste) quando ainda não existir.
+- **Regras de data garantidas** (`src/lib/addendum-shuffle.ts`): (1) nunca repete Fluxo + mês + divisão + praça, nem de uma Agenda marcada como Excluir; (2) Agenda nova não fica antes do início da vigência nem em mês já decorrido, e depois do fim prorroga a vigência até o último dia do último mês novo (cláusula de prazo); (3) cada Data Base Diesel é `DD/MM/AAAA`, usa o dia de aplicação da Oportunidade, fica no mês da Agenda ou no anterior e é igual em todas as linhas daquela Agenda; (4) Agenda nova herda periodicidade, janela, divisão, praça, Base Diesel e tolerâncias do Fluxo; (5) meses já decorridos só são alterados/excluídos se faltarem Agendas futuras para os 60%; (6) vigência acima de 365 dias configura o reajuste anual (Diesel + IGP-M + IPCA = 100% e primeiro reajuste) quando ainda não existir.
 - A validação de preços e a alçada continuam valendo: Agendas Alteradas/Incluídas com desvio acima do limite exigem aprovação.
 - Verificação: build de produção aprovado; simulação de 2.100 sorteios do planejador (60%+ de mudanças, sem colisão de mês, rateio fechando 100%, datas válidas) e E2E local com vários sorteios seguidos e “Validar e concluir” passando em todas as validações estruturais (o único bloqueio foi a alçada de preço).
 
@@ -303,7 +311,7 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - De **Negociação** para **Aprovação**, o servidor exige que uma Cotação seja concluída e sincronizada, com preços validados (ok ou aprovados por alçada).
 - De **Aprovação** para **Formalização**, exige Cotação sincronizada, preço `Ok` ou `Aprovada`, aprovação registrada quando necessária e nenhuma solicitação pendente.
 - Em **Formalização**, um Contrato pode ser enviado ao NetLex simulado quando as partes, vigência, Cotação e regras contratuais estiverem válidas.
-- De **Formalização** para **Fechado**, ainda exige retorno jurídico e contrato vigente, que não fazem parte desta etapa; o Path permanece bloqueado.
+- De **Formalização** para **Fechado**, exige um documento NetLex simulado com status **Assinatura**. O botão **Mover para Assinatura** representa esse retorno manual dentro do Playground.
 - A transição de **Aprovação** para **Negociação** é permitida para representar rejeição ou cancelamento de aprovação.
 - A edição de outros campos da oportunidade não exige mudança de estágio.
 
@@ -312,8 +320,14 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - A ação aparece na Oportunidade do tipo **Contrato**, em **Formalização**, após a aprovação de preços e a sincronização da Cotação. O servidor também revalida os pré-requisitos antes de criar o snapshot.
 - O envio simulado valida partes cliente/VLI, vigência, agendas dentro da vigência, reajustes (quando a vigência excede 365 dias), estado de aprovação, tolerâncias e itens da Cotação.
 - O registro guarda Contratante(s), entidade VLI, devedor solidário opcional, vigência, regra de tarifa, reajustes, indicação de Take or Pay, trechos, serviços, períodos, volumes e tarifas aprovadas. A minuta distingue a tarifa total do grupo da parcela rateada para cada serviço.
-- O número NetLex e o status **Aguardando retorno da NetLex** ficam destacados na Oportunidade. O link abre a minuta em nova aba.
-- O documento é um snapshot demonstrativo, não tem validade jurídica e não chama a API externa. O fluxo real completa outros dados e questionários no NetLex; cancelamento/reenvio e retorno de status ainda não estão simulados. Após o envio, os dados que compõem a minuta ficam protegidos contra edição/exclusão.
+- O número NetLex e o status inicial **Análise jurídica** ficam destacados na Oportunidade. O link abre a minuta em nova aba; **Mover para Assinatura** é uma mudança simulada de status que libera o fechamento.
+- A minuta inclui quatro cláusulas adicionais montadas com dados da oportunidade e da cotação: escopo, composição tarifária, datas-base por fluxo e formalização de alterações. O documento é um snapshot demonstrativo, não tem validade jurídica e não chama a API externa. Questionário e complementos jurídicos ainda precisam ser preenchidos no NetLex real; após o envio, os dados que compõem a minuta ficam protegidos contra edição/exclusão.
+
+### Aditivo simulado
+
+- Um Contrato em **Assinatura** permite criar uma Oportunidade de Aditivo. Ela herda Conta, partes, vigência e reajuste e cria uma Cotação com as Agendas da versão vigente marcadas como **Manter**.
+- No Rascunho, editar preço, volume, Base Diesel ou tolerâncias marca a Agenda como **Alterar**; novas Agendas são **Incluir** e as removidas ficam **Excluir**. O botão **Embaralhar aditivo** monta outro cenário dentro das regras de período e data; a alçada avalia apenas Agendas incluídas ou alteradas.
+- A minuta de aditivo envia somente as mudanças. Ao mover para **Assinatura**, o Playground simula a aplicação no Contrato original e guarda uma nova versão. São aceitos aditivos sucessivos; ACS não gera aditivo.
 
 ### Cotação ferroviária: Contrato e ACS
 
@@ -324,12 +338,12 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - Um Fluxo Planejado elegível pertence à Conta da Oportunidade e é ferroviário. O catálogo cria os registros internos de origem necessários quando a conta ainda não tem Fluxo elegível; essa origem não aparece na jornada. Location e Mercadoria são referências ligadas ao registro do fluxo. A interface monta a rota a partir das siglas cadastradas.
 - Cada agenda deve ter ano entre 1900 e 4000, mês de 1 a 12, volume inteiro positivo, Base Diesel e serviço ferroviário permitido. Na etapa de Agendas, a pessoa escolhe CBS ou líquida para a Cotação; uma vez salva a primeira Agenda, essa escolha fica fixa. Não são aceitas duas tarifas positivas.
 - Serviços permitidos: FRETE, CARGA, DESCARGA, BALDEAÇÃO, MANOBRA ORIGEM e MANOBRA DESTINO. Cada grupo de Fluxo/período/divisão/praça precisa conter FRETE; o rateio de acessórios deve fechar o valor principal com diferença máxima de R$ 0,02 e somar 100% com tolerância de 0,2 ponto percentual.
-- `VLI_KeySchedule__c` é representada localmente como `schedule_key`: código do fluxo + AAAAMM + divisão + praça. A agenda repetida para outro serviço pode compartilhar a chave; o mesmo serviço na mesma chave é rejeitado inclusive entre cotações.
-- DataBaseDiesel aceita `MM/AAAA` ou `DD/MM/AAAA`; é exigida para periodicidade anual ou quando o fluxo tem agendas em meses diferentes. O dia efetivo é sempre substituído pelo dia de aplicação 1, 10 ou 20 salvo na Oportunidade. Um fluxo mantém uma Base Diesel por Cotação. O catálogo mock inicial inclui ELDORADO.
+- `VLI_KeySchedule__c` é representada localmente como `schedule_key`: código do fluxo + AAAAMM + divisão + praça. A agenda repetida para outro serviço pode compartilhar a chave; o mesmo serviço na mesma chave é rejeitado dentro da Cotação. Cotações alternativas podem reutilizar chaves iguais.
+- DataBaseDiesel aceita `MM/AAAA` ou `DD/MM/AAAA`; a data precisa estar no mês da Agenda ou no mês anterior, com o dia de aplicação 1, 10 ou 20 salvo na Oportunidade. A Base Diesel e a data são iguais em todas as linhas do mesmo grupo. Um Fluxo mantém uma Base Diesel por Cotação. O catálogo mock inicial inclui ELDORADO.
 - Vigência inicial/final da Oportunidade deve cobrir as agendas. ACS exige vigência inferior a 12 meses e rejeita qualquer tolerância positiva; assim, ACS não cria Take or Pay. Em Contrato, as quatro tolerâncias, quando usadas, devem ser inteiras de 0 a 100 e preenchidas em conjunto.
 - Dados Faker são mockados e reproduzíveis por seed. O gerador não consulta Jetsons, não calcula recomendação real de preço e não representa sincronização com Salesforce.
 
-As regras de negócio já simuladas para Cotação, Aprovação e criação do snapshot de Contrato NetLex estão descritas nesta página. Questionário jurídico, envio real, assinatura e retorno de status continuam pendentes; não devem ser descritos como validações ativas.
+As regras de negócio já simuladas para Cotação, Aprovação, snapshot de Contrato, assinatura simulada e aditivo estão descritas nesta página. Envio real, questionário jurídico e retorno automático de status do NetLex continuam pendentes; a assinatura simulada e o fechamento da Oportunidade são fluxos ativos do Playground.
 
 #### Regras em níveis
 
@@ -372,10 +386,10 @@ As regras de negócio já simuladas para Cotação, Aprovação e criação do s
    - Na aba **Cotações**, crie uma Cotação individual; ou abra **Cotações** e use **Nova Cotação manual**.
    - Ela fica vinculada à Oportunidade e inicia em **Rascunho**. Para montar toda a massa com seed, use **Gerar Cotação + itens + agendas** na lista Cotações e selecione a Oportunidade.
 5. **Montar Item e Agendas no screenflow**
-   - Dentro da Cotação, escolha **Adicionar Item**. O assistente abre em três etapas: Fluxo do Cliente → Agendas → Revisão.
+   - Dentro da Cotação, escolha **Adicionar Item**. Para Contrato, o assistente abre em quatro etapas: Fluxo do Cliente → Reajuste Ferro → Agendas → Revisão. Para ACS, Reajuste Ferro não aparece.
    - Selecione Cliente → Origem → Destino → Mercadoria → Modal, nessa ordem. O Cliente vem fixo da Conta de gestão; cada seleção filtra as opções válidas seguintes.
-   - Na etapa **Agendas**, escolha o serviço principal do Item, informe uma seed do Faker e adicione quantos grupos de período precisar.
-   - Em cada grupo, confira período dentro da vigência, divisão, praça, volume inteiro, tarifa conforme CBS/Líquida, Base Diesel e data base. Inclua serviços; FRETE é obrigatório e o rateio deve fechar tarifa e 100%.
+   - Em **Reajuste Ferro**, ajuste Diesel, IGP-M, IPCA e a data do primeiro reajuste, se necessário, e salve. Cada percentual deve ficar entre 0% e 100%; acima de 365 dias, a soma deve ser 100% e a data precisa ficar dentro da vigência. Em **Agendas**, escolha o serviço principal do Item, informe uma seed do Faker e adicione quantos grupos de período precisar.
+   - Em cada grupo, confira período dentro da vigência, divisão, praça, volume inteiro, tarifa conforme CBS/Líquida, Base Diesel e data-base no mês da Agenda ou no anterior. O dia da data vem da Oportunidade. Inclua serviços; FRETE é obrigatório e o rateio deve fechar a tarifa e 100%.
    - Use **Adicionar período** para incluir uma Agenda manualmente. **Criar em lote** gera um grupo por mês no intervalo escolhido, dentro da vigência, copiando os dados do grupo selecionado; períodos já usados são ignorados. **Gerar com Faker** continua disponível para preencher um grupo com dados repetíveis da seed.
    - Na etapa **Revisão**, confira o resumo e escolha **Salvar Item e Agendas**. O sistema grava tudo em uma transação; se alguma regra falhar, o toast explica o motivo e não deixa um Item incompleto.
    - Para acrescentar agendas a um Item já existente, expanda-o e escolha **Adicionar Agenda**: o mesmo screenflow abre com o Fluxo fixado e associa os grupos ao Item.
@@ -391,7 +405,10 @@ As regras de negócio já simuladas para Cotação, Aprovação e criação do s
    - Volte à Oportunidade. Com a Cotação sincronizada e preços resolvidos, o Path permite avançar de **Negociação → Aprovação → Formalização**.
    - Preencha **Contratante(s)** e **Entidade VLI** se ainda estiverem vazias e clique **Enviar contrato ao NetLex**.
    - A modal mostra o envio simulado. Depois, o número e status inicial aparecem em destaque; clique no link para abrir a minuta em nova aba.
-   - **A jornada termina em “Aguardando retorno da NetLex”.** Envio real, questionário jurídico, assinatura, retorno de status e fechamento ainda não existem no Playground.
+   - O documento começa em **Análise jurídica**. Clique **Mover para Assinatura** para simular o retorno do NetLex; isso libera o fechamento da Oportunidade.
+9. **Abrir um aditivo (Contrato)**
+   - Com o Contrato em **Assinatura**, clique **+ Nova oportunidade de aditivo** na minuta ou **+ Criar aditivo** na Cotação.
+   - Revise a Cotação criada com as Agendas vigentes em **Manter**, registre inclusões/alterações/exclusões e conclua, sincronize e envie o documento de aditivo pelo fluxo de Formalização. Mover o aditivo para **Assinatura** atualiza a versão do Contrato original.
 
 Ao registrar novas regras ou corrigir o fluxo, manter a hierarquia de bullets e subtópicos e indicar o que está ativo, o que está pendente e em que etapa aparece cada validação.
 
@@ -401,6 +418,8 @@ Ao registrar novas regras ou corrigir o fluxo, manter a hierarquia de bullets e 
 - CRUD em lote, incluindo criar, atualizar e excluir registros selecionados (até 500 registros por chamada de servidor).
 - Validação de preço por Agenda contra o preço recomendado (Jetsons mock), com comparação, edição e preço recomendado; aprovação simplificada por perfil Vendas/Aprovador, sem nomes nem hierarquia.
 - Criação de contrato simulado a partir da Oportunidade formalizada, com snapshot dos dados comerciais aprovados e página de minuta em nova aba.
+- Ciclo simulado de Aditivo: herança do Contrato em Assinatura, Cotação de mudanças, cláusulas, nova versão do Contrato e suporte a aditivos sucessivos.
+- Minuta de Contrato/ACS com quatro cláusulas personalizadas além das condições comerciais existentes.
 - Listas relacionadas configuráveis; no detalhe da Conta, Contatos e Oportunidades mostram as primeiras três colunas e suportam operações individuais/em lote.
 - Criação em lote numa lista relacionada mantém todos os registros vinculados ao respectivo registro pai.
 - Abertura das listas relacionadas em tela cheia, reordenação e remoção da configuração da lista.
@@ -465,8 +484,8 @@ O push/merge em `main` aciona o deploy configurado para o projeto. Para produç�
 
 ## Ainda não implementado
 
-- Integração externa com NetLex, questionário jurídico, assinatura, retorno de status e fechamento do contrato. O atual fluxo cria apenas um snapshot demonstrativo com status inicial.
+- Integração externa com NetLex, questionário jurídico, preenchimento de complementos jurídicos e retorno automático de status. A mudança para Assinatura e o fechamento são simulados no Playground.
 - Integração direta com Salesforce e Jetsons; o catálogo, as rotas e os preços recomendados desta versão são dados mockados locais, e a notificação de aprovação por e-mail não existe (a decisão acontece na aba Aprovação).
-- Porto, Rodoviário, Aditivo, outros Record Types de Cotação e upload CSV do gerador v6.2.
+- Porto, Rodoviário, outros Record Types de Cotação e upload CSV do gerador v6.2.
 - Partes contratuais granulares como registros e relacionamentos próprios.
 - Campos customizados persistidos criados pela interface. A personalização existente cobre exibição e ordem das colunas.

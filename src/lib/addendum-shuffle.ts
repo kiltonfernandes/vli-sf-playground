@@ -264,10 +264,12 @@ export function planAddendumShuffle(input: ShuffleInput): ShufflePlan {
 
   const dieselPattern = (flowId: string) => {
     const list = byFlow.get(flowId)!;
-    const own = list.filter(
-      (g) => dieselPeriod(g.rows[0].diesel_base_date) === period(g.year, g.month),
-    ).length;
-    return { perMonth: own * 2 >= list.length, last: list.at(-1)!.rows[0].diesel_base_date };
+    const lastGroup = list.at(-1)!;
+    const lastDate = lastGroup.rows[0].diesel_base_date;
+    return {
+      sameMonth: dieselPeriod(lastDate) === period(lastGroup.year, lastGroup.month),
+      last: lastDate,
+    };
   };
 
   let made = 0;
@@ -284,8 +286,10 @@ export function planAddendumShuffle(input: ShuffleInput): ShufflePlan {
       if (usedKeys.has(key)) continue;
       usedKeys.add(key);
       const pattern = dieselPattern(flowId);
-      const date =
-        pattern.perMonth || !pattern.last ? dieselDate(input.applicationDay, at) : pattern.last;
+      const date = dieselDate(
+        input.applicationDay,
+        pattern.sameMonth || !pattern.last ? at : addMonths(at, -1),
+      );
       const volume = Math.max(
         1,
         Math.round((template.rows[0].volume * f.number.float({ min: 0.85, max: 1.2 })) / 10) * 10,
@@ -325,10 +329,10 @@ export function planAddendumShuffle(input: ShuffleInput): ShufflePlan {
     );
     const services = ["FRETE", ...f.helpers.arrayElements(ACCESSORIES, { min: 2, max: 3 })];
     const first = Math.max(validStart, addMonths(currentEnd, -(newFlowMonths - 1)));
-    // Data-base única do Fluxo novo: a da primeira Agenda (regra da wiki).
-    const date = dieselDate(input.applicationDay, first);
     const volume = f.number.int({ min: 1000, max: 9000 });
     for (let at = first; at <= currentEnd; at = addMonths(at, 1)) {
+      // Each Schedule needs a base in its own month or the prior month.
+      const date = dieselDate(input.applicationDay, at);
       plan.created.push(
         buildGroup(input, f, {
           flowId: newFlow.flowId,

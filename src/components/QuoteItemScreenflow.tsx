@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { saveRecord, updateOpportunityTerm } from "@/lib/crud";
+import { saveRecord, updateOpportunityReadjustment, updateOpportunityTerm } from "@/lib/crud";
+import { contractDurationDays, readjustmentRuleError } from "@/lib/business-rules";
 import { toast } from "sonner";
 
 type Flow = {
@@ -226,21 +227,23 @@ export function QuoteItemScreenflow({
   const [termStart, setTermStart] = useState(contractStart);
   const [termEnd, setTermEnd] = useState(contractEnd);
   const [savingTerm, setSavingTerm] = useState(false);
+  const [dieselPct, setDieselPct] = useState(readjustment.diesel);
+  const [igpmPct, setIgpmPct] = useState(readjustment.igpm);
+  const [ipcaPct, setIpcaPct] = useState(readjustment.ipca);
+  const [firstDate, setFirstDate] = useState(firstReadjustmentDate);
+  const [savingReadjustment, setSavingReadjustment] = useState(false);
   const [termSaved, setTermSaved] = useState(!!contractStart && !!contractEnd);
   const startYear = Number(termStart?.slice(0, 4) || new Date().getFullYear());
   const startMonth = Number(termStart?.slice(5, 7) || 1);
   const endYear = Number(termEnd?.slice(0, 4) || startYear);
   const endMonth = Number(termEnd?.slice(5, 7) || 12);
-  const termDays =
-    termStart && termEnd
-      ? Math.round(
-          (Date.parse(`${termEnd}T00:00:00Z`) - Date.parse(`${termStart}T00:00:00Z`)) /
-            86400000,
-        )
-      : 0;
+  const termDays = termStart && termEnd ? (contractDurationDays(termStart, termEnd) ?? 0) : 0;
   const requiresAnnualSplit = termDays > 365;
-  const readjustmentTotal = readjustment.diesel + readjustment.igpm + readjustment.ipca;
-  const readjustmentValid = !requiresAnnualSplit || Math.abs(readjustmentTotal - 100) < 0.001;
+  const readjustmentTotal = dieselPct + igpmPct + ipcaPct;
+  const readjustmentError = termStart && termEnd
+    ? readjustmentRuleError({ contractStart: termStart, contractEnd: termEnd, dieselPct, igpmPct, ipcaPct, firstReadjustmentDate: firstDate })
+    : "Informe uma vigência válida antes de ajustar o reajuste anual.";
+  const readjustmentValid = !readjustmentError;
   const yearMonths = useMemo(() => {
     const result: Array<{ year: number; month: number }> = [];
     // Com fim livre, os seletores oferecem até 36 meses depois do término atual.
@@ -477,22 +480,8 @@ export function QuoteItemScreenflow({
       return false;
     }
     if (step === 1 && !readjustmentValid) {
-      setError("Para vigência superior a 365 dias, Diesel + IGP-M + IPCA precisam somar 100%.");
+      setError(readjustmentError ?? "Revise os parâmetros de reajuste anual.");
       return false;
-    }
-    if (step === 1 && requiresAnnualSplit && !firstReadjustmentDate) {
-      setError("Informe a data do primeiro reajuste na Oportunidade antes de continuar.");
-      return false;
-    }
-    if (step === 1 && firstReadjustmentDate && contractStart && contractEnd) {
-      const firstDate = Date.parse(`${firstReadjustmentDate}T00:00:00Z`);
-      if (
-        firstDate < Date.parse(`${contractStart}T00:00:00Z`) ||
-        firstDate > Date.parse(`${contractEnd}T00:00:00Z`)
-      ) {
-        setError("A data do primeiro reajuste precisa estar dentro da vigência do contrato.");
-        return false;
-      }
     }
     if (
       step === 2 &&
@@ -777,18 +766,28 @@ export function QuoteItemScreenflow({
                     gap: 12,
                   }}
                 >
-                  {[
-                    ["Diesel", readjustment.diesel],
-                    ["IGP-M", readjustment.igpm],
-                    ["IPCA", readjustment.ipca],
-                  ].map(([label, value]) => (
+                  {([
+                    ["Diesel", dieselPct, setDieselPct],
+                    ["IGP-M", igpmPct, setIgpmPct],
+                    ["IPCA", ipcaPct, setIpcaPct],
+                  ] as const).map(([label, value, setValue]) => (
                     <div
                       key={String(label)}
                       style={{ padding: 12, background: "#f3f3f3", borderRadius: 4 }}
                     >
                       <small>{label}</small>
-                      <div style={{ fontSize: 22, fontWeight: 700 }}>
-                        {Number(value).toFixed(2)}%
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <input
+                          aria-label={`Percentual ${label}`}
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={value}
+                          onChange={(event) => setValue(Number(event.target.value))}
+                          style={{ ...inputStyle, fontSize: 20, fontWeight: 700, padding: "5px 7px" }}
+                        />
+                        <strong>%</strong>
                       </div>
                     </div>
                   ))}
@@ -831,16 +830,48 @@ export function QuoteItemScreenflow({
                   Vigência: {termStart || "—"} a {termEnd || "—"} · {termDays} dias · Dia de
                   aplicação: {applicationDay}
                 </small>
-                {requiresAnnualSplit && (
+                {readjustmentError && (
                   <p
                     role="status"
-                    style={{ color: readjustmentValid ? "#2e844a" : "#ba0517", marginBottom: 0 }}
+                    style={{ color: "#ba0517", marginBottom: 0 }}
                   >
-                    Contratos com mais de 365 dias precisam distribuir 100% entre Diesel, IGP-M e
-                    IPCA. Para ajustar os percentuais, edite a Oportunidade e retorne a esta
-                    Cotação.
+                    {readjustmentError}
                   </p>
                 )}
+                <small style={{ display: "block", marginTop: 8 }}>
+                  Cada percentual deve ficar entre 0% e 100%. Acima de 365 dias, a soma precisa
+                  fechar 100%; a data do primeiro reajuste também deve ficar na vigência.
+                </small>
+                <button
+                  className="sf-btn"
+                  type="button"
+                  disabled={savingReadjustment || !readjustmentValid}
+                  style={{ marginTop: 12 }}
+                  onClick={async () => {
+                    setSavingReadjustment(true);
+                    try {
+                      await updateOpportunityReadjustment({
+                        data: {
+                          id: opportunityId,
+                          diesel_pct: dieselPct,
+                          igpm_pct: igpmPct,
+                          ipca_pct: ipcaPct,
+                          first_readjustment_date: firstDate,
+                        },
+                      });
+                      toast.success("Parâmetros de reajuste atualizados na Oportunidade.");
+                      await onTermSaved?.();
+                    } catch (error) {
+                      toast.error("Não foi possível salvar o reajuste", {
+                        description: error instanceof Error ? error.message : undefined,
+                      });
+                    } finally {
+                      setSavingReadjustment(false);
+                    }
+                  }}
+                >
+                  {savingReadjustment ? "Salvando…" : "Salvar parâmetros de reajuste"}
+                </button>
               </section>
               <section style={{ border: "1px solid #dddbda", borderRadius: 6, padding: 16 }}>
                 <h3 style={{ marginTop: 0 }}>Primeiro reajuste</h3>
@@ -859,8 +890,17 @@ export function QuoteItemScreenflow({
                   i
                 </button>
                 <p style={{ marginBottom: 4 }}>
-                  Primeiro reajuste: {firstReadjustmentDate || "não informado"}. As aplicações
-                  seguem o dia {applicationDay} de cada período.
+                  Primeiro reajuste:
+                  <input
+                    aria-label="Data do primeiro reajuste"
+                    type="date"
+                    value={firstDate}
+                    min={termStart || contractStart}
+                    max={termEnd || contractEnd}
+                    onChange={(event) => setFirstDate(event.target.value)}
+                    style={{ ...inputStyle, width: "auto", margin: "0 8px" }}
+                  />
+                  As aplicações seguem o dia {applicationDay} de cada período.
                 </p>
                 <small>
                   A Data Base Diesel e a base aplicável serão definidas por fluxo na próxima etapa.

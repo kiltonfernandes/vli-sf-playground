@@ -22,6 +22,11 @@ import {
 } from "./schema";
 import { asc as ascending } from "drizzle-orm";
 import { randomSeed, seededFaker } from "./generators/core";
+import {
+  isDieselBaseDateApplicable,
+  readjustmentRuleError,
+  reallocateScheduleGroup,
+} from "./business-rules";
 import { planAddendumShuffle, type ShuffleGroup } from "./addendum-shuffle";
 import { jetsonsUnitPrice, type JetsonsEndpoint } from "./jetsons";
 import {
@@ -2073,23 +2078,8 @@ export const syncQuote = createServerFn({ method: "POST" }).handler(async ({ dat
       )
     )
       throw new Error("Preencha tarifa e percentual acessório em todas as linhas da agenda.");
-    const amount = group.reduce(
-      (sum, row) => sum + Math.round(Number(useCbs ? row.accessory_cbs : row.accessory_net) * 100),
-      0,
-    );
-    const pct = group.reduce(
-      (sum, row) => sum + Number(useCbs ? row.accessory_cbs_pct : row.accessory_net_pct),
-      0,
-    );
-    if (
-      Math.abs(
-        amount - Math.round(Number(useCbs ? group[0].tariff_cbs : group[0].tariff_net) * 100),
-      ) > 2 ||
-      Math.abs(pct - 100) > 0.2
-    )
-      throw new Error(
-        "O rateio ferroviário deve fechar a tarifa e somar 100% (tolerância 0,2 ponto percentual).",
-      );
+    const allocationError = allocationErrorText(group, useCbs);
+    if (allocationError) throw new Error(allocationError);
   }
   if (opportunity.instrument_type === "ACS") {
     if (
@@ -2206,8 +2196,27 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
       throw new Error("A vigência da Oportunidade precisa cobrir a primeira e a última Agenda.");
     if (frequencyByFlow.get(flowId)!.size > 1)
       throw new Error("Um Fluxo não pode misturar periodicidade mensal e anual na mesma Cotação.");
-    if (row.diesel_base_date)
-      applicationDate(Number(opp.application_day), row.diesel_base_date, row.month, row.year);
+    if (!row.diesel_base_id || !row.diesel_base_date)
+      throw new Error(
+        `Informe Base Diesel e data na Agenda ${String(row.month).padStart(2, "0")}/${row.year}.`,
+      );
+    const normalizedDieselDate = applicationDate(
+      Number(opp.application_day),
+      row.diesel_base_date,
+      row.month,
+      row.year,
+    );
+    if (
+      !isDieselBaseDateApplicable(
+        normalizedDieselDate,
+        Number(opp.application_day),
+        row.month,
+        row.year,
+      )
+    )
+      throw new Error(
+        `A Data Base Diesel da Agenda ${String(row.month).padStart(2, "0")}/${row.year} deve estar no mesmo mês ou no mês anterior.`,
+      );
   }
   if ([...dieselByFlow.values()].some((bases) => bases.size > 1))
     throw new Error("Cada Fluxo Planejado só pode usar uma Base Diesel nesta Cotação.");
@@ -2249,24 +2258,8 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
       )
     )
       throw new Error("Complete os valores e percentuais de rateio em cada linha do grupo.");
-    const amount = group.reduce(
-        (sum, row) =>
-          sum + Math.round(Number(useCbs ? row.accessory_cbs : row.accessory_net) * 100),
-        0,
-      ),
-      pct = group.reduce(
-        (sum, row) => sum + Number(useCbs ? row.accessory_cbs_pct : row.accessory_net_pct),
-        0,
-      );
-    if (
-      Math.abs(
-        amount - Math.round(Number(useCbs ? group[0].tariff_cbs : group[0].tariff_net) * 100),
-      ) > 2 ||
-      Math.abs(pct - 100) > 0.2
-    )
-      throw new Error(
-        "O rateio deve totalizar a tarifa e fechar 100% (tolerância de 0,2 ponto percentual).",
-      );
+    const allocationError = allocationErrorText(group, useCbs);
+    if (allocationError) throw new Error(allocationError);
   }
   if (
     opp.instrument_type === "ACS" &&
@@ -2690,6 +2683,39 @@ async function validateOpportunityStage(
   throw new Error("A oportunidade só pode avançar pelas etapas disponíveis no Path.");
 }
 
+async function validateOpportunityReadjustmentInput(
+  recordId: string | null | undefined,
+  data: Record<string, unknown>,
+) {
+  const fields = [
+    "contract_start",
+    "contract_end",
+    "diesel_pct",
+    "igpm_pct",
+    "ipca_pct",
+    "first_readjustment_date",
+  ];
+  if (!fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))) return;
+  const [current] = recordId
+    ? await db.select().from(opportunities).where(eq(opportunities.id, recordId))
+    : [];
+  const value = (field: string) =>
+    Object.prototype.hasOwnProperty.call(data, field) ? data[field] : (current as any)?.[field];
+  const start = String(value("contract_start") ?? "");
+  const end = String(value("contract_end") ?? "");
+  // A draft opportunity may be saved before its term is configured.
+  if (!start || !end) return;
+  const error = readjustmentRuleError({
+    contractStart: start,
+    contractEnd: end,
+    dieselPct: Number(value("diesel_pct") ?? 0),
+    igpmPct: Number(value("igpm_pct") ?? 0),
+    ipcaPct: Number(value("ipca_pct") ?? 0),
+    firstReadjustmentDate: value("first_readjustment_date") as string | null | undefined,
+  });
+  if (error) throw new Error(error);
+}
+
 const RAIL_SERVICES = [
   "FRETE",
   "CARGA",
@@ -2724,6 +2750,21 @@ function applicationDate(day: number, rawValue: unknown, month: number, year: nu
       "A Data base diesel precisa ter uma data válida e o dia de aplicação da Oportunidade.",
     );
   return `${String(day).padStart(2, "0")}/${String(targetMonth).padStart(2, "0")}/${targetYear}`;
+}
+
+function allocationErrorText(group: Array<Record<string, any>>, useCbs: boolean) {
+  const amountField = useCbs ? "accessory_cbs" : "accessory_net";
+  const percentField = useCbs ? "accessory_cbs_pct" : "accessory_net_pct";
+  const mainField = useCbs ? "tariff_cbs" : "tariff_net";
+  const amountCents = group.reduce((sum, row) => sum + Math.round(Number(row[amountField] ?? 0) * 100), 0);
+  const percentTotal = group.reduce((sum, row) => sum + Number(row[percentField] ?? 0), 0);
+  const targetCents = Math.round(Number(group[0]?.[mainField] ?? 0) * 100);
+  if (Math.abs(amountCents - targetCents) <= 2 && Math.abs(percentTotal - 100) <= 0.2)
+    return null;
+  const first = group[0];
+  const period = first ? `${String(first.month).padStart(2, "0")}/${first.year}` : "período desconhecido";
+  const money = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return `Rateio inválido na Agenda ${period}: os serviços somam ${money(amountCents)} de ${money(targetCents)} e ${percentTotal.toFixed(2)}%. Os valores precisam fechar a tarifa e 100%.`;
 }
 
 async function validateQuoteSchedule(
@@ -2918,6 +2959,8 @@ async function validateQuoteSchedule(
     month,
     year,
   );
+  if (!isDieselBaseDateApplicable(d.diesel_base_date, Number(opp.application_day), month, year))
+    throw new Error("A Data Base Diesel deve estar no mês da Agenda ou no mês imediatamente anterior.");
   d.tariff_cbs = cbs;
   d.tariff_net = net ?? 0;
   d.accessory_cbs = accessoryCbs;
@@ -2991,6 +3034,7 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
     if (!recordId && data.application_day === undefined) data.application_day = 10;
     if (data.application_day !== undefined) data.application_day = Number(data.application_day);
     await validateOpportunityStage(recordId, data);
+    await validateOpportunityReadjustmentInput(recordId, data);
     await assertOpportunityContractUnchanged(recordId, data);
   }
   if (table === "quotes") {
@@ -3357,10 +3401,17 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
           );
       }
       if ((end.valueOf() - start.valueOf()) / 86400000 > 365) {
-        const percentageTotal = Number(opp.diesel_pct) + Number(opp.igpm_pct) + Number(opp.ipca_pct);
-        if (Math.abs(percentageTotal - 100) > 0.001 || !opp.first_readjustment_date)
+        const readjustmentError = readjustmentRuleError({
+          contractStart: opp.contract_start,
+          contractEnd: extendedEnd,
+          dieselPct: Number(opp.diesel_pct),
+          igpmPct: Number(opp.igpm_pct),
+          ipcaPct: Number(opp.ipca_pct),
+          firstReadjustmentDate: opp.first_readjustment_date,
+        });
+        if (readjustmentError)
           throw new Error(
-            `Com o fim em ${String(month).padStart(2, "0")}/${year}, a vigência passa de 365 dias. Configure na Oportunidade Diesel + IGP-M + IPCA = 100% e a data do primeiro reajuste.`,
+            `Com o fim em ${String(month).padStart(2, "0")}/${year}, a vigência passa de 365 dias. ${readjustmentError}`,
           );
       }
     }
@@ -3442,6 +3493,7 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
             if (recordData.application_day !== undefined)
               recordData.application_day = Number(recordData.application_day);
             await validateOpportunityStage(recordId, recordData);
+            await validateOpportunityReadjustmentInput(recordId, recordData);
             await assertOpportunityContractUnchanged(recordId, recordData);
           }
           if (table === "quotes") {
@@ -3632,6 +3684,51 @@ export const updateOpportunityTerm = createServerFn({ method: "POST" }).handler(
       })
       .where(eq(opportunities.id, id));
     return { ok: true, contract_start, contract_end };
+  },
+);
+
+/** Edit annual readjustment values from the Quote flow with server-side rule checks. */
+export const updateOpportunityReadjustment = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const data = input as {
+      id: string;
+      diesel_pct: number;
+      igpm_pct: number;
+      ipca_pct: number;
+      first_readjustment_date: string | null;
+    };
+    if (!data.id) throw new Error("Oportunidade não informada.");
+    const [opportunity] = await db.select().from(opportunities).where(eq(opportunities.id, data.id));
+    if (!opportunity) throw new Error("Oportunidade não encontrada.");
+    if (!opportunity.contract_start || !opportunity.contract_end)
+      throw new Error("Defina a vigência da Oportunidade antes de salvar o reajuste.");
+    const [sentContract] = await db
+      .select({ id: netlex_contracts.id })
+      .from(netlex_contracts)
+      .where(eq(netlex_contracts.opportunity_id, data.id));
+    if (sentContract) throw new Error("A minuta já foi enviada; seus parâmetros estão bloqueados.");
+    const values = {
+      contractStart: opportunity.contract_start,
+      contractEnd: opportunity.contract_end,
+      dieselPct: Number(data.diesel_pct),
+      igpmPct: Number(data.igpm_pct),
+      ipcaPct: Number(data.ipca_pct),
+      firstReadjustmentDate: data.first_readjustment_date || null,
+    };
+    const error = readjustmentRuleError(values);
+    if (error) throw new Error(error);
+    await db
+      .update(opportunities)
+      .set({
+        diesel_pct: values.dieselPct,
+        igpm_pct: values.igpmPct,
+        ipca_pct: values.ipcaPct,
+        first_readjustment_date: values.firstReadjustmentDate,
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(opportunities.id, data.id));
+    return { ok: true };
   },
 );
 
@@ -4344,17 +4441,36 @@ export const updateScheduleTariff = createServerFn({ method: "POST" }).handler(
       .from(opportunities)
       .where(eq(opportunities.id, quote.opportunity_id));
     const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
-    const mainTariff = Number(useCbs ? schedule.tariff_cbs : schedule.tariff_net);
-    const pct = mainTariff > 0 ? Number(((price / mainTariff) * 100).toFixed(2)) : 100;
-    await db
-      .update(quote_schedules)
-      .set({
-        ...(useCbs
-          ? { accessory_cbs: price, accessory_cbs_pct: pct }
-          : { accessory_net: price, accessory_net_pct: pct }),
-        updated_at: new Date().toISOString(),
-      })
-      .where(eq(quote_schedules.id, scheduleId));
+    const group = await quoteSchedulesByKey(quote.id, schedule.schedule_key);
+    const changedIndex = group.findIndex((row) => row.id === scheduleId);
+    if (changedIndex < 0) throw new Error("A Agenda não pertence ao grupo selecionado.");
+    const amountField = useCbs ? "accessory_cbs" : "accessory_net";
+    const allocation = reallocateScheduleGroup(
+      group.map((row) => Number((row as any)[amountField] ?? 0)),
+      changedIndex,
+      price,
+    );
+    const now = new Date().toISOString();
+    await db.transaction(async (tx) => {
+      for (const [index, row] of group.entries())
+        await tx
+          .update(quote_schedules)
+          .set({
+            ...(useCbs
+              ? {
+                  tariff_cbs: allocation.totalCents / 100,
+                  accessory_cbs: allocation.sharesCents[index] / 100,
+                  accessory_cbs_pct: allocation.percentUnits[index] / 100,
+                }
+              : {
+                  tariff_net: allocation.totalCents / 100,
+                  accessory_net: allocation.sharesCents[index] / 100,
+                  accessory_net_pct: allocation.percentUnits[index] / 100,
+                }),
+            updated_at: now,
+          })
+          .where(eq(quote_schedules.id, row.id));
+    });
     await markQuotePricesStale(quote.id);
     const result = await computeQuotePriceComparison(quote.id);
     return { ok: true, result };
