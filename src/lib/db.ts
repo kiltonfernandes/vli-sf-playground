@@ -91,7 +91,7 @@ export function ensureSchema(): Promise<void> {
       opportunity_id text NOT NULL UNIQUE REFERENCES opportunities(id) ON DELETE CASCADE,
       netlex_number text NOT NULL UNIQUE,
       title text NOT NULL,
-      status text NOT NULL DEFAULT 'Aguardando retorno da NetLex',
+      status text NOT NULL DEFAULT 'Análise jurídica',
       document_json text NOT NULL,
       created_at text NOT NULL,
       updated_at text NOT NULL
@@ -131,6 +131,27 @@ export function ensureSchema(): Promise<void> {
     for (const column of addendumColumns) {
       const info = await client.execute(`PRAGMA table_info(${column.table})`);
       if (!info.rows.some((row) => row.name === column.name)) await client.execute(column.sql);
+    }
+    // Renomeia o status inicial do NetLex: "Aguardando retorno da NetLex" virou "Análise jurídica".
+    const legacyNetlex = await client.execute({
+      sql: `SELECT id, document_json FROM netlex_contracts WHERE status = ?`,
+      args: ["Aguardando retorno da NetLex"],
+    });
+    for (const row of legacyNetlex.rows) {
+      let documentJson = String(row.document_json ?? "");
+      try {
+        const parsed = JSON.parse(documentJson);
+        if (parsed && parsed.status === "Aguardando retorno da NetLex") {
+          parsed.status = "Análise jurídica";
+          documentJson = JSON.stringify(parsed);
+        }
+      } catch {
+        // documento ilegível: atualiza só a coluna de status
+      }
+      await client.execute({
+        sql: `UPDATE netlex_contracts SET status = ?, document_json = ? WHERE id = ?`,
+        args: ["Análise jurídica", documentJson, String(row.id)],
+      });
     }
     const quoteColumns = await client.execute(`PRAGMA table_info(quotes)`);
     if (!quoteColumns.rows.some((row) => row.name === "tariff_mode"))

@@ -90,7 +90,7 @@ export const netlex_contracts = sqliteTable(
       .references(() => opportunities.id, { onDelete: "cascade" }),
     netlex_number: text("netlex_number").notNull(),
     title: text("title").notNull(),
-    status: text("status").notNull().default("Aguardando retorno da NetLex"),
+    status: text("status").notNull().default("Análise jurídica"),
     /** Contrato, ACS ou Aditivo (RAT). */
     kind: text("kind").notNull().default("Contrato"),
     /** Aditivo: contrato original que recebe as mudanças na assinatura. */

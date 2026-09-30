@@ -1,2 +1,2 @@
 /** Increment this value according to VERSIONING.md for every product change. */
-export const APP_VERSION = "v6.20.07";
+export const APP_VERSION = "v6.21.07";

@@ -501,7 +501,7 @@ export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
         "Documento demonstrativo do Playground. A integração externa e a validade jurídica dependem do NetLex.",
       title,
       netlexNumber,
-      status: "Aguardando retorno da NetLex",
+      status: NETLEX_WAITING,
       createdAt: now,
       parties: {
         customerAccount: account.name,
@@ -600,7 +600,7 @@ export const getNetlexContractFull = createServerFn({ method: "GET" })
   },
 );
 
-export const NETLEX_WAITING = "Aguardando retorno da NetLex";
+export const NETLEX_WAITING = "Análise jurídica";
 export const NETLEX_SIGNATURE = "Assinatura";
 
 /** Aditivos (RAT) e oportunidades aditivas de um contrato. */
@@ -966,7 +966,7 @@ export const moveNetlexContractToSignature = createServerFn({ method: "POST" })
     if (!contract) throw new Error("Documento NetLex não encontrado.");
     if (contract.status === NETLEX_SIGNATURE) return { ok: true, changed: false };
     if (contract.status !== NETLEX_WAITING)
-      throw new Error("Só é possível ir para Assinatura a partir de Aguardando retorno da NetLex.");
+      throw new Error("Só é possível ir para Assinatura a partir de Análise jurídica.");
     const now = new Date().toISOString();
     const doc = parseContractDocument(contract.document_json);
     await db
@@ -982,19 +982,13 @@ export const moveNetlexContractToSignature = createServerFn({ method: "POST" })
     return { ok: true, changed: true };
   });
 
-/** Cria a Oportunidade aditiva a partir de um Contrato em Assinatura (ACS não gera aditivo). */
-export const createAddendumOpportunity = createServerFn({ method: "POST" })
-  .inputValidator((data: { contractId: string }) => data)
-  .handler(async ({ data: input }) => {
-    await ensureSchema();
-    const { contractId } = input as { contractId: string };
-    const [base] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, contractId));
-    if (!base) throw new Error("Contrato não encontrado.");
-    if (base.kind !== "Contrato")
-      throw new Error("Somente Contrato gera aditivo. ACS e aditivos não podem ser aditados.");
-    if (base.status !== NETLEX_SIGNATURE)
-      throw new Error("O contrato precisa estar em Assinatura no NetLex para receber aditivo.");
-    const [baseOpportunity] = await db
+/** Insere a Oportunidade aditiva de um Contrato em Assinatura (ACS não gera aditivo). */
+async function spawnAddendumOpportunity(base: typeof netlex_contracts.$inferSelect) {
+  if (base.kind !== "Contrato")
+    throw new Error("Somente Contrato gera aditivo. ACS e aditivos não podem ser aditados.");
+  if (base.status !== NETLEX_SIGNATURE)
+    throw new Error("O contrato precisa estar em Assinatura no NetLex para receber aditivo.");
+  const [baseOpportunity] = await db
       .select()
       .from(opportunities)
       .where(eq(opportunities.id, base.opportunity_id));
@@ -1035,7 +1029,73 @@ export const createAddendumOpportunity = createServerFn({ method: "POST" })
       created_at: now,
       updated_at: now,
     });
+  return id;
+}
+
+/** Cria a Oportunidade aditiva a partir de um Contrato em Assinatura (ACS não gera aditivo). */
+export const createAddendumOpportunity = createServerFn({ method: "POST" })
+  .inputValidator((data: { contractId: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const { contractId } = input as { contractId: string };
+    const [base] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, contractId));
+    if (!base) throw new Error("Contrato não encontrado.");
+    const id = await spawnAddendumOpportunity(base);
     return { ok: true, id };
+  });
+
+/**
+ * Um clique na Cotação do contrato: cria a Oportunidade aditiva e já abre a
+ * Cotação do aditivo com a linha de base das Agendas vigentes.
+ */
+export const createAddendumFromQuote = createServerFn({ method: "POST" })
+  .inputValidator((data: { quoteId: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, input.quoteId));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    const [opp] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, quote.opportunity_id));
+    if (!opp || opp.instrument_type !== "Contrato")
+      throw new Error("Somente a Cotação de um Contrato gera aditivo.");
+    const [contract] = await db
+      .select()
+      .from(netlex_contracts)
+      .where(
+        and(
+          eq(netlex_contracts.opportunity_id, opp.id),
+          eq(netlex_contracts.kind, "Contrato"),
+        ),
+      )
+      .orderBy(desc(netlex_contracts.created_at));
+    if (!contract)
+      throw new Error(
+        "Formalize o contrato no NetLex (página da Oportunidade) antes de criar um aditivo.",
+      );
+    const opportunityId = await spawnAddendumOpportunity(contract);
+    const [newOpportunity] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, opportunityId));
+    if (!newOpportunity) throw new Error("Oportunidade do aditivo não foi criada.");
+    const now = new Date().toISOString();
+    const quoteId = crypto.randomUUID();
+    await db.insert(quotes).values({
+      id: quoteId,
+      opportunity_id: opportunityId,
+      quote_number: `COT-${Date.now().toString().slice(-6)}`,
+      name: `${newOpportunity.name} · Ferroviário`,
+      record_type: "VLI_General",
+      tariff_mode: newOpportunity.integration_tariff === "CBS" ? "CBS" : "Líquida",
+      status: "Rascunho",
+      seed: randomSeed(),
+      created_at: now,
+      updated_at: now,
+    });
+    await seedAddendumBaseline(quoteId, newOpportunity);
+    return { ok: true, opportunityId, quoteId };
   });
 
 /** Aditivo: marca (ou restaura) uma Agenda do contrato como "Excluir". */
@@ -1506,7 +1566,21 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
     })),
   }));
   const addendum = quote.instrument_type === "Aditivo" ? await buildQuoteAddendum(id) : null;
-  return { quote, items: itemsWithPrices, thresholds, addendum };
+  const netlexContract =
+    quote.instrument_type === "Contrato"
+      ? ((
+          await db
+            .select({
+              id: netlex_contracts.id,
+              status: netlex_contracts.status,
+              netlex_number: netlex_contracts.netlex_number,
+            })
+            .from(netlex_contracts)
+            .where(eq(netlex_contracts.opportunity_id, quote.opportunity_id))
+            .orderBy(desc(netlex_contracts.created_at))
+        )[0] ?? null)
+      : null;
+  return { quote, items: itemsWithPrices, thresholds, addendum, netlexContract };
 });
 
 export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
@@ -4126,6 +4200,121 @@ export const applyRecommendedPrices = createServerFn({ method: "POST" }).handler
     await markQuotePricesStale(id);
     const fresh = await computeQuotePriceComparison(id);
     return { ok: true, result: fresh };
+  },
+);
+
+/** Divide um total em centavos proporcionalmente aos pesos; a última linha absorve o resto. */
+function splitByWeights(totalCents: number, weights: number[]) {
+  const safe = weights.map((weight) => Math.max(0, weight));
+  const sum = safe.reduce((acc, weight) => acc + weight, 0);
+  if (sum <= 0) return safe.map(() => 0);
+  const shares = safe.map((weight) => Math.floor((totalCents * weight) / sum));
+  shares[shares.length - 1] += totalCents - shares.reduce((acc, share) => acc + share, 0);
+  return shares;
+}
+
+/**
+ * Edição em massa de preços: ajusta todas as Agendas da Cotação de uma vez.
+ * - `delta_pct`: escala o praticado atual em `pct`% (mantém a proporção do rateio);
+ * - `target_deviation`: fixa o praticado em `pct`% sobre o preço Jetsons de cada Agenda.
+ */
+export const bulkAdjustQuotePrices = createServerFn({ method: "POST" }).handler(
+  async ({ data: input }) => {
+    await ensureSchema();
+    const { id, mode, pct } = input as { id: string; mode: string; pct: number };
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    if (quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível editar preços em uma Cotação em Rascunho.");
+    if (mode !== "delta_pct" && mode !== "target_deviation")
+      throw new Error("Modo de edição em massa inválido.");
+    const percent = Number(pct);
+    if (!Number.isFinite(percent) || percent <= -100 || percent > 500)
+      throw new Error("Informe um percentual entre -99 e 500.");
+    await ensureRecommendedPricesForQuote(id);
+    if (mode === "target_deviation") {
+      const check = await computeQuotePriceComparison(id);
+      if (check.rows.some((row) => row.missing))
+        throw new Error("Gere os preços recomendados ausentes antes de aplicar.");
+    }
+    const [opp] = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, quote.opportunity_id));
+    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+    const items = await db
+      .select()
+      .from(quote_line_items)
+      .where(eq(quote_line_items.quote_id, id));
+    const prices = await db
+      .select()
+      .from(recommended_prices)
+      .where(
+        inArray(
+          recommended_prices.planned_flow_id,
+          items.map((item) => item.planned_flow_id),
+        ),
+      );
+    const priceMap = new Map(
+      prices.map((price) => [
+        `${price.planned_flow_id}|${price.service}|${price.year}|${price.month}`,
+        Number(price.unit_price),
+      ]),
+    );
+    const groups = new Map<string, Array<typeof quote_schedules.$inferSelect>>();
+    for (const item of items) {
+      const schedules = await db
+        .select()
+        .from(quote_schedules)
+        .where(eq(quote_schedules.quote_line_item_id, item.id));
+      for (const schedule of schedules)
+        groups.set(schedule.schedule_key, [...(groups.get(schedule.schedule_key) ?? []), schedule]);
+    }
+    const now = new Date().toISOString();
+    let touched = 0;
+    for (const group of groups.values()) {
+      const factor = 1 + percent / 100;
+      const weights = group.map((schedule) => {
+        if (mode === "delta_pct")
+          return Number(useCbs ? (schedule.accessory_cbs ?? 0) : (schedule.accessory_net ?? 0));
+        const item = items.find((entry) => entry.id === schedule.quote_line_item_id);
+        return (
+          priceMap.get(
+            `${item?.planned_flow_id}|${schedule.service}|${schedule.year}|${schedule.month}`,
+          ) ?? 0
+        );
+      });
+      const baseTotalCents = Math.round(weights.reduce((acc, weight) => acc + weight, 0) * 100);
+      if (baseTotalCents <= 0) continue;
+      const newTotalCents = Math.max(1, Math.round(baseTotalCents * factor));
+      const shares = splitByWeights(newTotalCents, weights);
+      await Promise.all(
+        group.map((schedule, index) => {
+          const sharePct = Number(((shares[index] / newTotalCents) * 100).toFixed(2));
+          return db
+            .update(quote_schedules)
+            .set({
+              ...(useCbs
+                ? {
+                    tariff_cbs: newTotalCents / 100,
+                    accessory_cbs: shares[index] / 100,
+                    accessory_cbs_pct: sharePct,
+                  }
+                : {
+                    tariff_net: newTotalCents / 100,
+                    accessory_net: shares[index] / 100,
+                    accessory_net_pct: sharePct,
+                  }),
+              updated_at: now,
+            })
+            .where(eq(quote_schedules.id, schedule.id));
+        }),
+      );
+      touched += group.length;
+    }
+    await markQuotePricesStale(id);
+    const fresh = await computeQuotePriceComparison(id);
+    return { ok: true, result: fresh, touched };
   },
 );
 

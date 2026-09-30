@@ -1,10 +1,12 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   applyRecommendedPrices,
+  bulkAdjustQuotePrices,
   completeQuote,
+  createAddendumFromQuote,
   deleteRecord,
   getQuoteFull,
   listQuoteOptions,
@@ -35,6 +37,7 @@ export const Route = createFileRoute("/quotes/$id")({
 function QuotePage() {
   const { id } = Route.useParams(),
     qc = useQueryClient();
+  const navigate = useNavigate();
   const [open, setOpen] = useState<Record<string, boolean>>({ items: true, header: true }),
     [newItem, setNewItem] = useState(false),
     [scheduleItem, setScheduleItem] = useState<any>(null),
@@ -43,7 +46,8 @@ function QuotePage() {
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [pricePanel, setPricePanel] = useState<any>(null),
-    [groupMode, setGroupMode] = useState<"structure" | "period">("structure");
+    [creatingAddendum, setCreatingAddendum] = useState(false),
+    [groupMode, setGroupMode] = useState<"structure" | "period">("period");
   const { data, isLoading } = useQuery({
     queryKey: ["quote-full", id],
     queryFn: () => getQuoteFull({ data: { id } }) as Promise<any>,
@@ -75,6 +79,9 @@ function QuotePage() {
   const canChangeTariff = !items.some((item) => item.schedules?.length);
   const applicationDay = Number(options?.opportunity?.application_day ?? 10);
   const addendum = data.addendum as any | null;
+  const netlexContract = (data as any).netlexContract as
+    | { id: string; status: string; netlex_number: string }
+    | null;
   const isAddendum = q.instrument_type === "Aditivo";
   const editable = q.status === "Rascunho" && !q.is_synced;
   const businessRules = [
@@ -452,6 +459,40 @@ function QuotePage() {
             >
               {busy ? "Sincronizando…" : "Sincronizar com Oportunidade"}
             </button>
+            {q.instrument_type === "Contrato" && (
+              <button
+                className="sf-btn"
+                disabled={busy || creatingAddendum || netlexContract?.status !== "Assinatura"}
+                title={
+                  !netlexContract
+                    ? "Formalize o contrato no NetLex (página da Oportunidade) para liberar o aditivo"
+                    : netlexContract.status !== "Assinatura"
+                      ? `Contrato Nº ${netlexContract.netlex_number} em “${netlexContract.status}” — o aditivo abre quando o contrato estiver em Assinatura`
+                      : "Cria a Oportunidade e a Cotação de aditivo com a linha de base do contrato vigente"
+                }
+                onClick={async () => {
+                  setCreatingAddendum(true);
+                  try {
+                    const created = await createAddendumFromQuote({ data: { quoteId: id } });
+                    toast.success("Aditivo criado", {
+                      description:
+                        "A Cotação do aditivo já nasce com as Agendas do contrato vigente.",
+                    });
+                    await qc.invalidateQueries({ queryKey: ["quotes"] });
+                    await qc.invalidateQueries({ queryKey: ["opportunities"] });
+                    await navigate({ to: "/quotes/$id", params: { id: created.quoteId } });
+                  } catch (error) {
+                    toast.error("Não foi possível criar o aditivo", {
+                      description: error instanceof Error ? error.message : "Tente novamente.",
+                    });
+                  } finally {
+                    setCreatingAddendum(false);
+                  }
+                }}
+              >
+                {creatingAddendum ? "Criando…" : "+ Criar aditivo"}
+              </button>
+            )}
           </>}
         message={
           <span style={{ display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -534,17 +575,17 @@ function QuotePage() {
               <div className="sf-segmented" role="group" aria-label="Agrupar Agendas">
                 <button
                   type="button"
-                  aria-pressed={groupMode === "structure"}
-                  onClick={() => setGroupMode("structure")}
-                >
-                  Estrutura
-                </button>
-                <button
-                  type="button"
                   aria-pressed={groupMode === "period"}
                   onClick={() => setGroupMode("period")}
                 >
                   Período
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={groupMode === "structure"}
+                  onClick={() => setGroupMode("structure")}
+                >
+                  Estrutura
                 </button>
               </div>
             </div>
@@ -1552,6 +1593,8 @@ function PricePanel({
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const [bulkMode, setBulkMode] = useState<"delta_pct" | "target_deviation">("delta_pct");
+  const [bulkPct, setBulkPct] = useState("5");
   const thresholds = result.thresholds ?? { gg: 5, dir: 7 };
   const schedules = (result.schedules ?? []) as any[];
   const approved = result.price_status === "Aprovada";
@@ -1639,8 +1682,142 @@ function PricePanel({
             (desvio até {thresholds.gg}%), amarelas indicam aprovação necessária e vermelhas
             gravidade alta (acima de {thresholds.dir}%). Qualquer solicitação pode ser decidida pelo
             Perfil Aprovador. Uma aprovação cobre todas as Agendas da Cotação. Edite o preço
-            praticado direto na linha e saia do campo para salvar.
+            praticado direto na linha e saia do campo para salvar, ou use a edição em massa.
           </p>
+          {(() => {
+            const bulkValue = Number(String(bulkPct).replace(",", "."));
+            const bulkValid = Number.isFinite(bulkValue) && bulkValue > -100 && bulkValue <= 500;
+            const comparable = schedules.filter(
+              (entry) => entry.deviation_pct !== null && entry.deviation_pct !== undefined,
+            );
+            let preview = "";
+            if (bulkValid && comparable.length) {
+              if (bulkMode === "target_deviation") {
+                preview = `As ${comparable.length} linhas com preço Jetsons ficam a ${
+                  bulkValue >= 0 ? "+" : ""
+                }${bulkValue.toFixed(2).replace(".", ",")}% do recomendado.`;
+              } else {
+                const deviations = comparable.map(
+                  (entry) =>
+                    ((1 + Number(entry.deviation_pct) / 100) * (1 + bulkValue / 100) - 1) * 100,
+                );
+                const max = Math.max(...deviations);
+                const over = deviations.filter((deviation) => deviation > thresholds.gg).length;
+                preview = `Desvio máximo estimado: ${max >= 0 ? "+" : ""}${max
+                  .toFixed(2)
+                  .replace(".", ",")}% · ${over} linha(s) acima do limite de ${thresholds.gg}%.`;
+              }
+            }
+            if (!canEdit || !schedules.length) return null;
+            return (
+              <div
+                style={{
+                  border: "1px solid #b7d7f5",
+                  background: "#f0f7ff",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  marginBottom: 14,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 13 }}>⚡ Edição em massa</strong>
+                  <span style={{ fontSize: 12, color: "#514f4d" }}>
+                    aplica em todas as {schedules.length} linhas de uma vez, mantendo o rateio em
+                    100%
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div className="sf-segmented" role="group" aria-label="Modo de edição em massa">
+                    <button
+                      type="button"
+                      aria-pressed={bulkMode === "delta_pct"}
+                      onClick={() => setBulkMode("delta_pct")}
+                    >
+                      Ajustar praticado em %
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={bulkMode === "target_deviation"}
+                      onClick={() => setBulkMode("target_deviation")}
+                    >
+                      % sobre o Jetsons
+                    </button>
+                  </div>
+                  <label
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}
+                  >
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={bulkPct}
+                      onChange={(event) => setBulkPct(event.target.value)}
+                      aria-label="Percentual da edição em massa"
+                      style={{
+                        width: 76,
+                        textAlign: "right",
+                        padding: "3px 6px",
+                        border: "1px solid #dddbda",
+                        borderRadius: 4,
+                      }}
+                    />
+                    %
+                  </label>
+                  <div style={{ display: "inline-flex", gap: 4 }}>
+                    {(bulkMode === "delta_pct" ? [-10, -5, 5, 10] : [0, 5, 10]).map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        className="sf-btn"
+                        style={{ padding: "2px 8px", fontSize: 12 }}
+                        onClick={() => setBulkPct(String(chip))}
+                      >
+                        {chip === 0 && bulkMode === "target_deviation"
+                          ? "= Jetsons"
+                          : `${chip > 0 ? "+" : ""}${chip}%`}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="sf-btn sf-btn--brand"
+                    disabled={busy || !bulkValid}
+                    title={
+                      bulkMode === "delta_pct"
+                        ? "Escala o preço praticado atual de todas as linhas pelo percentual informado"
+                        : "Fixa o praticado de todas as linhas nesse percentual sobre o preço Jetsons"
+                    }
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const response = await bulkAdjustQuotePrices({
+                          data: { id: result.quote_id, mode: bulkMode, pct: bulkValue },
+                        });
+                        onRefreshed(response.result);
+                        await invalidateAll();
+                        toast.success("Preços atualizados em massa", {
+                          description: `${response.touched} linhas ajustadas · desvio máximo agora ${Number(
+                            response.result.max_discount_pct,
+                          ).toFixed(2)}%.`,
+                        });
+                      } catch (error) {
+                        toast.error("Não foi possível aplicar a edição em massa", {
+                          description:
+                            error instanceof Error ? error.message : "Tente novamente.",
+                        });
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    {busy ? "Aplicando…" : "Aplicar em todas"}
+                  </button>
+                </div>
+                {preview && <div style={{ fontSize: 12, color: "#16325c" }}>{preview}</div>}
+              </div>
+            );
+          })()}
           {(result.rows ?? []).map((row: any) => {
             const groupRows = byItem.get(row.item_id) ?? [];
             const situation = groupRows.reduce<PriceSituation>((worst, entry) => {
@@ -2065,3 +2242,4 @@ function AddendumPanel({
     </section>
   );
 }
+

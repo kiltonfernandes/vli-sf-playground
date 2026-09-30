@@ -16,6 +16,7 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v6.21.07` — Default Quote Schedule grouping to Período, add bulk price editing to the Jetsons comparison (percent adjustment or target deviation over Jetsons with live preview, allocation kept at 100%), add a one-click “Criar aditivo” action on contract Quotes that spawns the addendum Opportunity and Quote from the signed NetLex contract, and rename the initial NetLex status to “Análise jurídica” with an automatic migration of existing documents.
 - `v6.20.07` — Add the “Embaralhar aditivo” shuffle to addendum Quotes: seeded scenario with at least 60% of the baseline Schedules changed or deleted and about 30% new Schedules, enforcing the app's date rules (unique Flow+month, no past or pre-term months, term extension for Schedules after the end, valid diesel base dates, annual readjustment when the term exceeds 365 days).
 - `v6.19.07` — Implement contract addenda end to end (baseline Schedules as Keep, Change/Delete/Include operations, generated clauses, multiple addenda per contract, ACS excluded), add the NetLex Assinatura status with addendum materialization and version history, style the Quote and NetLex Paths, group Quote Schedules by period, and allow free end months in batch Schedule creation.
 - `v5.19.07` — Widen the Jetsons comparison modal, simplify approval to the Vendas/Aprovador profiles, let approved prices pass the Opportunity gate, and add an approval-gated NetLex contract snapshot with an initial-status preview.

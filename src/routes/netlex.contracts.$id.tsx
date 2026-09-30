@@ -155,7 +155,7 @@ function NetlexContractPage() {
           label="Etapas do documento no NetLex"
           steps={[
             { label: "Enviado", hint: fmtDate(contract.created_at) },
-            { label: "Aguardando retorno da NetLex", hint: "Análise jurídica" },
+            { label: "Análise jurídica", hint: "Aguardando retorno da NetLex" },
             {
               label: "Assinatura",
               hint: contract.signed_at ? fmtDate(contract.signed_at) : "Libera o fechamento",

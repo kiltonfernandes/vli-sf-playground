@@ -10,6 +10,13 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v6.21.07 — Cotação: Período por padrão, edição de preços em massa e aditivo em um clique
+
+- **Agrupar por Período primeiro**: as Agendas da Cotação agora abrem agrupadas por **Período**; **Estrutura** virou a segunda opção do seletor.
+- **Edição em massa de preços** no comparativo Jetsons (barra “⚡ Edição em massa”): ajusta todas as linhas de uma vez em dois modos — **Ajustar praticado em %** (escala o preço atual, mantendo a proporção do rateio) ou **% sobre o Jetsons** (fixa um desvio alvo; 0% equivale ao preço recomendado). Tem chips rápidos, prévia ao vivo do desvio máximo estimado com a contagem de linhas acima do limite de alçada, e grava tudo de uma vez com o rateio refeito para fechar a tarifa em 100%.
+- **Criar aditivo na Cotação**: a Cotação de um Contrato ganha o botão **“+ Criar aditivo”** nas ações do caminho. Ele fica desabilitado — com dica explicando o que falta — até o contrato estar em **Assinatura** no NetLex. Com um clique, cria a Oportunidade aditiva e a Cotação do aditivo já com a linha de base das Agendas vigentes, navegando direto para ela.
+- **NetLex**: o status inicial do documento foi renomeado de “Aguardando retorno da NetLex” para **“Análise jurídica”** (a etapa do caminho mantém a explicação como dica). Documentos existentes são migrados automaticamente na inicialização do servidor.
+
 ### v6.20.07 — Embaralhar aditivo (shuffle com regras de data)
 
 - **Botão “🔀 Embaralhar aditivo”** no painel Motor de aditivo da Cotação (só em Rascunho). Um clique volta a Cotação à linha de base do contrato vigente (Agendas, vigência e reajuste) e sorteia, com uma seed interna (não exibida), um cenário novo: **pelo menos 60% das Agendas são alteradas ou excluídas** (excluir ≈ 25–40% delas) e **≈ 30% de Agendas novas são incluídas**. “Agenda” = um Fluxo em um mês (todas as linhas de serviço juntas). Pede confirmação se já houver mudanças.

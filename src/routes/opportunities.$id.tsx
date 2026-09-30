@@ -253,7 +253,7 @@ function OpportunityRecordPage() {
               ? `Documento Nº ${netlexContract.netlex_number} enviado.`
               : "Use “Enviar ao NetLex” no topo desta página.",
             explanation:
-              "Na Formalização, Contrato, ACS e Aditivo passam pelo NetLex. O envio gera o número do documento com o status inicial “Aguardando retorno da NetLex”. No aditivo, o NetLex recebe somente as mudanças (RAT), não o contrato inteiro.",
+              "Na Formalização, Contrato, ACS e Aditivo passam pelo NetLex. O envio gera o número do documento com o status inicial “Análise jurídica”. No aditivo, o NetLex recebe somente as mudanças (RAT), não o contrato inteiro.",
           },
           {
             label: "Status Assinatura no NetLex",
@@ -1264,7 +1264,7 @@ function FormalizationBanner({
           </div>
           <div className="sf-next-step-detail">
             {canSend
-              ? "Tudo pronto. O envio gera o número do documento com status “Aguardando retorno da NetLex”."
+              ? "Tudo pronto. O envio gera o número do documento com status “Análise jurídica”."
               : `Pendências: ${blockers.join(" · ") || "confira as regras de negócio"}.`}
           </div>
           {baseLine}
