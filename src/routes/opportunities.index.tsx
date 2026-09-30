@@ -15,7 +15,7 @@ const SEGMENTS = ["Ferroviário", "Portuário", "Rodoviário"];
 type Opportunity = {
   id: string; account_id: string; account_name: string; name: string; instrument_type: string; stage: string;
   segment: string | null; amount: number; close_date: string | null; contract_start: string | null; contract_end: string | null;
-  application_day: number;
+  application_day: number; first_readjustment_date: string | null;
   diesel_pct: number; igpm_pct: number; ipca_pct: number; contracting_parties: string | null; vli_entity: string | null;
   joint_debtor: string | null; integration_tariff: string; take_or_pay: number;
 };
@@ -45,6 +45,7 @@ function OpportunitiesPage() {
     { name: "close_date", label: "Data de fechamento", type: "date" },
     { name: "contract_start", label: "Início da vigência", type: "date" },
     { name: "contract_end", label: "Fim da vigência", type: "date" },
+    { name: "first_readjustment_date", label: "Data do primeiro reajuste", type: "date" },
     { name: "application_day", label: "Dia de aplicação", type: "select", options: ["1", "10", "20"], required: true },
     { name: "diesel_pct", label: "Reajuste diesel (%)", type: "number" },
     { name: "igpm_pct", label: "Reajuste IGP-M (%)", type: "number" },
@@ -74,6 +75,7 @@ function OpportunitiesPage() {
     segment: row?.segment ?? "", amount: row?.amount ?? 0, close_date: row?.close_date ?? "",
     contract_start: row?.contract_start ?? "", contract_end: row?.contract_end ?? "",
     application_day: String(row?.application_day ?? 10),
+    first_readjustment_date: row?.first_readjustment_date ?? "",
     diesel_pct: row?.diesel_pct ?? 0, igpm_pct: row?.igpm_pct ?? 0, ipca_pct: row?.ipca_pct ?? 0,
     contracting_parties: row?.contracting_parties ?? "", vli_entity: row?.vli_entity ?? "VLI Multimodal S.A.",
     joint_debtor: row?.joint_debtor ?? "", integration_tariff: row?.integration_tariff ?? "Líquida",
