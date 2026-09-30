@@ -16,6 +16,8 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v9.21.20` — Add the post-contract instruments Sales Order (Ordem de Vendas) and Adjustment Curve (Curva de Ajuste): a single post-contract hub on signed contracts (Aditivo · Ordem de Vendas · Curva de Ajuste), inherited read-only conditions, a volume-redistribution panel with per-flow balance, customer-portal approval with 7-day validity, dedicated document pages, and a repaired README.
+
 - `v8.21.20` — Fix the price-validation modal approval action by connecting its direct route handler to the approval workspace.
 
 - `v8.21.19` — Ensure the “Na fila de aprovação” action always opens the approval workspace, including while the detailed approval identifier is still unavailable.

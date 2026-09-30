@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   createAddendumOpportunity,
+  createPostContractFromContract,
   getNetlexContractFull,
   moveNetlexContractToSignature,
 } from "@/lib/crud";
@@ -11,6 +12,8 @@ import { SfShell } from "@/components/SfShell";
 import { SfPath } from "@/components/SfPath";
 import { FIELD_LABELS, summaryText } from "@/lib/addendum";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { PostContractHub } from "@/components/PostContract";
+import { SALES_ORDER, isPostContractInstrument } from "@/lib/post-contract";
 
 const SIGNATURE = "Assinatura";
 
@@ -29,6 +32,7 @@ function NetlexContractPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [busy, setBusy] = useState<"" | "sign" | "addendum">("");
+  const [creatingKind, setCreatingKind] = useState("");
   const { data, isLoading } = useQuery({
     queryKey: ["netlex-contract", id],
     queryFn: () => getNetlexContractFull({ data: { id } }),
@@ -74,6 +78,23 @@ function NetlexContractPage() {
     }
   };
 
+  const createPostContract = async (kind: string) => {
+    if (kind === "Aditivo") return newAddendum();
+    setCreatingKind(kind);
+    try {
+      const result = await createPostContractFromContract({ data: { contractId: id, kind } });
+      await qc.invalidateQueries({ queryKey: ["opportunities"] });
+      toast.success(kind === SALES_ORDER ? "Ordem de vendas criada" : "Curva de ajuste criada");
+      await navigate({ to: "/quotes/$id", params: { id: result.quoteId } });
+    } catch (error) {
+      toast.error("Não foi possível criar", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setCreatingKind("");
+    }
+  };
+
   if (isLoading)
     return (
       <SfShell>
@@ -90,7 +111,19 @@ function NetlexContractPage() {
     );
 
   const { contract, document: doc, opportunity, baseContract, addenda } = data;
+  const postContract = ((data as any).postContract ?? []) as any[];
   const kind = String(contract.kind || doc.kind || "Contrato");
+  if (isPostContractInstrument(kind))
+    return (
+      <SfShell>
+        <div style={{ padding: 32 }}>
+          {kind} não é um documento do NetLex.{" "}
+          <Link to="/post-contract/$id" params={{ id }} style={{ color: "#0176d3" }}>
+            Abrir {kind === SALES_ORDER ? "a ordem de vendas" : "o registro da curva"}
+          </Link>
+        </div>
+      </SfShell>
+    );
   const isAddendum = kind === "Aditivo";
   const signed = contract.status === SIGNATURE;
   const versions = (doc.versions ?? []) as Array<Record<string, any>>;
@@ -187,11 +220,7 @@ function NetlexContractPage() {
                   {busy === "sign" ? "Atualizando…" : "Mover para Assinatura"}
                 </button>
               )}
-              {signed && kind === "Contrato" && (
-                <button className="sf-btn sf-btn--brand" disabled={!!busy} onClick={newAddendum}>
-                  {busy === "addendum" ? "Criando…" : "+ Nova oportunidade de aditivo"}
-                </button>
-              )}
+
             </>
           }
           message={
@@ -204,6 +233,18 @@ function NetlexContractPage() {
               : "Simulação: no NetLex real o analista jurídico muda o status. Aqui use “Mover para Assinatura”."
           }
         />
+
+        {signed && kind === "Contrato" && (
+          <div style={{ margin: "0 -16px 16px" }}>
+            <PostContractHub
+              contract={contract}
+              addenda={addenda as any[]}
+              postContract={postContract}
+              busyKind={busy === "addendum" ? "Aditivo" : creatingKind}
+              onCreate={(entry) => void createPostContract(entry)}
+            />
+          </div>
+        )}
 
         <div className="sf-netlex-notice">
           <strong>Minuta demonstrativa — ambiente de simulação</strong>
@@ -557,6 +598,51 @@ function NetlexContractPage() {
             </div>
           </section>
         </article>
+
+        {kind === "Contrato" && postContract.length > 0 && (
+          <section className="sf-card" style={{ marginTop: 20 }}>
+            <div className="sf-card-header">Pós-contrato · ordens de vendas e curvas de ajuste</div>
+            <div className="sf-card-body">
+              <table className="sf-netlex-table sf-netlex-table--compact">
+                <thead>
+                  <tr>
+                    <th>Instrumento</th>
+                    <th>Oportunidade</th>
+                    <th>Etapa</th>
+                    <th>Documento</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {postContract.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{entry.instrument_type}</td>
+                      <td>
+                        <Link to="/opportunities/$id" params={{ id: entry.id }} style={{ color: "#0176d3" }}>
+                          {entry.name}
+                        </Link>
+                      </td>
+                      <td>{entry.stage}</td>
+                      <td>
+                        {entry.document ? (
+                          <Link to="/post-contract/$id" params={{ id: entry.document.id }} style={{ color: "#0176d3" }}>
+                            Nº {entry.document.netlex_number}
+                          </Link>
+                        ) : (
+                          "Em negociação"
+                        )}
+                      </td>
+                      <td>{entry.document?.status ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ margin: "8px 0 0", color: "#5c5c5c", fontSize: 12 }}>
+                Nenhum desses registros altera este contrato. Mudança permanente de preço, prazo ou agenda é Aditivo.
+              </p>
+            </div>
+          </section>
+        )}
 
         {!isAddendum && (versions.length > 0 || addenda.length > 0) && (
           <section className="sf-card" style={{ marginTop: 20 }}>

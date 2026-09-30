@@ -602,7 +602,8 @@ export function QuoteItemScreenflow({
     </select>
   );
   // ACS não tem reajuste: a etapa de reajuste só existe para Contrato.
-  const skipReadjustment = instrumentType === "ACS";
+  // Ordem de vendas herda o reajuste do contrato-base: a etapa também não aparece.
+  const skipReadjustment = instrumentType === "ACS" || instrumentType === "Ordem de Vendas";
   const allSteps = [
     { id: 0, title: "Fluxo do Cliente" },
     { id: 1, title: "Reajuste Ferro" },
@@ -1285,6 +1286,20 @@ export function QuoteItemScreenflow({
                         ))}
                       </div>
                     </section>
+                  ) : instrumentType === "Ordem de Vendas" ? (
+                    <p
+                      style={{
+                        margin: "12px 0 0",
+                        padding: 10,
+                        borderRadius: 4,
+                        color: "#124d73",
+                        background: "#f3f9fe",
+                        fontSize: 12,
+                      }}
+                    >
+                      Tolerâncias e Take or Pay são herdados do contrato-base. A ordem de vendas
+                      não informa novas tolerâncias nesta Agenda.
+                    </p>
                   ) : instrumentType === "ACS" ? (
                     <p
                       style={{
@@ -1373,7 +1388,11 @@ export function QuoteItemScreenflow({
             <>
               <h3>Condições comerciais</h3>
               <p style={{ color: "#444" }}>Complete as regras comerciais antes da revisão final.</p>
-              {instrumentType === "ACS" ? (
+              {instrumentType === "Ordem de Vendas" ? (
+                <div role="status" style={{ padding: 12, borderRadius: 4, background: "#f3f9fe", color: "#124d73" }}>
+                  <strong>Take or Pay herdado do contrato-base</strong><br />A ordem de vendas reutiliza a curva de volumes, as tolerâncias e a regra de compensação do contrato. Nada é configurado aqui.
+                </div>
+              ) : instrumentType === "ACS" ? (
                 <div role="status" style={{ padding: 12, borderRadius: 4, background: "#f3f9fe", color: "#124d73" }}>
                   <strong>Take or Pay não aplicável</strong><br />ACS não aceita tolerâncias nem configuração de Take or Pay.
                 </div>

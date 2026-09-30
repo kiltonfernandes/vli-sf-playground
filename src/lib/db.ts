@@ -163,6 +163,7 @@ export function ensureSchema(): Promise<void> {
       { name: "price_status", sql: `ALTER TABLE quotes ADD COLUMN price_status text NOT NULL DEFAULT 'Não validada'` },
       { name: "max_discount_pct", sql: `ALTER TABLE quotes ADD COLUMN max_discount_pct real NOT NULL DEFAULT 0` },
       { name: "alcada_level", sql: `ALTER TABLE quotes ADD COLUMN alcada_level text NOT NULL DEFAULT 'Sem alçada'` },
+      { name: "adjustment_log", sql: `ALTER TABLE quotes ADD COLUMN adjustment_log text` },
     ])
       if (!quoteColumns.rows.some((row) => row.name === column.name))
         await client.execute(column.sql);

@@ -28,6 +28,7 @@ import { Route as OpportunitiesIndexRouteImport } from './routes/opportunities.i
 import { Route as OpportunitiesIdRouteImport } from './routes/opportunities.$id'
 import { Route as PlannedFlowsIndexRouteImport } from './routes/planned-flows.index'
 import { Route as PlannedFlowsIdRouteImport } from './routes/planned-flows.$id'
+import { Route as PostContractIdRouteImport } from './routes/post-contract.$id'
 import { Route as QuoteLineItemsIndexRouteImport } from './routes/quote-line-items.index'
 import { Route as QuoteLineItemsIdRouteImport } from './routes/quote-line-items.$id'
 import { Route as QuoteSchedulesIndexRouteImport } from './routes/quote-schedules.index'
@@ -37,6 +38,7 @@ import { Route as QuotesIdRouteImport } from './routes/quotes.$id'
 import { Route as RecommendedPricesIndexRouteImport } from './routes/recommended-prices.index'
 import { Route as RecommendedPricesIdRouteImport } from './routes/recommended-prices.$id'
 import { Route as NetlexContractsIdRouteImport } from './routes/netlex.contracts.$id'
+import { Route as PortalSalesOrdersIdRouteImport } from './routes/portal.sales-orders.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -133,6 +135,11 @@ const PlannedFlowsIdRoute = PlannedFlowsIdRouteImport.update({
   path: '/planned-flows/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PostContractIdRoute = PostContractIdRouteImport.update({
+  id: '/post-contract/$id',
+  path: '/post-contract/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const QuoteLineItemsIndexRoute = QuoteLineItemsIndexRouteImport.update({
   id: '/quote-line-items/',
   path: '/quote-line-items/',
@@ -178,6 +185,11 @@ const NetlexContractsIdRoute = NetlexContractsIdRouteImport.update({
   path: '/netlex/contracts/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PortalSalesOrdersIdRoute = PortalSalesOrdersIdRouteImport.update({
+  id: '/portal/sales-orders/$id',
+  path: '/portal/sales-orders/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -190,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/merchandise/$id': typeof MerchandiseIdRoute
   '/opportunities/$id': typeof OpportunitiesIdRoute
   '/planned-flows/$id': typeof PlannedFlowsIdRoute
+  '/post-contract/$id': typeof PostContractIdRoute
   '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
   '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
   '/quotes/$id': typeof QuotesIdRoute
@@ -208,6 +221,7 @@ export interface FileRoutesByFullPath {
   '/quotes/': typeof QuotesIndexRoute
   '/recommended-prices/': typeof RecommendedPricesIndexRoute
   '/netlex/contracts/$id': typeof NetlexContractsIdRoute
+  '/portal/sales-orders/$id': typeof PortalSalesOrdersIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -220,6 +234,7 @@ export interface FileRoutesByTo {
   '/merchandise/$id': typeof MerchandiseIdRoute
   '/opportunities/$id': typeof OpportunitiesIdRoute
   '/planned-flows/$id': typeof PlannedFlowsIdRoute
+  '/post-contract/$id': typeof PostContractIdRoute
   '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
   '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
   '/quotes/$id': typeof QuotesIdRoute
@@ -238,6 +253,7 @@ export interface FileRoutesByTo {
   '/quotes': typeof QuotesIndexRoute
   '/recommended-prices': typeof RecommendedPricesIndexRoute
   '/netlex/contracts/$id': typeof NetlexContractsIdRoute
+  '/portal/sales-orders/$id': typeof PortalSalesOrdersIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -251,6 +267,7 @@ export interface FileRoutesById {
   '/merchandise/$id': typeof MerchandiseIdRoute
   '/opportunities/$id': typeof OpportunitiesIdRoute
   '/planned-flows/$id': typeof PlannedFlowsIdRoute
+  '/post-contract/$id': typeof PostContractIdRoute
   '/quote-line-items/$id': typeof QuoteLineItemsIdRoute
   '/quote-schedules/$id': typeof QuoteSchedulesIdRoute
   '/quotes/$id': typeof QuotesIdRoute
@@ -269,6 +286,7 @@ export interface FileRoutesById {
   '/quotes/': typeof QuotesIndexRoute
   '/recommended-prices/': typeof RecommendedPricesIndexRoute
   '/netlex/contracts/$id': typeof NetlexContractsIdRoute
+  '/portal/sales-orders/$id': typeof PortalSalesOrdersIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -283,6 +301,7 @@ export interface FileRouteTypes {
     | '/merchandise/$id'
     | '/opportunities/$id'
     | '/planned-flows/$id'
+    | '/post-contract/$id'
     | '/quote-line-items/$id'
     | '/quote-schedules/$id'
     | '/quotes/$id'
@@ -301,6 +320,7 @@ export interface FileRouteTypes {
     | '/quotes/'
     | '/recommended-prices/'
     | '/netlex/contracts/$id'
+    | '/portal/sales-orders/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -313,6 +333,7 @@ export interface FileRouteTypes {
     | '/merchandise/$id'
     | '/opportunities/$id'
     | '/planned-flows/$id'
+    | '/post-contract/$id'
     | '/quote-line-items/$id'
     | '/quote-schedules/$id'
     | '/quotes/$id'
@@ -331,6 +352,7 @@ export interface FileRouteTypes {
     | '/quotes'
     | '/recommended-prices'
     | '/netlex/contracts/$id'
+    | '/portal/sales-orders/$id'
   id:
     | '__root__'
     | '/'
@@ -343,6 +365,7 @@ export interface FileRouteTypes {
     | '/merchandise/$id'
     | '/opportunities/$id'
     | '/planned-flows/$id'
+    | '/post-contract/$id'
     | '/quote-line-items/$id'
     | '/quote-schedules/$id'
     | '/quotes/$id'
@@ -361,6 +384,7 @@ export interface FileRouteTypes {
     | '/quotes/'
     | '/recommended-prices/'
     | '/netlex/contracts/$id'
+    | '/portal/sales-orders/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -374,6 +398,7 @@ export interface RootRouteChildren {
   MerchandiseIdRoute: typeof MerchandiseIdRoute
   OpportunitiesIdRoute: typeof OpportunitiesIdRoute
   PlannedFlowsIdRoute: typeof PlannedFlowsIdRoute
+  PostContractIdRoute: typeof PostContractIdRoute
   QuoteLineItemsIdRoute: typeof QuoteLineItemsIdRoute
   QuoteSchedulesIdRoute: typeof QuoteSchedulesIdRoute
   QuotesIdRoute: typeof QuotesIdRoute
@@ -392,6 +417,7 @@ export interface RootRouteChildren {
   QuotesIndexRoute: typeof QuotesIndexRoute
   RecommendedPricesIndexRoute: typeof RecommendedPricesIndexRoute
   NetlexContractsIdRoute: typeof NetlexContractsIdRoute
+  PortalSalesOrdersIdRoute: typeof PortalSalesOrdersIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -529,6 +555,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlannedFlowsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/post-contract/$id': {
+      id: '/post-contract/$id'
+      path: '/post-contract/$id'
+      fullPath: '/post-contract/$id'
+      preLoaderRoute: typeof PostContractIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/quote-line-items/': {
       id: '/quote-line-items/'
       path: '/quote-line-items'
@@ -592,6 +625,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NetlexContractsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/portal/sales-orders/$id': {
+      id: '/portal/sales-orders/$id'
+      path: '/portal/sales-orders/$id'
+      fullPath: '/portal/sales-orders/$id'
+      preLoaderRoute: typeof PortalSalesOrdersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -606,6 +646,7 @@ const rootRouteChildren: RootRouteChildren = {
   MerchandiseIdRoute: MerchandiseIdRoute,
   OpportunitiesIdRoute: OpportunitiesIdRoute,
   PlannedFlowsIdRoute: PlannedFlowsIdRoute,
+  PostContractIdRoute: PostContractIdRoute,
   QuoteLineItemsIdRoute: QuoteLineItemsIdRoute,
   QuoteSchedulesIdRoute: QuoteSchedulesIdRoute,
   QuotesIdRoute: QuotesIdRoute,
@@ -624,6 +665,7 @@ const rootRouteChildren: RootRouteChildren = {
   QuotesIndexRoute: QuotesIndexRoute,
   RecommendedPricesIndexRoute: RecommendedPricesIndexRoute,
   NetlexContractsIdRoute: NetlexContractsIdRoute,
+  PortalSalesOrdersIdRoute: PortalSalesOrdersIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

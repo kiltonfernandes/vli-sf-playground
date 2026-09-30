@@ -12,7 +12,19 @@ import {
   deleteRecord,
   deleteRecordsBulk,
   updateOpportunityTakeOrPay,
+  createPostContractFromContract,
+  sendSalesOrderToClient,
+  registerAdjustmentCurve,
 } from "@/lib/crud";
+import { PostContractFormalization, PostContractHub } from "@/components/PostContract";
+import {
+  ADJUSTMENT_CURVE,
+  CURVE_STATUS,
+  SALES_ORDER,
+  SALES_ORDER_STATUS,
+  isPostContractInstrument,
+  recordTypeFor,
+} from "@/lib/post-contract";
 import { SfShell } from "@/components/SfShell";
 import { SfDeleteButton, SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
 import { SfBulkRecordDialog } from "@/components/SfBulkRecordDialog";
@@ -21,16 +33,16 @@ import { fmtDate, fmtMoney } from "@/lib/format";
 import { BusinessRulesChecklist, type BusinessRule } from "@/components/BusinessRulesChecklist";
 import { parseTakeOrPayConfig, type TakeOrPayConfig } from "@/lib/take-or-pay";
 
-const INSTRUMENTS = ["Contrato", "ACS", "Aditivo", "Outros Serviços"];
+const INSTRUMENTS = ["Contrato", "ACS", "Aditivo", SALES_ORDER, ADJUSTMENT_CURVE, "Outros Serviços"];
 const STAGES = ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"];
 const SEGMENTS = ["Ferroviário", "Portuário", "Rodoviário"];
-const quoteFields: FieldDef[] = [
+const quoteFieldsFor = (instrument: string): FieldDef[] => [
   { name: "name", label: "Nome da Cotação", required: true },
   {
     name: "record_type",
     label: "Tipo de Cotação",
     type: "select",
-    options: ["VLI_General"],
+    options: [recordTypeFor(instrument)],
     required: true,
   },
   { name: "seed", label: "Seed", type: "number", required: true },
@@ -51,6 +63,8 @@ function OpportunityRecordPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [creatingAddendum, setCreatingAddendum] = useState(false);
+  const [creatingKind, setCreatingKind] = useState("");
+  const [postBusy, setPostBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [activeTab, setActiveTab] = useState("quotes");
   const [bulkQuoteRows, setBulkQuoteRows] = useState<any[] | null>(null);
@@ -125,10 +139,18 @@ function OpportunityRecordPage() {
   const baseContract = data.baseContract;
   const addenda = (data.addenda ?? []) as any[];
   const isAddendum = opportunity.instrument_type === "Aditivo";
+  const isPostContract = isPostContractInstrument(opportunity.instrument_type);
+  const isSalesOrder = opportunity.instrument_type === SALES_ORDER;
+  const postDocument = (data.postContractDocument ?? null) as any | null;
+  const postStatus = String(postDocument?.status ?? "");
+  const postFormalized = isSalesOrder
+    ? postStatus === SALES_ORDER_STATUS.approved
+    : postStatus === CURVE_STATUS.registered;
+  const derived = isAddendum || isPostContract;
   const netlexInstrument = ["Contrato", "ACS", "Aditivo"].includes(opportunity.instrument_type);
   const netlexSigned = netlexContract?.status === "Assinatura";
   const inFormalization = ["Formalização", "Fechado"].includes(opportunity.stage);
-  const baseContractSigned = !isAddendum || baseContract?.status === "Assinatura";
+  const baseContractSigned = !derived || baseContract?.status === "Assinatura";
   const canSendContract =
     opportunity.stage === "Formalização" &&
     netlexInstrument &&
@@ -148,17 +170,31 @@ function OpportunityRecordPage() {
     },
     {
       label: "Instrumento aceito para Cotação",
-      passed: ["Contrato", "ACS"].includes(opportunity.instrument_type) || (isAddendum && !!baseContract),
+      passed: ["Contrato", "ACS"].includes(opportunity.instrument_type) || (derived && !!baseContract),
       detail: ["Contrato", "ACS"].includes(opportunity.instrument_type)
         ? opportunity.instrument_type
-        : isAddendum
+        : derived
           ? baseContract
-            ? `Aditivo ao contrato Nº ${baseContract.netlex_number}`
-            : "Crie o aditivo a partir de um Contrato em Assinatura no NetLex."
-          : "O fluxo atual aceita Contrato, ACS ou Aditivo.",
+            ? `${opportunity.instrument_type} do contrato Nº ${baseContract.netlex_number}`
+            : `Crie ${isAddendum ? "o aditivo" : `a ${String(opportunity.instrument_type).toLowerCase()}`} a partir de um Contrato em Assinatura.`
+          : "O fluxo atual aceita Contrato, ACS, Aditivo, Ordem de Vendas ou Curva de Ajuste.",
       explanation:
-        "Neste escopo ferroviário, a Cotação atende Contrato, ACS e Aditivo. O Aditivo nunca nasce solto: ele é criado a partir de um Contrato em Assinatura no NetLex (ACS não gera aditivo) e herda partes, vigência, reajustes e Agendas desse contrato.",
+        "Neste escopo ferroviário, a Cotação atende Contrato, ACS, Aditivo, Ordem de Vendas e Curva de Ajuste. Os três últimos nunca nascem soltos: são criados no hub Pós-contrato de um Contrato em Assinatura (ACS não gera nenhum deles). Só o Aditivo altera o contrato; ordem de vendas e curva reutilizam as condições vigentes.",
     },
+    ...(isPostContract
+      ? [
+          {
+            label: "Contrato-base em Assinatura",
+            passed: baseContract?.status === "Assinatura",
+            detail: baseContract
+              ? `Nº ${baseContract.netlex_number} · ${baseContract.status}`
+              : "Sem contrato-base vinculado.",
+            explanation: isSalesOrder
+              ? "A ordem de vendas é uma venda pontual sobre um contrato vigente: herda vigência, tarifa (CBS ou líquida), reajuste e Take or Pay. Ela não altera os itens do contrato; mudança permanente continua sendo Aditivo."
+              : "A curva de ajuste redistribui volumes já previstos entre meses da vigência (ex.: quebra de safra). Os preços e os itens do contrato não mudam e o total de cada fluxo precisa se manter.",
+          },
+        ]
+      : []),
     ...(isAddendum
       ? [
           {
@@ -264,7 +300,37 @@ function OpportunityRecordPage() {
       explanation:
         "A minuta deve identificar a parte cliente que contrata e a empresa VLI prestadora. O devedor solidário é opcional.",
     },
-    ...(inFormalization
+    ...(inFormalization && isPostContract
+      ? isSalesOrder
+        ? [
+            {
+              label: "Ordem enviada ao contato aprovador",
+              passed: !!postDocument,
+              detail: postDocument
+                ? `Nº ${postDocument.netlex_number} · ${postDocument.document?.contact?.name ?? "contato"}`
+                : "Escolha o contato aprovador e use “Enviar ordem ao cliente”.",
+              explanation:
+                "Na Formalização a ordem de vendas vira um contrato simplificado com referência ao contrato-base. O contato aprovador (com e-mail) recebe a proposta e tem 7 dias para aprovar no portal do cliente.",
+            },
+            {
+              label: "Aprovada pelo cliente no portal",
+              passed: postStatus === SALES_ORDER_STATUS.approved,
+              detail: postDocument ? postStatus : "Disponível depois do envio.",
+              explanation:
+                "O cliente aprova em Gestão de Contratos → Ordem de vendas no portal (Experience Cloud, simulado aqui). Se a semana passar sem aprovação, a proposta expira e precisa ser reenviada.",
+            },
+          ]
+        : [
+            {
+              label: "Curva registrada",
+              passed: postStatus === CURVE_STATUS.registered,
+              detail: postDocument ? `Nº ${postDocument.netlex_number} · ${postStatus}` : "Use “Registrar curva”.",
+              explanation:
+                "A curva não passa pelo NetLex: é um registro operacional vinculado ao contrato. Depois de registrada, a Oportunidade pode ser fechada.",
+            },
+          ]
+      : []),
+    ...(inFormalization && !isPostContract
       ? [
           {
             label: "Formalizar no NetLex",
@@ -302,7 +368,7 @@ function OpportunityRecordPage() {
       name: "instrument_type",
       label: "Tipo de instrumento",
       type: "select",
-      options: INSTRUMENTS,
+      options: isPostContract ? INSTRUMENTS : INSTRUMENTS.filter((entry) => !isPostContractInstrument(entry)),
       required: true,
     },
     { name: "stage", label: "Estágio", type: "select", options: STAGES, required: true },
@@ -363,7 +429,7 @@ function OpportunityRecordPage() {
 
   const quoteDefinitions =
     opportunity.segment === "Ferroviário" &&
-    (["Contrato", "ACS"].includes(opportunity.instrument_type) || (isAddendum && !!baseContract))
+    (["Contrato", "ACS"].includes(opportunity.instrument_type) || (derived && !!baseContract))
       ? [
           {
             key: "quotes",
@@ -415,14 +481,14 @@ function OpportunityRecordPage() {
                 name: "record_type",
                 label: "Tipo de Cotação",
                 type: "select" as const,
-                options: ["VLI_General"],
+                options: [recordTypeFor(opportunity.instrument_type)],
                 required: true,
               },
               { name: "seed", label: "Seed", type: "number" as const },
             ],
             createDefaults: () => ({
               name: `${opportunity.name} · Ferroviário`,
-              record_type: "VLI_General",
+              record_type: recordTypeFor(opportunity.instrument_type),
               status: "Rascunho",
               is_synced: 0,
               seed: 20260929,
@@ -578,7 +644,7 @@ function OpportunityRecordPage() {
         stage={opportunity.stage}
         hasSyncedQuote={hasSyncedQuote}
         priceApproved={priceApproved}
-        netlexSigned={netlexSigned}
+        netlexSigned={isPostContract ? postFormalized : netlexSigned}
         rules={opportunityRules}
         opportunityId={id}
         accountName={account?.name ?? "—"}
@@ -632,6 +698,63 @@ function OpportunityRecordPage() {
           value={opportunity.close_date ? fmtDate(opportunity.close_date) : "—"}
         />
       </div>
+      {isPostContract ? (
+        <PostContractFormalization
+          instrument={opportunity.instrument_type}
+          stage={opportunity.stage}
+          baseContract={baseContract}
+          document={postDocument}
+          contacts={(data.contacts ?? []) as any[]}
+          busy={postBusy}
+          onSend={async (contactId) => {
+            setPostBusy(true);
+            try {
+              const result = await sendSalesOrderToClient({ data: { opportunityId: id, contactId } });
+              await Promise.all([
+                qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
+                qc.invalidateQueries({ queryKey: ["opportunities"] }),
+              ]);
+              toast.success(result.resent ? "Ordem de vendas reenviada" : "Ordem de vendas enviada ao cliente", {
+                description: "O contato aprovador tem 7 dias para aprovar no portal.",
+              });
+            } catch (error) {
+              toast.error("Não foi possível enviar a ordem de vendas", {
+                description: error instanceof Error ? error.message : undefined,
+              });
+            } finally {
+              setPostBusy(false);
+            }
+          }}
+          onRegister={async () => {
+            setPostBusy(true);
+            try {
+              await registerAdjustmentCurve({ data: { opportunityId: id } });
+              await qc.invalidateQueries({ queryKey: ["opportunity-full", id] });
+              toast.success("Curva de ajuste registrada", { description: "Os itens do contrato não foram alterados." });
+            } catch (error) {
+              toast.error("Não foi possível registrar a curva", {
+                description: error instanceof Error ? error.message : undefined,
+              });
+            } finally {
+              setPostBusy(false);
+            }
+          }}
+          onClose={async () => {
+            try {
+              await saveRecord({ data: { table: "opportunities", recordId: id, data: { stage: "Fechado" } } });
+              await Promise.all([
+                qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
+                qc.invalidateQueries({ queryKey: ["opportunities"] }),
+              ]);
+              toast.success("Oportunidade fechada");
+            } catch (error) {
+              toast.error("Não foi possível fechar", {
+                description: error instanceof Error ? error.message : undefined,
+              });
+            }
+          }}
+        />
+      ) : (
       <FormalizationBanner
         stage={opportunity.stage}
         instrument={opportunity.instrument_type}
@@ -678,6 +801,44 @@ function OpportunityRecordPage() {
           }
         }}
       />
+      )}
+      {opportunity.instrument_type === "Contrato" && netlexContract && netlexSigned && (
+        <PostContractHub
+          contract={netlexContract}
+          addenda={addenda}
+          postContract={(data.postContract ?? []) as any[]}
+          busyKind={creatingKind}
+          onCreate={async (kind) => {
+            setCreatingKind(kind);
+            try {
+              if (kind === "Aditivo") {
+                const result = await createAddendumOpportunity({ data: { contractId: netlexContract.id } });
+                await qc.invalidateQueries({ queryKey: ["opportunities"] });
+                toast.success("Oportunidade de aditivo criada", {
+                  description: "Ela herda partes, vigência, reajustes e Agendas do contrato.",
+                });
+                await navigate({ to: "/opportunities/$id", params: { id: result.id } });
+                return;
+              }
+              const result = await createPostContractFromContract({ data: { contractId: netlexContract.id, kind } });
+              await qc.invalidateQueries({ queryKey: ["opportunities"] });
+              toast.success(kind === SALES_ORDER ? "Ordem de vendas criada" : "Curva de ajuste criada", {
+                description:
+                  kind === SALES_ORDER
+                    ? "A Cotação já nasce em Negociação com as condições do contrato."
+                    : "A Cotação já nasce com as Agendas do contrato. Use “Mover volume”.",
+              });
+              await navigate({ to: "/quotes/$id", params: { id: result.quoteId } });
+            } catch (error) {
+              toast.error("Não foi possível criar", {
+                description: error instanceof Error ? error.message : undefined,
+              });
+            } finally {
+              setCreatingKind("");
+            }
+          }}
+        />
+      )}
 
       <div style={{ padding: 24 }}>
         <div
@@ -860,6 +1021,10 @@ function OpportunityRecordPage() {
               <div style={{ padding: 16, display: "grid", gap: 12 }}>
                 {opportunity.instrument_type === "ACS" ? (
                   <p style={{ margin: 0 }}>ACS não admite Take or Pay nem tolerâncias nas Agendas.</p>
+                ) : isPostContract ? (
+                  <p style={{ margin: 0 }}>
+                    Herdado do contrato-base{baseContract ? ` Nº ${baseContract.netlex_number}` : ""}. {isSalesOrder ? "A ordem de vendas" : "A curva de ajuste"} não cria nem altera Take or Pay; a apuração segue a regra do contrato.
+                  </p>
                 ) : opportunity.instrument_type !== "Contrato" && !isAddendum ? (
                   <p style={{ margin: 0 }}>Disponível para Contrato e aditivo de Contrato.</p>
                 ) : (
@@ -922,10 +1087,10 @@ function OpportunityRecordPage() {
         <SfRecordDialog
           title="Nova Cotação"
           table="quotes"
-          fields={quoteFields}
+          fields={quoteFieldsFor(opportunity.instrument_type)}
           defaults={{
             name: `${opportunity.name} · Ferroviário`,
-            record_type: "VLI_General",
+            record_type: recordTypeFor(opportunity.instrument_type),
             status: "Rascunho",
             is_synced: 0,
             seed: 20260929,
@@ -948,7 +1113,7 @@ function OpportunityRecordPage() {
           title={`Editar ${quoteToEdit.name}`}
           table="quotes"
           recordId={quoteToEdit.id}
-          fields={quoteFields}
+          fields={quoteFieldsFor(opportunity.instrument_type)}
           defaults={{
             name: quoteToEdit.name,
             record_type: quoteToEdit.record_type,
@@ -970,11 +1135,11 @@ function OpportunityRecordPage() {
       {bulkQuoteRows !== null && (
         <SfBulkRecordDialog
           table="quotes"
-          fields={quoteFields}
+          fields={quoteFieldsFor(opportunity.instrument_type)}
           defaults={{
             opportunity_id: id,
             name: `${opportunity.name} · Ferroviário`,
-            record_type: "VLI_General",
+            record_type: recordTypeFor(opportunity.instrument_type),
             status: "Rascunho",
             is_synced: 0,
             seed: 20260929,
@@ -1388,34 +1553,16 @@ function FormalizationBanner({
               : isAddendum
                 ? "Aditivo em Assinatura: as mudanças já foram aplicadas no contrato original."
                 : instrument === "Contrato"
-                  ? `Contrato em Assinatura. ${addenda.length ? `${addenda.length} aditivo(s) vinculado(s).` : "Pode receber aditivos."}`
+                  ? "Contrato em Assinatura. Use o hub Pós-contrato abaixo para aditivo, ordem de vendas ou curva de ajuste."
                   : "Documento em Assinatura. ACS não gera aditivo."}
         </div>
         {baseLine}
-        {!isAddendum && addenda.length > 0 && (
-          <div className="sf-next-step-detail">
-            {addenda.map((entry, index) => (
-              <span key={entry.id}>
-                {index > 0 && " · "}
-                <Link to="/opportunities/$id" params={{ id: entry.id }} style={{ color: "#0176d3" }}>
-                  {entry.name}
-                </Link>{" "}
-                ({entry.document ? entry.document.status : entry.stage})
-              </span>
-            ))}
-          </div>
-        )}
       </div>
       <div className="sf-next-step-actions">
         {openLink(contract)}
         {signed && stage === "Formalização" && (
           <button className="sf-btn sf-btn--brand" onClick={onClose}>
             ✓ Fechar oportunidade
-          </button>
-        )}
-        {signed && instrument === "Contrato" && (
-          <button className="sf-btn sf-btn--brand" disabled={creatingAddendum} onClick={onCreateAddendum}>
-            {creatingAddendum ? "Criando…" : "+ Nova oportunidade de aditivo"}
           </button>
         )}
       </div>

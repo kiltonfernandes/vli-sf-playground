@@ -10,6 +10,8 @@ import { exportCsv } from "@/lib/csv";
 import { fmtMoney } from "@/lib/format";
 
 const INSTRUMENTS = ["Contrato", "ACS", "Aditivo", "Outros Serviços"];
+// Filtro da lista inclui os instrumentos pós-contrato, que só nascem de um Contrato em Assinatura.
+const FILTER_INSTRUMENTS = [...INSTRUMENTS.slice(0, 3), "Ordem de Vendas", "Curva de Ajuste", "Outros Serviços"];
 const STAGES = ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"];
 const SEGMENTS = ["Ferroviário", "Portuário", "Rodoviário"];
 type Opportunity = {
@@ -58,7 +60,7 @@ function OpportunitiesPage() {
   const columns: Column<Opportunity>[] = [
     { key: "name", label: "Oportunidade", render: (row) => <Link to="/opportunities/$id" params={{ id: row.id }} style={{ color: "#0176d3", fontWeight: 600 }}>{row.name}</Link>, sortValue: (row) => row.name, searchValue: (row) => row.name },
     { key: "account", label: "Conta de gestão", render: (row) => row.account_name, sortValue: (row) => row.account_name, searchValue: (row) => row.account_name },
-    { key: "instrument", label: "Instrumento", render: (row) => row.instrument_type, sortValue: (row) => row.instrument_type, filterOptions: INSTRUMENTS, filterValue: (row) => row.instrument_type },
+    { key: "instrument", label: "Instrumento", render: (row) => row.instrument_type, sortValue: (row) => row.instrument_type, filterOptions: FILTER_INSTRUMENTS, filterValue: (row) => row.instrument_type },
     { key: "stage", label: "Estágio", render: (row) => row.stage, sortValue: (row) => row.stage, filterOptions: STAGES, filterValue: (row) => row.stage },
     { key: "segment", label: "Segmento", render: (row) => row.segment ?? "—", sortValue: (row) => row.segment ?? "", filterOptions: SEGMENTS, filterValue: (row) => row.segment },
     { key: "amount", label: "Valor", align: "right", render: (row) => fmtMoney(Number(row.amount)), sortValue: (row) => Number(row.amount) },

@@ -175,6 +175,8 @@ export const quotes = sqliteTable(
     max_discount_pct: real("max_discount_pct").notNull().default(0),
     alcada_level: text("alcada_level").notNull().default("Sem alçada"),
     seed: integer("seed").notNull(),
+    /** Curva de ajuste: histórico JSON dos deslocamentos de volume (origem → destino). */
+    adjustment_log: text("adjustment_log"),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
   },

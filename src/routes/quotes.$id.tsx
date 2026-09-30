@@ -8,6 +8,7 @@ import {
   bulkAdjustQuotePrices,
   completeQuote,
   createAddendumFromQuote,
+  createPostContractFromContract,
   deleteRecord,
   getQuoteFull,
   listQuoteOptions,
@@ -30,6 +31,8 @@ import { BusinessRulesChecklist, type BusinessRule } from "@/components/Business
 import { SfPath } from "@/components/SfPath";
 import { FIELD_LABELS } from "@/lib/addendum";
 import { parseTakeOrPayConfig } from "@/lib/take-or-pay";
+import { AdjustmentCurvePanel, InheritedChips, inheritedItems } from "@/components/PostContract";
+import { ADJUSTMENT_CURVE, SALES_ORDER, isPostContractInstrument } from "@/lib/post-contract";
 
 const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
 export const Route = createFileRoute("/quotes/$id")({
@@ -50,6 +53,7 @@ function QuotePage() {
     [message, setMessage] = useState(""),
     [pricePanel, setPricePanel] = useState<any>(null),
     [creatingAddendum, setCreatingAddendum] = useState(false),
+    [creatingKind, setCreatingKind] = useState(""),
     [groupMode, setGroupMode] = useState<"structure" | "period">("period");
   const { data, isLoading } = useQuery({
     queryKey: ["quote-full", id],
@@ -86,9 +90,50 @@ function QuotePage() {
     | { id: string; status: string; netlex_number: string }
     | null;
   const isAddendum = q.instrument_type === "Aditivo";
+  const isCurve = q.instrument_type === ADJUSTMENT_CURVE;
+  const isSalesOrder = q.instrument_type === SALES_ORDER;
+  const isPostContract = isPostContractInstrument(q.instrument_type);
+  const postContract = (data as any).postContract as any | null;
+  const curve = postContract?.curve ?? null;
   const editable = q.status === "Rascunho" && !q.is_synced;
+  const CURVE_SKIPPED_RULES = [
+    "Preço validado ou aprovado",
+    "Aprovação registrada quando necessária",
+    "Volume inteiro e tarifa selecionada preenchidos",
+  ];
   const businessRules = [
-    ...getQuoteBusinessRules(q, items, options, tariffMode, applicationDay),
+    ...getQuoteBusinessRules(q, items, options, tariffMode, applicationDay).filter(
+      (rule) => !isCurve || !CURVE_SKIPPED_RULES.includes(rule.label),
+    ),
+    ...(isCurve && curve
+      ? [
+          {
+            label: "Preços do contrato mantidos",
+            passed: true,
+            detail: "Tarifas, Base Diesel e rateio vêm travados do contrato-base.",
+            explanation:
+              "A curva de ajuste não renegocia preço: não há validação Jetsons nem alçada. Para mudar preço de forma permanente, use Aditivo.",
+          },
+          {
+            label: "Ao menos um deslocamento de volume",
+            passed: !!curve.changed,
+            detail: curve.changed
+              ? `${Number(curve.moved).toLocaleString("pt-BR")} deslocados em ${curve.log.length} movimento(s).`
+              : "Use “Mover volume” para redistribuir entre períodos.",
+            explanation:
+              "Cada deslocamento tira volume de um período e coloca em outro dentro da vigência, com justificativa operacional (ex.: quebra de safra).",
+          },
+          {
+            label: "Saldo por fluxo zerado",
+            passed: !!curve.balanced,
+            detail: curve.balanced
+              ? "A soma antes e depois é igual em todos os fluxos."
+              : "Algum fluxo ficou com total diferente do contratado.",
+            explanation:
+              "A curva só redistribui: o volume total de cada fluxo precisa continuar igual ao do contrato.",
+          },
+        ]
+      : []),
     ...(isAddendum
       ? [
           {
@@ -110,7 +155,12 @@ function QuotePage() {
   const hasSchedules = items.some((item) => item.schedules?.length);
   const pathSteps = [
     { label: "Rascunho", hint: hasSchedules ? `${items.length} itens` : "Adicione Itens e Agendas" },
-    { label: "Validação de preços", hint: String(q.price_status) },
+    isCurve
+      ? {
+          label: "Deslocamento de volumes",
+          hint: !curve?.changed ? "Mova volume" : curve?.balanced ? "Saldo zerado" : "Saldo pendente",
+        }
+      : { label: "Validação de preços", hint: String(q.price_status) },
     ...(needsApproval
       ? [{ label: "Aprovação", hint: q.price_status === "Aprovada" ? "Aprovada" : q.price_status === "Rejeitada" ? "Rejeitada" : "Pendente" }]
       : []),
@@ -189,6 +239,11 @@ function QuotePage() {
           <SituationChip situation={situation} thresholds={thresholds} />
         </td>
         <td style={{ whiteSpace: "nowrap", textDecoration: "none" }}>
+          {isCurve ? (
+            <span style={{ color: "#706e6b", fontSize: 12 }} title="Use “Mover volume” no painel da curva">
+              🔒 Contrato
+            </span>
+          ) : (<>
           {!excluded && (
             <>
               <button className="sf-link" onClick={() => setEditSchedule({ ...row, item })}>
@@ -240,6 +295,7 @@ function QuotePage() {
               Excluir
             </button>
           )}
+          </>)}
         </td>
       </tr>
     );
@@ -401,6 +457,19 @@ function QuotePage() {
               {q.opportunity_name}
             </Link>{" "}
             · {q.account_name} · {q.instrument_type} · Ferroviário
+            {postContract?.baseContract && (
+              <>
+                {" "}· contrato-base{" "}
+                <a
+                  href={`/netlex/contracts/${postContract.baseContract.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#0176d3" }}
+                >
+                  Nº {postContract.baseContract.netlex_number}
+                </a>
+              </>
+            )}
           </div>
         </div>
         <div className="sf-ph-actions">
@@ -417,7 +486,7 @@ function QuotePage() {
         done={!!q.is_synced}
         blocked={pathBlocked}
         actions={<>
-            <button
+            {!isCurve && <button
               className="sf-btn"
               disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
               title="Abre o comparativo do Jetsons com todas as Agendas: desvio por linha, cores de alçada e edição de preço"
@@ -437,7 +506,7 @@ function QuotePage() {
               }}
             >
               {busy ? "Validando…" : "Validar preços"}
-            </button>
+            </button>}
             {q.price_status === "Pendente alçada" && (
               <button
                 className="sf-btn sf-btn--brand"
@@ -496,10 +565,48 @@ function QuotePage() {
                 {creatingAddendum ? "Criando…" : "+ Criar aditivo"}
               </button>
             )}
+            {q.instrument_type === "Contrato" &&
+              [SALES_ORDER, ADJUSTMENT_CURVE].map((kind) => (
+                <button
+                  key={kind}
+                  className="sf-btn"
+                  disabled={busy || !!creatingKind || netlexContract?.status !== "Assinatura"}
+                  title={
+                    netlexContract?.status !== "Assinatura"
+                      ? "Disponível quando o contrato estiver em Assinatura no NetLex"
+                      : kind === SALES_ORDER
+                        ? "Venda pontual com as condições do contrato; não altera o contrato"
+                        : "Redistribui volumes entre meses; preços e total por fluxo mantidos"
+                  }
+                  onClick={async () => {
+                    if (!netlexContract) return;
+                    setCreatingKind(kind);
+                    try {
+                      const created = await createPostContractFromContract({
+                        data: { contractId: netlexContract.id, kind },
+                      });
+                      toast.success(kind === SALES_ORDER ? "Ordem de vendas criada" : "Curva de ajuste criada", {
+                        description: "Oportunidade em Negociação vinculada ao contrato-base.",
+                      });
+                      await qc.invalidateQueries({ queryKey: ["quotes"] });
+                      await qc.invalidateQueries({ queryKey: ["opportunities"] });
+                      await navigate({ to: "/quotes/$id", params: { id: created.quoteId } });
+                    } catch (error) {
+                      toast.error("Não foi possível criar", {
+                        description: error instanceof Error ? error.message : "Tente novamente.",
+                      });
+                    } finally {
+                      setCreatingKind("");
+                    }
+                  }}
+                >
+                  {creatingKind === kind ? "Criando…" : kind === SALES_ORDER ? "+ Ordem de vendas" : "+ Curva de ajuste"}
+                </button>
+              ))}
           </>}
         message={
           <span style={{ display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <PriceStatusBadge quote={q} />
+            {!isCurve && <PriceStatusBadge quote={q} />}
             {message && (
               <span
                 style={{
@@ -543,6 +650,34 @@ function QuotePage() {
             }}
           />
         </Section>
+        {isPostContract && postContract && (
+          <section className="sf-card sf-pc-inherited" aria-label="Condições herdadas">
+            <div className="sf-card-header">
+              {isSalesOrder ? "⚡ Ordem de vendas" : "📈 Curva de ajuste"} · herdado do contrato
+              {postContract.baseContract ? ` Nº ${postContract.baseContract.netlex_number}` : ""}
+            </div>
+            <div className="sf-card-body">
+              <InheritedChips items={inheritedItems(postContract)} />
+              <p className="sf-curve-muted" style={{ margin: "8px 0 0" }}>
+                {isSalesOrder
+                  ? "Adicione Itens e Agendas normalmente: o preço recomendado Jetsons é obrigatório e a alçada vale como em qualquer Cotação (a maior alçada entre os Itens governa). Tolerâncias não são informadas: Take or Pay é o do contrato."
+                  : "Nada aqui altera o contrato. Para mudar preço, prazo ou cláusula de forma permanente, use Aditivo."}
+              </p>
+            </div>
+          </section>
+        )}
+        {isCurve && curve && (
+          <AdjustmentCurvePanel
+            quoteId={id}
+            curve={curve}
+            term={postContract.term ?? {}}
+            editable={editable}
+            stage={options?.opportunity?.stage ?? "Negociação"}
+            onChanged={async () => {
+              await refresh();
+            }}
+          />
+        )}
         {isAddendum && addendum && (
           <AddendumPanel
             addendum={addendum}
@@ -592,13 +727,15 @@ function QuotePage() {
                 </button>
               </div>
             </div>
-            <button
-              className="sf-btn sf-btn--brand"
-              onClick={() => setNewItem(true)}
-              disabled={!options}
-            >
-              + Adicionar Item
-            </button>
+            {!isCurve && (
+              <button
+                className="sf-btn sf-btn--brand"
+                onClick={() => setNewItem(true)}
+                disabled={!options}
+              >
+                + Adicionar Item
+              </button>
+            )}
           </div>
           {!items.length && (
             <p style={{ color: "#706e6b" }}>
@@ -669,6 +806,7 @@ function QuotePage() {
                                   >
                                     Abrir registro
                                   </Link>
+{!isCurve && (<>
                                   <button
                                     className="sf-link"
                                     onClick={(e) => {
@@ -690,6 +828,7 @@ function QuotePage() {
                                   >
                                     + Agenda
                                   </button>
+</>)}
                                 </summary>
                                 <div style={{ padding: 8 }}>
                                   {item.schedules.length > 0 ? (
@@ -755,7 +894,7 @@ function QuotePage() {
           applicationDay={applicationDay}
           canChangeTariff={canChangeTariff}
           usedSchedules={(options?.usedSchedules ?? []).filter((row: any) => row.quote_id === id)}
-          allowExtendTerm
+          allowExtendTerm={!isPostContract}
           initialFlowId={scheduleItem?.flow_id}
           initialService={scheduleItem?.service}
           itemId={scheduleItem?.id}

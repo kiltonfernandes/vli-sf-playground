@@ -39,6 +39,21 @@ import {
   summarizeChanges,
   type AddendumChange,
 } from "./addendum";
+import {
+  ADJUSTMENT_CURVE,
+  CURVE_STATUS,
+  SALES_ORDER,
+  SALES_ORDER_STATUS,
+  SALES_ORDER_VALIDITY_DAYS,
+  curveBalance,
+  destinationDieselDate,
+  effectiveSalesOrderStatus,
+  isPostContractInstrument,
+  parseCurveLog,
+  periodLabel,
+  recordTypeFor,
+  type CurveMove,
+} from "./post-contract";
 
 type SaveInput = {
   table: TableName;
@@ -209,7 +224,26 @@ export const getOpportunityFull = createServerFn({ method: "GET" })
         ? { ...contract, document: parseContractDocument(contract.document_json) }
         : null,
       baseContract: baseContract ?? null,
-      addenda: contract ? await listContractAddenda(contract.id) : [],
+      addenda: contract && contract.kind === "Contrato" ? await listContractAddenda(contract.id) : [],
+      postContract:
+        contract && contract.kind === "Contrato" ? await listContractPostContract(contract.id) : [],
+      contacts: isPostContractInstrument(opportunity.instrument_type)
+        ? await db
+            .select({
+              id: contacts.id,
+              name: contacts.name,
+              email: contacts.email,
+              title: contacts.title,
+              decision_role: contacts.decision_role,
+            })
+            .from(contacts)
+            .where(eq(contacts.account_id, opportunity.account_id))
+            .orderBy(asc(contacts.name))
+        : [],
+      postContractDocument:
+        contract && isPostContractInstrument(opportunity.instrument_type)
+          ? postContractDocumentView(contract)
+          : null,
     };
   },
 );
@@ -487,7 +521,7 @@ export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
       const siblings = await db
         .select({ id: netlex_contracts.id })
         .from(netlex_contracts)
-        .where(eq(netlex_contracts.base_contract_id, baseContract.id));
+        .where(and(eq(netlex_contracts.base_contract_id, baseContract.id), eq(netlex_contracts.kind, "Aditivo")));
       const sequence = siblings.length + 1;
       const number = `${baseContract.netlex_number}-A${sequence}`;
       const addendumTitle = `Aditivo ${sequence} ao contrato ${baseContract.netlex_number} · ${account.name}`;
@@ -670,6 +704,7 @@ export const getNetlexContractFull = createServerFn({ method: "GET" })
       opportunity: opportunity ?? null,
       baseContract: baseContract ?? null,
       addenda: await listContractAddenda(contract.id),
+      postContract: contract.kind === "Contrato" ? await listContractPostContract(contract.id) : [],
     };
   },
 );
@@ -695,7 +730,7 @@ async function listContractAddenda(contractId: string) {
     db
       .select({ id: opportunities.id, name: opportunities.name, stage: opportunities.stage })
       .from(opportunities)
-      .where(eq(opportunities.base_contract_id, contractId))
+      .where(and(eq(opportunities.base_contract_id, contractId), eq(opportunities.instrument_type, "Aditivo")))
       .orderBy(asc(opportunities.created_at)),
   ]);
   return addendumOpportunities.map((opportunity) => ({
@@ -1073,11 +1108,19 @@ export const moveNetlexContractToSignature = createServerFn({ method: "POST" })
   });
 
 /** Insere a Oportunidade aditiva de um Contrato em Assinatura (ACS não gera aditivo). */
-async function spawnAddendumOpportunity(base: typeof netlex_contracts.$inferSelect) {
+async function spawnAddendumOpportunity(
+  base: typeof netlex_contracts.$inferSelect,
+  instrument: string = "Aditivo",
+) {
+  const label = instrument === "Aditivo" ? "aditivo" : instrument.toLowerCase();
   if (base.kind !== "Contrato")
-    throw new Error("Somente Contrato gera aditivo. ACS e aditivos não podem ser aditados.");
+    throw new Error(
+      instrument === "Aditivo"
+        ? "Somente Contrato gera aditivo. ACS e aditivos não podem ser aditados."
+        : `Somente Contrato gera ${label}. ACS não gera aditivo, ordem de vendas nem curva de ajuste.`,
+    );
   if (base.status !== NETLEX_SIGNATURE)
-    throw new Error("O contrato precisa estar em Assinatura no NetLex para receber aditivo.");
+    throw new Error(`O contrato precisa estar em Assinatura no NetLex para gerar ${label}.`);
   const [baseOpportunity] = await db
       .select()
       .from(opportunities)
@@ -1087,16 +1130,17 @@ async function spawnAddendumOpportunity(base: typeof netlex_contracts.$inferSele
     const existing = await db
       .select({ id: opportunities.id })
       .from(opportunities)
-      .where(eq(opportunities.base_contract_id, base.id));
+      .where(and(eq(opportunities.base_contract_id, base.id), eq(opportunities.instrument_type, instrument)));
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     const [account] = await db.select().from(accounts).where(eq(accounts.id, baseOpportunity.account_id));
     await db.insert(opportunities).values({
       id,
       account_id: baseOpportunity.account_id,
-      name: `Aditivo ${existing.length + 1} · Contrato ${base.netlex_number} · ${account?.name ?? ""}`.trim(),
-      instrument_type: "Aditivo",
-      stage: "Prospecção",
+      name: `${instrument} ${existing.length + 1} · Contrato ${base.netlex_number} · ${account?.name ?? ""}`.trim(),
+      instrument_type: instrument,
+      // Ordem de vendas e curva de ajuste já nascem com a Cotação aberta.
+      stage: instrument === "Aditivo" ? "Prospecção" : "Negociação",
       segment: baseOpportunity.segment,
       amount: 0,
       close_date: baseOpportunity.close_date,
@@ -1671,7 +1715,10 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
             .orderBy(desc(netlex_contracts.created_at))
         )[0] ?? null)
       : null;
-  return { quote, items: itemsWithPrices, thresholds, addendum, netlexContract };
+  const postContract = isPostContractInstrument(quote.instrument_type)
+    ? await buildQuotePostContract(id, itemsWithPrices)
+    : null;
+  return { quote, items: itemsWithPrices, thresholds, addendum, netlexContract, postContract };
 });
 
 export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
@@ -2253,6 +2300,18 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
   const items = await db.select().from(quote_line_items).where(eq(quote_line_items.quote_id, id));
   if (!items.length) throw new Error("Adicione ao menos um Item à Cotação.");
+  if (isPostContractInstrument(opp.instrument_type) && !opp.base_contract_id)
+    throw new Error(`A ${opp.instrument_type.toLowerCase()} precisa estar vinculada a um contrato em Assinatura.`);
+  if (opp.instrument_type === ADJUSTMENT_CURVE) {
+    const curve = await buildQuoteCurve(id);
+    if (!curve.changed)
+      throw new Error("A curva de ajuste precisa deslocar ao menos um volume entre períodos. Use “Mover volume”.");
+    const unbalanced = curve.flows.find((flow) => !flow.balanced);
+    if (unbalanced)
+      throw new Error(
+        `O fluxo ${unbalanced.flowCode} ficou com saldo ${unbalanced.delta > 0 ? "+" : ""}${unbalanced.delta.toLocaleString("pt-BR")}: a curva só redistribui volume, a soma antes/depois precisa ser igual.`,
+      );
+  }
   if (opp.instrument_type === "Aditivo") {
     const addendum = await buildQuoteAddendum(id);
     if (!addendum) throw new Error("A Oportunidade de aditivo precisa de um contrato base.");
@@ -2370,6 +2429,32 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     )
   )
     throw new Error("ACS não pode ter Take or Pay.");
+  if (
+    opp.instrument_type === SALES_ORDER &&
+    rows.some((row) =>
+      [
+        row.tolerance_vli_volume,
+        row.tolerance_client_volume,
+        row.tolerance_vli_tariff,
+        row.tolerance_client_tariff,
+      ].some((v) => v !== null && v > 0),
+    )
+  )
+    throw new Error("A ordem de vendas herda o Take or Pay do contrato: não informe tolerâncias nas Agendas.");
+  if (opp.instrument_type === ADJUSTMENT_CURVE) {
+    // Preços, rateio e tolerâncias são os do contrato: não há nova alçada.
+    await db
+      .update(quotes)
+      .set({
+        status: "Concluída",
+        price_status: "Ok",
+        alcada_level: "Sem alçada",
+        max_discount_pct: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(quotes.id, id));
+    return { ok: true };
+  }
   const priceCheck = await computeQuotePriceComparison(id);
   if (priceCheck.rows.some((row) => row.missing))
     throw new Error(
@@ -2697,7 +2782,7 @@ export const getContactFull = createServerFn({ method: "GET" }).handler(async ({
 });
 
 /** Instrumentos que usam Cotação ferroviária. Aditivo parte de um Contrato assinado. */
-const QUOTE_INSTRUMENTS = ["Contrato", "ACS", "Aditivo"];
+const QUOTE_INSTRUMENTS = ["Contrato", "ACS", "Aditivo", SALES_ORDER, ADJUSTMENT_CURVE];
 
 const OPPORTUNITY_STAGES = [
   "Prospecção",
@@ -2775,6 +2860,23 @@ async function validateOpportunityStage(
       .select()
       .from(netlex_contracts)
       .where(eq(netlex_contracts.opportunity_id, recordId));
+    if (current.instrument_type === SALES_ORDER) {
+      if (!contract) throw new Error("Envie a ordem de vendas ao cliente antes de fechar a Oportunidade.");
+      const doc = parseContractDocument(contract.document_json);
+      const status = effectiveSalesOrderStatus(contract.status, doc.expiresAt);
+      if (status !== SALES_ORDER_STATUS.approved)
+        throw new Error(
+          status === SALES_ORDER_STATUS.expired
+            ? "A proposta expirou sem aprovação. Reenvie a ordem de vendas ao cliente."
+            : "A ordem de vendas precisa ser aprovada pelo cliente no portal antes de fechar.",
+        );
+      return;
+    }
+    if (current.instrument_type === ADJUSTMENT_CURVE) {
+      if (!contract || contract.status !== CURVE_STATUS.registered)
+        throw new Error("Registre a curva de ajuste antes de fechar a Oportunidade.");
+      return;
+    }
     if (!contract) throw new Error("Envie o contrato ao NetLex antes de fechar a Oportunidade.");
     if (contract.status !== NETLEX_SIGNATURE)
       throw new Error("No NetLex, mude o status do documento para Assinatura antes de fechar.");
@@ -2788,6 +2890,8 @@ async function validateTakeOrPayOpportunity(
   current: { instrument_type: string; take_or_pay_config: string | null },
   quoteId: string,
 ) {
+  // Ordem de vendas e curva de ajuste herdam o Take or Pay do contrato (somente leitura).
+  if (isPostContractInstrument(current.instrument_type)) return;
   const state = await getTakeOrPayQuoteState(opportunityId, quoteId);
   const config = parseTakeOrPayConfig(current.take_or_pay_config);
   if (current.instrument_type === "ACS") {
@@ -3012,6 +3116,10 @@ async function validateQuoteSchedule(
     );
   if (opp.instrument_type === "ACS" && anyTolerance)
     throw new Error("ACS não aceita tolerâncias nem Take or Pay.");
+  if (opp.instrument_type === ADJUSTMENT_CURVE)
+    throw new Error("Na curva de ajuste, preços e Agendas vêm do contrato. Use “Mover volume” para redistribuir.");
+  if (opp.instrument_type === SALES_ORDER && anyTolerance)
+    throw new Error("A ordem de vendas herda o Take or Pay do contrato: não informe tolerâncias.");
   const tariffMode = quote?.tariff_mode || opp.integration_tariff;
   if (tariffMode === "CBS" && !(Number(cbs ?? 0) > 0))
     throw new Error("A Oportunidade usa tarifa CBS. Preencha Tarifa CBS e deixe a líquida vazia.");
@@ -3189,6 +3297,12 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
       );
     if (opp.instrument_type === "Aditivo" && !opp.base_contract_id)
       throw new Error("A Oportunidade de aditivo precisa estar vinculada a um contrato assinado.");
+    if (isPostContractInstrument(opp.instrument_type)) {
+      if (!opp.base_contract_id)
+        throw new Error(`A ${opp.instrument_type.toLowerCase()} nasce de um Contrato em Assinatura.`);
+      (data as any).record_type = recordTypeFor(opp.instrument_type);
+      if (!recordId) (data as any).tariff_mode = opp.integration_tariff;
+    }
     if (!recordId && !(data as any).quote_number)
       (data as any).quote_number = `COT-${Date.now().toString().slice(-6)}`;
     if (!recordId && !(data as any).seed) (data as any).seed = 20260929;
@@ -3277,7 +3391,8 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
       .select()
       .from(opportunities)
       .where(eq(opportunities.id, String(data.opportunity_id ?? "")));
-    if (opp?.instrument_type === "Aditivo") await seedAddendumBaseline(newId, opp);
+    if (opp?.instrument_type === "Aditivo" || opp?.instrument_type === ADJUSTMENT_CURVE)
+      await seedAddendumBaseline(newId, opp);
   }
   if (table === "quote_line_items" || table === "quote_schedules") {
     const quoteId = await quoteIdForRecord(table, recordId, data as Record<string, unknown>);
@@ -3356,6 +3471,8 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
     }
     if (![1, 10, 20].includes(Number(opp.application_day)))
       throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
+    if (opp.instrument_type === ADJUSTMENT_CURVE)
+      throw new Error("A curva de ajuste não cria Itens: use “Mover volume” para redistribuir as Agendas do contrato.");
     if (opp.instrument_type === "ACS") {
       const start = new Date(`${opp.contract_start}T00:00:00Z`);
       const limit = new Date(start);
@@ -3440,6 +3557,10 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         throw new Error("Cada tolerância deve ser um número inteiro entre 0% e 100%.");
       if (opp.instrument_type === "ACS" && tolerances.some((value) => value > 0))
         throw new Error("ACS não aceita tolerâncias nem Take or Pay.");
+      if (opp.instrument_type === SALES_ORDER && tolerances.some((value) => value > 0))
+        throw new Error("A ordem de vendas herda o Take or Pay do contrato: não informe tolerâncias.");
+      if (opp.instrument_type === SALES_ORDER && period > endMonth)
+        throw new Error("A ordem de vendas precisa ficar dentro da vigência do contrato-base; ela não estende prazo (use Aditivo).");
       if (!group.diesel_base_id || group.diesel_base_id !== request.groups[0].diesel_base_id)
         throw new Error("Use uma única Base Diesel por Fluxo nesta Cotação.");
       if (!["Mensal", "Anual"].includes(group.frequency))
@@ -4315,7 +4436,7 @@ async function refreshAddendumOperations(quoteId: string) {
     .from(quotes)
     .innerJoin(opportunities, eq(quotes.opportunity_id, opportunities.id))
     .where(eq(quotes.id, quoteId));
-  if (row?.instrument !== "Aditivo") return;
+  if (row?.instrument !== "Aditivo" && row?.instrument !== ADJUSTMENT_CURVE) return;
   for (const schedule of await quoteScheduleRows(quoteId)) {
     const operation = effectiveOperation(schedule);
     if (operation !== schedule.operation)
@@ -4353,6 +4474,7 @@ export const validateQuotePrices = createServerFn({ method: "POST" }).handler(
   async ({ data: input }) => {
     await ensureSchema();
     const { id } = input as { id: string };
+    await assertQuotePricesEditable(id);
     // O Jetsons (mock) sempre tem preço de mercado para os trechos da Cotação:
     // gerar os ausentes antes de comparar.
     await ensureRecommendedPricesForQuote(id);
@@ -4427,6 +4549,7 @@ export const applyRecommendedPrices = createServerFn({ method: "POST" }).handler
     if (!quote) throw new Error("Cotação não encontrada.");
     if (quote.status !== "Rascunho" || quote.is_synced)
       throw new Error("Só é possível aplicar preços em uma Cotação em Rascunho.");
+    await assertQuotePricesEditable(id);
     await ensureRecommendedPricesForQuote(id);
     const result = await computeQuotePriceComparison(id);
     if (result.rows.some((row) => row.missing))
@@ -4526,6 +4649,7 @@ export const bulkAdjustQuotePrices = createServerFn({ method: "POST" }).handler(
     if (!quote) throw new Error("Cotação não encontrada.");
     if (quote.status !== "Rascunho" || quote.is_synced)
       throw new Error("Só é possível editar preços em uma Cotação em Rascunho.");
+    await assertQuotePricesEditable(id);
     if (mode !== "delta_pct" && mode !== "target_deviation")
       throw new Error("Modo de edição em massa inválido.");
     const percent = Number(pct);
@@ -4628,6 +4752,7 @@ export const updateScheduleTariff = createServerFn({ method: "POST" }).handler(
       .from(quote_schedules)
       .where(eq(quote_schedules.id, scheduleId));
     if (!schedule) throw new Error("Agenda não encontrada.");
+    await assertQuotePricesEditable(await quoteIdForRecord("quote_schedules", scheduleId, undefined));
     const [item] = await db
       .select()
       .from(quote_line_items)
@@ -4942,3 +5067,614 @@ async function ensureRecommendedPricesForQuote(quoteId: string) {
   }
   return created;
 }
+
+// ---------------------------------------------------------------------------
+// Pós-contrato: Ordem de Vendas e Curva de Ajuste
+// Os dois nascem de um Contrato em Assinatura, herdam suas condições e nunca
+// alteram os itens do contrato. A regra pura fica em ./post-contract.
+// ---------------------------------------------------------------------------
+
+/** Curva de ajuste: preços, rateio e tolerâncias vêm do contrato e não são editáveis. */
+async function assertQuotePricesEditable(quoteId: string) {
+  if (!quoteId) return;
+  const [row] = await db
+    .select({ instrument: opportunities.instrument_type })
+    .from(quotes)
+    .innerJoin(opportunities, eq(quotes.opportunity_id, opportunities.id))
+    .where(eq(quotes.id, quoteId));
+  if (row?.instrument === ADJUSTMENT_CURVE)
+    throw new Error("A curva de ajuste mantém os preços do contrato. Ela só redistribui volumes entre períodos.");
+}
+
+function postContractDocumentView(contract: typeof netlex_contracts.$inferSelect) {
+  const document = parseContractDocument(contract.document_json);
+  return {
+    id: contract.id,
+    netlex_number: contract.netlex_number,
+    title: contract.title,
+    kind: contract.kind,
+    status: effectiveSalesOrderStatus(contract.status, document.expiresAt),
+    created_at: contract.created_at,
+    document,
+  };
+}
+
+/** Ordens de vendas e curvas de ajuste originadas de um contrato. */
+async function listContractPostContract(contractId: string) {
+  const [documents, rows] = await Promise.all([
+    db
+      .select()
+      .from(netlex_contracts)
+      .where(
+        and(
+          eq(netlex_contracts.base_contract_id, contractId),
+          inArray(netlex_contracts.kind, [SALES_ORDER, ADJUSTMENT_CURVE]),
+        ),
+      ),
+    db
+      .select({
+        id: opportunities.id,
+        name: opportunities.name,
+        stage: opportunities.stage,
+        instrument_type: opportunities.instrument_type,
+        created_at: opportunities.created_at,
+      })
+      .from(opportunities)
+      .where(
+        and(
+          eq(opportunities.base_contract_id, contractId),
+          inArray(opportunities.instrument_type, [SALES_ORDER, ADJUSTMENT_CURVE]),
+        ),
+      )
+      .orderBy(asc(opportunities.created_at)),
+  ]);
+  return rows.map((row) => {
+    const doc = documents.find((entry) => entry.opportunity_id === row.id);
+    return { ...row, document: doc ? postContractDocumentView(doc) : null };
+  });
+}
+
+async function quoteCurveItems(quoteId: string) {
+  const items = await db.select().from(quote_line_items).where(eq(quote_line_items.quote_id, quoteId));
+  const result = [] as Array<{
+    id: string;
+    planned_flow_id: string;
+    flow_code: string;
+    route: string;
+    unit: string;
+    service: string;
+    schedules: Array<typeof quote_schedules.$inferSelect>;
+  }>;
+  for (const item of items) {
+    const [flow] = await db.select().from(planned_flows).where(eq(planned_flows.id, item.planned_flow_id));
+    if (!flow) continue;
+    const [[origin], [destination], [product], schedules] = await Promise.all([
+      db.select().from(locations).where(eq(locations.id, flow.origin_id)),
+      db.select().from(locations).where(eq(locations.id, flow.destination_id)),
+      db.select().from(merchandise).where(eq(merchandise.id, flow.merchandise_id)),
+      db
+        .select()
+        .from(quote_schedules)
+        .where(eq(quote_schedules.quote_line_item_id, item.id))
+        .orderBy(asc(quote_schedules.year), asc(quote_schedules.month)),
+    ]);
+    result.push({
+      id: item.id,
+      planned_flow_id: flow.id,
+      flow_code: flow.code,
+      route: `${origin?.code ?? "?"} → ${destination?.code ?? "?"} · ${product?.name ?? "Mercadoria"}`,
+      unit: product?.unit ?? "",
+      service: item.service,
+      schedules,
+    });
+  }
+  return result;
+}
+
+async function buildQuoteCurve(quoteId: string) {
+  const items = await quoteCurveItems(quoteId);
+  const [quote] = await db.select({ adjustment_log: quotes.adjustment_log }).from(quotes).where(eq(quotes.id, quoteId));
+  return { ...curveBalance(items), log: parseCurveLog(quote?.adjustment_log) };
+}
+
+/** Contexto herdado exibido na Cotação de ordem de vendas ou de curva de ajuste. */
+async function buildQuotePostContract(quoteId: string, _items: unknown[]) {
+  const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!quote) return null;
+  const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, quote.opportunity_id));
+  if (!opp) return null;
+  const [base] = opp.base_contract_id
+    ? await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, opp.base_contract_id))
+    : [];
+  const baseDoc = base ? parseContractDocument(base.document_json) : {};
+  return {
+    instrument: opp.instrument_type,
+    applicationDay: Number(opp.application_day),
+    term: { start: opp.contract_start, end: opp.contract_end },
+    baseContract: base
+      ? {
+          id: base.id,
+          netlex_number: base.netlex_number,
+          title: base.title,
+          status: base.status,
+          opportunity_id: base.opportunity_id,
+        }
+      : null,
+    inherited: {
+      tariffBasis: String(baseDoc.commercialConditions?.tariffBasis ?? opp.integration_tariff),
+      readjustment: baseDoc.readjustment ?? null,
+      takeOrPay: baseDoc.takeOrPay ?? { enabled: false, config: null },
+      term: baseDoc.term ?? null,
+    },
+    curve: opp.instrument_type === ADJUSTMENT_CURVE ? await buildQuoteCurve(quoteId) : null,
+  };
+}
+
+/** Itens e Agendas no formato de documento (mesmo formato da minuta de contrato). */
+async function buildDocItemsFromQuote(quoteId: string) {
+  const items = await quoteCurveItems(quoteId);
+  const docItems = [] as Array<Record<string, any>>;
+  for (const item of items) {
+    const [flow] = await db.select().from(planned_flows).where(eq(planned_flows.id, item.planned_flow_id));
+    const [[origin], [destination], [product]] = flow
+      ? await Promise.all([
+          db.select().from(locations).where(eq(locations.id, flow.origin_id)),
+          db.select().from(locations).where(eq(locations.id, flow.destination_id)),
+          db.select().from(merchandise).where(eq(merchandise.id, flow.merchandise_id)),
+        ])
+      : [[], [], []];
+    const dieselIds = [...new Set(item.schedules.map((schedule) => schedule.diesel_base_id))];
+    const dieselRows = dieselIds.length
+      ? await db.select().from(diesel_bases).where(inArray(diesel_bases.id, dieselIds))
+      : [];
+    docItems.push({
+      service: item.service,
+      plannedFlowId: item.planned_flow_id,
+      flowCode: item.flow_code,
+      route: item.route,
+      modal: flow?.modal ?? "Ferroviário",
+      merchandise: product?.name ?? "—",
+      unit: product?.unit ?? item.unit,
+      origin: origin?.name ?? "—",
+      destination: destination?.name ?? "—",
+      dieselBases: dieselRows.map((row) => row.name),
+      schedules: item.schedules.map((schedule) => ({
+        key: schedule.schedule_key,
+        service: schedule.service,
+        year: schedule.year,
+        month: schedule.month,
+        period: `${schedule.year}-${String(schedule.month).padStart(2, "0")}`,
+        periodWindow: schedule.period_window,
+        plaza: schedule.plaza,
+        division: schedule.division,
+        volume: schedule.volume,
+        tariffNet: Number(schedule.tariff_net),
+        tariffCbs: schedule.tariff_cbs === null ? null : Number(schedule.tariff_cbs),
+        accessoryNet: schedule.accessory_net === null ? null : Number(schedule.accessory_net),
+        accessoryCbs: schedule.accessory_cbs === null ? null : Number(schedule.accessory_cbs),
+        accessoryNetPct: schedule.accessory_net_pct,
+        accessoryCbsPct: schedule.accessory_cbs_pct,
+        dieselBaseId: schedule.diesel_base_id,
+        dieselBaseDate: schedule.diesel_base_date,
+      })),
+    });
+  }
+  const groups = new Map<string, { volume: number; tariff: number }>();
+  for (const item of docItems)
+    for (const schedule of item.schedules) {
+      const tariff = schedule.tariffCbs && schedule.tariffCbs > 0 ? schedule.tariffCbs : schedule.tariffNet;
+      if (!groups.has(schedule.key)) groups.set(schedule.key, { volume: Number(schedule.volume), tariff });
+    }
+  const totals = [...groups.values()].reduce(
+    (sum, group) => ({ volume: sum.volume + group.volume, revenue: sum.revenue + group.volume * group.tariff }),
+    { volume: 0, revenue: 0 },
+  );
+  return { items: docItems, totals: { ...totals, revenue: Number(totals.revenue.toFixed(2)) } };
+}
+
+async function approvedSyncedQuote(opportunityId: string) {
+  const rows = await db.select().from(quotes).where(eq(quotes.opportunity_id, opportunityId));
+  const quote = rows.find((row) => row.is_synced && row.status === "Sincronizada");
+  if (!quote) throw new Error("Conclua e sincronize a Cotação antes de formalizar.");
+  if (!["Ok", "Aprovada"].includes(quote.price_status))
+    throw new Error("Valide e aprove os preços da Cotação antes de formalizar.");
+  const approvals = await db.select().from(quote_approvals).where(eq(quote_approvals.quote_id, quote.id));
+  if (approvals.some((approval) => approval.status === "Pendente"))
+    throw new Error("Há uma aprovação de preço pendente para esta Cotação.");
+  if (quote.price_status === "Aprovada" && !approvals.some((approval) => approval.status === "Aprovada"))
+    throw new Error("A decisão de alçada ainda não foi registrada.");
+  return quote;
+}
+
+async function signedBaseContract(opp: typeof opportunities.$inferSelect) {
+  const [base] = opp.base_contract_id
+    ? await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, opp.base_contract_id))
+    : [];
+  if (!base) throw new Error("Vincule a Oportunidade a um contrato em Assinatura.");
+  if (base.status !== NETLEX_SIGNATURE) throw new Error("O contrato-base precisa estar em Assinatura no NetLex.");
+  return base;
+}
+
+/**
+ * Cria a Oportunidade e a Cotação de ordem de vendas ou de curva de ajuste a
+ * partir de um Contrato em Assinatura. A curva já nasce com as Agendas do contrato.
+ */
+export const createPostContractFromContract = createServerFn({ method: "POST" })
+  .inputValidator((data: { contractId: string; kind: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const { contractId, kind } = input;
+    if (!isPostContractInstrument(kind)) throw new Error("Escolha Ordem de Vendas ou Curva de Ajuste.");
+    const [base] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, contractId));
+    if (!base) throw new Error("Contrato não encontrado.");
+    const opportunityId = await spawnAddendumOpportunity(base, kind);
+    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, opportunityId));
+    if (!opp) throw new Error("A Oportunidade não foi criada.");
+    const now = new Date().toISOString();
+    const quoteId = crypto.randomUUID();
+    await db.insert(quotes).values({
+      id: quoteId,
+      opportunity_id: opportunityId,
+      quote_number: `COT-${Date.now().toString().slice(-6)}`,
+      name: `${opp.name} · Ferroviário`,
+      record_type: recordTypeFor(kind),
+      tariff_mode: opp.integration_tariff === "CBS" ? "CBS" : "Líquida",
+      status: "Rascunho",
+      seed: randomSeed(),
+      created_at: now,
+      updated_at: now,
+    });
+    if (kind === ADJUSTMENT_CURVE) await seedAddendumBaseline(quoteId, opp);
+    return { ok: true, opportunityId, quoteId };
+  });
+
+/** Curva de ajuste: desloca volume de um período para outro dentro da vigência. */
+export const moveCurveVolume = createServerFn({ method: "POST" })
+  .inputValidator(
+    (data: { quoteId: string; fromKey: string; toYear: number; toMonth: number; volume: number; reason: string; note?: string }) => data,
+  )
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const { quoteId, fromKey } = input;
+    const toYear = Number(input.toYear),
+      toMonth = Number(input.toMonth),
+      volume = Number(input.volume);
+    const reason = String(input.reason ?? "").trim();
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    if (quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível mover volume com a curva em Rascunho.");
+    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, quote.opportunity_id));
+    if (!opp || opp.instrument_type !== ADJUSTMENT_CURVE) throw new Error("Esta Cotação não é uma curva de ajuste.");
+    if (opp.stage !== "Negociação") throw new Error("A Oportunidade precisa estar em Negociação.");
+    if (!reason) throw new Error("Informe a justificativa operacional do deslocamento.");
+    if (!Number.isInteger(volume) || volume <= 0) throw new Error("O volume deslocado deve ser um inteiro positivo.");
+    if (!Number.isInteger(toYear) || !Number.isInteger(toMonth) || toMonth < 1 || toMonth > 12)
+      throw new Error("Informe um período de destino válido.");
+    const source = await quoteSchedulesByKey(quoteId, fromKey);
+    if (!source.length) throw new Error("Período de origem não encontrado na curva.");
+    const available = Number(source[0].volume);
+    if (volume > available)
+      throw new Error(`O período de origem tem ${available.toLocaleString("pt-BR")} disponíveis; não é possível deslocar mais que isso.`);
+    const [flowCode, , division, plaza] = fromKey.split("|");
+    const fromPeriod = source[0].year * 100 + source[0].month;
+    const toPeriod = toYear * 100 + toMonth;
+    if (toPeriod === fromPeriod) throw new Error("Escolha um período de destino diferente da origem.");
+    if (!opp.contract_start || !opp.contract_end) throw new Error("A vigência do contrato não está definida.");
+    const startMonth = Number(opp.contract_start.slice(0, 4) + opp.contract_start.slice(5, 7));
+    const endMonth = Number(opp.contract_end.slice(0, 4) + opp.contract_end.slice(5, 7));
+    if (toPeriod < startMonth || toPeriod > endMonth)
+      throw new Error("O destino precisa estar dentro da vigência do contrato. Para estender prazo, use Aditivo.");
+    const toKey = `${flowCode}|${toYear}${String(toMonth).padStart(2, "0")}|${division}|${plaza}`;
+    const destination = await quoteSchedulesByKey(quoteId, toKey);
+    const now = new Date().toISOString();
+    const [item] = await db
+      .select({ id: quote_line_items.id, planned_flow_id: quote_line_items.planned_flow_id })
+      .from(quote_line_items)
+      .where(eq(quote_line_items.id, source[0].quote_line_item_id));
+    const [flowUnit] = item
+      ? await db
+          .select({ unit: merchandise.unit })
+          .from(planned_flows)
+          .innerJoin(merchandise, eq(planned_flows.merchandise_id, merchandise.id))
+          .where(eq(planned_flows.id, item.planned_flow_id))
+      : [];
+    const move: CurveMove = {
+      id: crypto.randomUUID(),
+      flowCode,
+      from: { year: source[0].year, month: source[0].month, key: fromKey },
+      to: { year: toYear, month: toMonth, key: toKey },
+      volume,
+      unit: flowUnit?.unit ?? "",
+      reason,
+      note: input.note?.trim() || null,
+      at: now,
+    };
+    await db.transaction(async (tx) => {
+      for (const row of source)
+        await tx
+          .update(quote_schedules)
+          .set({ volume: available - volume, updated_at: now })
+          .where(eq(quote_schedules.id, row.id));
+      if (destination.length) {
+        const current = Number(destination[0].volume);
+        for (const row of destination)
+          await tx
+            .update(quote_schedules)
+            .set({ volume: current + volume, updated_at: now })
+            .where(eq(quote_schedules.id, row.id));
+      } else {
+        for (const row of source)
+          await tx.insert(quote_schedules).values({
+            ...row,
+            id: crypto.randomUUID(),
+            schedule_key: toKey,
+            year: toYear,
+            month: toMonth,
+            volume,
+            diesel_base_date: destinationDieselDate(Number(opp.application_day), toYear, toMonth),
+            operation: "Incluir",
+            base_snapshot: null,
+            created_at: now,
+            updated_at: now,
+          } as typeof quote_schedules.$inferInsert);
+      }
+      await tx
+        .update(quotes)
+        .set({
+          adjustment_log: JSON.stringify([...parseCurveLog(quote.adjustment_log), move]),
+          price_status: "Não validada",
+          updated_at: now,
+        })
+        .where(eq(quotes.id, quoteId));
+    });
+    await refreshAddendumOperations(quoteId);
+    return {
+      ok: true,
+      move,
+      label: `${periodLabel(move.from.year, move.from.month)} → ${periodLabel(toYear, toMonth)}`,
+    };
+  });
+
+/** Curva de ajuste: descarta os deslocamentos e volta às Agendas do contrato. */
+export const resetCurveToBaseline = createServerFn({ method: "POST" })
+  .inputValidator((data: { quoteId: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, input.quoteId));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    if (quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível restaurar a curva em Rascunho.");
+    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, quote.opportunity_id));
+    if (!opp || opp.instrument_type !== ADJUSTMENT_CURVE) throw new Error("Esta Cotação não é uma curva de ajuste.");
+    await db.delete(quote_line_items).where(eq(quote_line_items.quote_id, quote.id));
+    await db
+      .update(quotes)
+      .set({ adjustment_log: null, price_status: "Não validada", updated_at: new Date().toISOString() })
+      .where(eq(quotes.id, quote.id));
+    await seedAddendumBaseline(quote.id, opp);
+    return { ok: true };
+  });
+
+/** Ordem de vendas: gera o contrato simplificado e envia ao contato aprovador (validade de 1 semana). */
+export const sendSalesOrderToClient = createServerFn({ method: "POST" })
+  .inputValidator((data: { opportunityId: string; contactId: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, input.opportunityId));
+    if (!opp || opp.instrument_type !== SALES_ORDER) throw new Error("Oportunidade de ordem de vendas não encontrada.");
+    if (opp.stage !== "Formalização") throw new Error("Avance a Oportunidade para Formalização antes de enviar.");
+    const base = await signedBaseContract(opp);
+    const [contact] = await db.select().from(contacts).where(eq(contacts.id, input.contactId));
+    if (!contact || contact.account_id !== opp.account_id)
+      throw new Error("Escolha um contato da Conta do cliente como aprovador da ordem de vendas.");
+    if (!contact.email?.trim())
+      throw new Error("O contato aprovador precisa ter e-mail para receber a proposta e acessar o portal.");
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const expiresAt = new Date(now.valueOf() + SALES_ORDER_VALIDITY_DAYS * 86400000).toISOString();
+    const contactInfo = { id: contact.id, name: contact.name, email: contact.email, title: contact.title };
+    const [existing] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.opportunity_id, opp.id));
+    if (existing) {
+      const doc = parseContractDocument(existing.document_json);
+      const status = effectiveSalesOrderStatus(existing.status, doc.expiresAt);
+      if (status === SALES_ORDER_STATUS.approved) throw new Error("A ordem de vendas já foi aprovada pelo cliente.");
+      if (status === SALES_ORDER_STATUS.sent)
+        throw new Error("A proposta já está com o cliente e ainda não expirou.");
+      const nextDoc = {
+        ...doc,
+        status: SALES_ORDER_STATUS.sent,
+        sentAt: nowIso,
+        expiresAt,
+        contact: contactInfo,
+        history: [...(doc.history ?? []), { at: nowIso, event: "Reenviada ao cliente", by: contact.name }],
+      };
+      await db
+        .update(netlex_contracts)
+        .set({ status: SALES_ORDER_STATUS.sent, document_json: JSON.stringify(nextDoc), updated_at: nowIso })
+        .where(eq(netlex_contracts.id, existing.id));
+      return { ok: true, id: existing.id, resent: true };
+    }
+    const quote = await approvedSyncedQuote(opp.id);
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, opp.account_id));
+    const { items, totals } = await buildDocItemsFromQuote(quote.id);
+    if (!items.length || items.some((item) => !item.schedules.length))
+      throw new Error("A ordem de vendas precisa de Itens com Agendas.");
+    const baseDoc = parseContractDocument(base.document_json);
+    const siblings = await db
+      .select({ id: netlex_contracts.id })
+      .from(netlex_contracts)
+      .where(and(eq(netlex_contracts.base_contract_id, base.id), eq(netlex_contracts.kind, SALES_ORDER)));
+    const sequence = siblings.length + 1;
+    const number = `${base.netlex_number}-OV${sequence}`;
+    const title = `Ordem de vendas ${sequence} · contrato ${base.netlex_number} · ${account?.name ?? ""}`.trim();
+    const document = {
+      simulation: true,
+      kind: SALES_ORDER,
+      notice:
+        "Contrato simplificado demonstrativo do Playground: reutiliza as condições do contrato-base e não substitui a assinatura real.",
+      title,
+      netlexNumber: number,
+      sequence,
+      status: SALES_ORDER_STATUS.sent,
+      createdAt: nowIso,
+      sentAt: nowIso,
+      expiresAt,
+      validityDays: SALES_ORDER_VALIDITY_DAYS,
+      contact: contactInfo,
+      baseContract: { id: base.id, netlexNumber: base.netlex_number, title: base.title, term: baseDoc.term ?? null },
+      parties: baseDoc.parties ?? null,
+      opportunity: { id: opp.id, name: opp.name, instrumentType: opp.instrument_type },
+      term: { start: opp.contract_start, end: opp.contract_end, applicationDay: opp.application_day },
+      commercialConditions: {
+        quoteNumber: quote.quote_number,
+        quoteId: quote.id,
+        priceApproval: quote.price_status,
+        alcadaLevel: quote.alcada_level,
+        maxDiscountPct: quote.max_discount_pct,
+        tariffBasis: quote.tariff_mode || opp.integration_tariff,
+        currency: "BRL",
+      },
+      readjustment: baseDoc.readjustment ?? null,
+      takeOrPay: baseDoc.takeOrPay ?? { enabled: false, config: null },
+      items,
+      totals,
+      history: [{ at: nowIso, event: "Enviada ao cliente", by: contact.name }],
+    };
+    const id = crypto.randomUUID();
+    await db.insert(netlex_contracts).values({
+      id,
+      opportunity_id: opp.id,
+      netlex_number: number,
+      title,
+      status: SALES_ORDER_STATUS.sent,
+      kind: SALES_ORDER,
+      base_contract_id: base.id,
+      document_json: JSON.stringify(document),
+      created_at: nowIso,
+      updated_at: nowIso,
+    });
+    await db.update(opportunities).set({ amount: totals.revenue, updated_at: nowIso }).where(eq(opportunities.id, opp.id));
+    return { ok: true, id, resent: false };
+  });
+
+/** Portal do cliente (Experience Cloud simulado): Gestão de Contratos → Ordem de vendas → Aprovar. */
+export const approveSalesOrderInPortal = createServerFn({ method: "POST" })
+  .inputValidator((data: { id: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const [row] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, input.id));
+    if (!row || row.kind !== SALES_ORDER) throw new Error("Ordem de vendas não encontrada.");
+    const doc = parseContractDocument(row.document_json);
+    const status = effectiveSalesOrderStatus(row.status, doc.expiresAt);
+    const now = new Date().toISOString();
+    if (status === SALES_ORDER_STATUS.approved) return { ok: true, changed: false };
+    if (status === SALES_ORDER_STATUS.expired) {
+      await db
+        .update(netlex_contracts)
+        .set({ status: SALES_ORDER_STATUS.expired, updated_at: now })
+        .where(eq(netlex_contracts.id, row.id));
+      throw new Error("A proposta expirou. O gerente de contas precisa reenviar a ordem de vendas.");
+    }
+    const nextDoc = {
+      ...doc,
+      status: SALES_ORDER_STATUS.approved,
+      approvedAt: now,
+      approvedBy: doc.contact?.name ?? "Cliente",
+      history: [...(doc.history ?? []), { at: now, event: "Aprovada no portal", by: doc.contact?.name ?? "Cliente" }],
+    };
+    await db
+      .update(netlex_contracts)
+      .set({ status: SALES_ORDER_STATUS.approved, signed_at: now, document_json: JSON.stringify(nextDoc), updated_at: now })
+      .where(eq(netlex_contracts.id, row.id));
+    return { ok: true, changed: true };
+  });
+
+/** Curva de ajuste: registra a redistribuição sem mexer nos itens do contrato. */
+export const registerAdjustmentCurve = createServerFn({ method: "POST" })
+  .inputValidator((data: { opportunityId: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, input.opportunityId));
+    if (!opp || opp.instrument_type !== ADJUSTMENT_CURVE) throw new Error("Oportunidade de curva de ajuste não encontrada.");
+    if (opp.stage !== "Formalização") throw new Error("Avance a Oportunidade para Formalização antes de registrar.");
+    const [existing] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.opportunity_id, opp.id));
+    if (existing) return { ok: true, id: existing.id, created: false };
+    const base = await signedBaseContract(opp);
+    const quote = await approvedSyncedQuote(opp.id);
+    const curve = await buildQuoteCurve(quote.id);
+    if (!curve.changed || !curve.balanced)
+      throw new Error("A curva precisa ter ao menos um deslocamento e manter o total de cada fluxo.");
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, opp.account_id));
+    const siblings = await db
+      .select({ id: netlex_contracts.id })
+      .from(netlex_contracts)
+      .where(and(eq(netlex_contracts.base_contract_id, base.id), eq(netlex_contracts.kind, ADJUSTMENT_CURVE)));
+    const sequence = siblings.length + 1;
+    const number = `${base.netlex_number}-CA${sequence}`;
+    const title = `Curva de ajuste ${sequence} · contrato ${base.netlex_number} · ${account?.name ?? ""}`.trim();
+    const now = new Date().toISOString();
+    const document = {
+      simulation: true,
+      kind: ADJUSTMENT_CURVE,
+      notice: "Registro operacional: os itens do contrato-base não são alterados. Para mudar o contrato, use Aditivo.",
+      title,
+      netlexNumber: number,
+      sequence,
+      status: CURVE_STATUS.registered,
+      registeredAt: now,
+      baseContract: { id: base.id, netlexNumber: base.netlex_number, title: base.title },
+      opportunity: { id: opp.id, name: opp.name, instrumentType: opp.instrument_type },
+      term: { start: opp.contract_start, end: opp.contract_end },
+      quote: { id: quote.id, number: quote.quote_number },
+      moved: curve.moved,
+      flows: curve.flows.filter((flow) => flow.periods.some((period) => period.delta !== 0)),
+      moves: curve.log,
+    };
+    const id = crypto.randomUUID();
+    await db.insert(netlex_contracts).values({
+      id,
+      opportunity_id: opp.id,
+      netlex_number: number,
+      title,
+      status: CURVE_STATUS.registered,
+      kind: ADJUSTMENT_CURVE,
+      base_contract_id: base.id,
+      signed_at: now,
+      document_json: JSON.stringify(document),
+      created_at: now,
+      updated_at: now,
+    });
+    return { ok: true, id, created: true };
+  });
+
+/** Documento de ordem de vendas ou de curva de ajuste (página própria e portal). */
+export const getPostContractDocument = createServerFn({ method: "GET" })
+  .inputValidator((data: { id: string }) => data)
+  .handler(async ({ data: input }) => {
+    await ensureSchema();
+    const [row] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.id, input.id));
+    if (!row || !isPostContractInstrument(row.kind)) return null;
+    const view = postContractDocumentView(row);
+    if (view.status !== row.status && view.status === SALES_ORDER_STATUS.expired)
+      await db
+        .update(netlex_contracts)
+        .set({ status: view.status, updated_at: new Date().toISOString() })
+        .where(eq(netlex_contracts.id, row.id));
+    const [opportunity] = await db
+      .select({ id: opportunities.id, name: opportunities.name, stage: opportunities.stage })
+      .from(opportunities)
+      .where(eq(opportunities.id, row.opportunity_id));
+    const [base] = row.base_contract_id
+      ? await db
+          .select({
+            id: netlex_contracts.id,
+            netlex_number: netlex_contracts.netlex_number,
+            title: netlex_contracts.title,
+            status: netlex_contracts.status,
+          })
+          .from(netlex_contracts)
+          .where(eq(netlex_contracts.id, row.base_contract_id))
+      : [];
+    return { ...view, opportunity: opportunity ?? null, baseContract: base ?? null };
+  });
