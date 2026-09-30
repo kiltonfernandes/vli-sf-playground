@@ -721,6 +721,37 @@ function OpportunityRecordPage() {
             aria-labelledby="opportunity-tab-quotes"
             hidden={selectedTab !== "quotes"}
           >
+            {opportunity.instrument_type === "Contrato" && hasTopTolerance && !savedTop && !inheritedTop && (
+              <div
+                role="alert"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 16,
+                  marginBottom: 16,
+                  padding: "14px 16px",
+                  border: "1px solid #f5b700",
+                  borderRadius: 4,
+                  background: "#fff8e1",
+                  color: "#5c4300",
+                }}
+              >
+                <div>
+                  <strong>Take or Pay precisa ser configurado</strong>
+                  <div style={{ marginTop: 4, fontSize: 13 }}>
+                    A Cotação tem tolerâncias de volume ou tarifa. Configure as datas e a regra de compensação antes de avançar a Oportunidade para Aprovação.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="sf-btn sf-btn--brand"
+                  onClick={() => setActiveTab("details")}
+                >
+                  Configurar agora
+                </button>
+              </div>
+            )}
             <div className="sf-card">
               <div
                 className="sf-card-header"
