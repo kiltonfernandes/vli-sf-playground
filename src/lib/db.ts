@@ -130,6 +130,8 @@ export function ensureSchema(): Promise<void> {
       { table: "netlex_contracts", name: "kind", sql: `ALTER TABLE netlex_contracts ADD COLUMN kind text NOT NULL DEFAULT 'Contrato'` },
       { table: "netlex_contracts", name: "base_contract_id", sql: `ALTER TABLE netlex_contracts ADD COLUMN base_contract_id text` },
       { table: "netlex_contracts", name: "signed_at", sql: `ALTER TABLE netlex_contracts ADD COLUMN signed_at text` },
+      { table: "opportunities", name: "port_igpm_pct", sql: `ALTER TABLE opportunities ADD COLUMN port_igpm_pct real NOT NULL DEFAULT 100` },
+      { table: "opportunities", name: "port_ipca_pct", sql: `ALTER TABLE opportunities ADD COLUMN port_ipca_pct real NOT NULL DEFAULT 0` },
     ];
     for (const column of addendumColumns) {
       const info = await client.execute(`PRAGMA table_info(${column.table})`);
@@ -164,6 +166,7 @@ export function ensureSchema(): Promise<void> {
       { name: "max_discount_pct", sql: `ALTER TABLE quotes ADD COLUMN max_discount_pct real NOT NULL DEFAULT 0` },
       { name: "alcada_level", sql: `ALTER TABLE quotes ADD COLUMN alcada_level text NOT NULL DEFAULT 'Sem alçada'` },
       { name: "adjustment_log", sql: `ALTER TABLE quotes ADD COLUMN adjustment_log text` },
+      { name: "port_terms", sql: `ALTER TABLE quotes ADD COLUMN port_terms text` },
     ])
       if (!quoteColumns.rows.some((row) => row.name === column.name))
         await client.execute(column.sql);

@@ -67,6 +67,9 @@ export const opportunities = sqliteTable(
     diesel_pct: real("diesel_pct").notNull().default(0),
     igpm_pct: real("igpm_pct").notNull().default(0),
     ipca_pct: real("ipca_pct").notNull().default(0),
+    /** Reajuste do modal portuário (sem diesel): IGP-M/IPCA_Harbor no Salesforce. */
+    port_igpm_pct: real("port_igpm_pct").notNull().default(100),
+    port_ipca_pct: real("port_ipca_pct").notNull().default(0),
     contracting_parties: text("contracting_parties"),
     vli_entity: text("vli_entity"),
     joint_debtor: text("joint_debtor"),
@@ -177,6 +180,8 @@ export const quotes = sqliteTable(
     seed: integer("seed").notNull(),
     /** Curva de ajuste: histórico JSON dos deslocamentos de volume (origem → destino). */
     adjustment_log: text("adjustment_log"),
+    /** Condições portuárias (JSON): franquia de armazenagem e período adicional. */
+    port_terms: text("port_terms"),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
   },

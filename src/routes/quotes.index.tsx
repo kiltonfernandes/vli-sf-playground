@@ -6,6 +6,7 @@ import { SfShell } from "@/components/SfShell";
 import { SfListView, type Column } from "@/components/SfListView";
 import { SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
 import { randomSeed } from "@/lib/generators";
+import { isQuoteSegment } from "@/lib/segments";
 
 type Opp = {
   id: string;
@@ -43,7 +44,7 @@ function QuotesPage() {
       opportunities.filter(
         (o) =>
           o.stage === "Negociação" &&
-          o.segment === "Ferroviário" &&
+          isQuoteSegment(o.segment) &&
           ["Contrato", "ACS"].includes(o.instrument_type),
       ),
     [opportunities],
@@ -143,8 +144,8 @@ function QuotesPage() {
           <div className="sf-ph-eyebrow">Vendas</div>
           <h1 className="sf-ph-title">Cotações</h1>
           <div className="sf-ph-sub">
-            Cotação → Itens por fluxo e serviço → Agendas por período. Escopo atual: Ferroviário,
-            Contrato e ACS.
+            Cotação → Itens por fluxo e serviço → Agendas por período. Escopo atual: Ferroviário, Portuário e
+            Ferroviário + Portuário, Contrato e ACS.
           </div>
         </div>
         <div className="sf-ph-actions">

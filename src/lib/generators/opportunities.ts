@@ -4,7 +4,13 @@ const INSTRUMENTS = ["Contrato", "ACS"];
 
 export const opportunitiesGenerator: Generator = (f) => {
   const instrument = f.helpers.arrayElement(INSTRUMENTS);
-  const segment = "Ferroviário";
+  // Ferro é o caso mais comum; porto e ferro + porto seguem as regras por modal.
+  const segment = f.helpers.arrayElement([
+    "Ferroviário",
+    "Ferroviário",
+    "Portuário",
+    "Ferroviário + Portuário",
+  ]);
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const end = new Date(start);
@@ -28,6 +34,9 @@ export const opportunitiesGenerator: Generator = (f) => {
     diesel_pct: diesel,
     igpm_pct: igpm,
     ipca_pct: ipca,
+    // Porto: reajuste sem diesel (IGP-M 100% citado no KT como padrão).
+    port_igpm_pct: 100,
+    port_ipca_pct: 0,
     contracting_parties: f.company.name(),
     vli_entity: "VLI Multimodal S.A.",
     joint_debtor: "",

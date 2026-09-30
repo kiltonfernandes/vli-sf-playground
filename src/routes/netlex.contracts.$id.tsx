@@ -445,11 +445,37 @@ function NetlexContractPage() {
 
             <section className="sf-netlex-clause">
               <h3>5. Reajuste</h3>
+              {readjustment.byModal && Object.keys(readjustment.byModal).length > 0 ? (
+                // Reajuste por modal: ferro (Diesel + IGP-M + IPCA) e porto (IGP-M + IPCA, sem diesel).
+                Object.entries(readjustment.byModal as Record<string, any>).map(([modal, values]) => (
+                  <div key={modal} style={{ marginBottom: 8 }}>
+                    <strong>
+                      {modal === "Portuário" ? "⚓ Porto" : "🚂 Ferro"}
+                    </strong>
+                    <div className="sf-netlex-facts">
+                      {modal === "Portuário" ? (
+                        <Fact label="Diesel" value="Não se aplica" />
+                      ) : (
+                        <Fact label="Diesel" value={`${Number(values.dieselPct ?? 0)}%`} />
+                      )}
+                      <Fact label="IGP-M" value={`${Number(values.igpmPct ?? 0)}%`} />
+                      <Fact label="IPCA" value={`${Number(values.ipcaPct ?? 0)}%`} />
+                      {modal !== "Portuário" && (
+                        <Fact label="Dia de aplicação" value={String(values.applicationDay ?? term.applicationDay ?? "—")} />
+                      )}
+                    </div>
+                    {values.notice && <p style={{ margin: "4px 0 0", fontSize: 12 }}>{values.notice}</p>}
+                  </div>
+                ))
+              ) : (
+                <div className="sf-netlex-facts">
+                  <Fact label="Diesel" value={`${Number(readjustment.dieselPct ?? 0)}%`} />
+                  <Fact label="IGP-M" value={`${Number(readjustment.igpmPct ?? 0)}%`} />
+                  <Fact label="IPCA" value={`${Number(readjustment.ipcaPct ?? 0)}%`} />
+                  <Fact label="Dia de aplicação" value={String(term.applicationDay ?? "—")} />
+                </div>
+              )}
               <div className="sf-netlex-facts">
-                <Fact label="Diesel" value={`${Number(readjustment.dieselPct ?? 0)}%`} />
-                <Fact label="IGP-M" value={`${Number(readjustment.igpmPct ?? 0)}%`} />
-                <Fact label="IPCA" value={`${Number(readjustment.ipcaPct ?? 0)}%`} />
-                <Fact label="Dia de aplicação" value={String(term.applicationDay ?? "—")} />
                 <Fact
                   label="Primeiro reajuste"
                   value={readjustment.firstReadjustmentDate
@@ -457,6 +483,12 @@ function NetlexContractPage() {
                     : "Não informado"}
                 />
               </div>
+              {doc.portTerms && (
+                <div className="sf-netlex-facts">
+                  <Fact label="Armazenagem · dias livres" value={String(doc.portTerms.freeTimeDays)} />
+                  <Fact label="Armazenagem · período adicional" value={`${doc.portTerms.extraPeriodDays} dias`} />
+                </div>
+              )}
             </section>
 
             <section className="sf-netlex-clause">
@@ -466,6 +498,15 @@ function NetlexContractPage() {
                   ? "Aplicável conforme os compromissos e tolerâncias registrados nas Agendas."
                   : "Não configurado para esta Oportunidade."}
               </p>
+              {takeOrPay.enabled && Array.isArray(takeOrPay.records) && takeOrPay.records.length > 0 && (
+                <p>
+                  Registros separados por modal:{" "}
+                  {takeOrPay.records
+                    .map((record: any) => `${record.label} (${record.flowIds.length} fluxo${record.flowIds.length === 1 ? "" : "s"})`)
+                    .join(" · ")}
+                  .
+                </p>
+              )}
               {takeOrPay.enabled && (
                 <>
                 {takeOrPay.config && <div className="sf-fields">

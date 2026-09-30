@@ -34,6 +34,18 @@ const SERVICE_FIXED_PRICE: Record<string, number> = {
   "MANOBRA DESTINO": 12,
 };
 
+/**
+ * Serviços portuários (R$/t) — ordem de grandeza das tabelas públicas dos terminais
+ * VLI (TIPLAM 2023 / TMIB 2026): embarque de granéis ~R$73–80/t, desembarque de
+ * fertilizantes ~R$91–175/t, armazenagem por período adicional ~R$15–45/t, pesagem ~R$3/t.
+ */
+const PORT_SERVICE_PRICE: Record<string, number> = {
+  EMBARQUE: 76,
+  DESEMBARQUE: 128,
+  ARMAZENAGEM: 28,
+  PESAGEM: 3.2,
+};
+
 /** Hash determinístico estável de string, normalizado para 0..1. */
 function stableUnit(value: string) {
   let h = 2166136261;
@@ -74,7 +86,14 @@ export function jetsonsUnitPrice(input: {
   const merchandise = input.merchandise.trim();
   const service = input.service.trim().toUpperCase();
   let price: number;
-  if (service === "FRETE") {
+  if (PORT_SERVICE_PRICE[service] !== undefined) {
+    // Porto não depende de distância: preço do terminal (±6%) e da mercadoria (±4%).
+    const terminal = input.origin.code === "NAV" ? input.destination.code : input.origin.code;
+    price =
+      PORT_SERVICE_PRICE[service] *
+      (0.94 + stableUnit(`terminal:${terminal}|${service}`) * 0.12) *
+      (0.96 + stableUnit(`port-merch:${merchandise}|${service}`) * 0.08);
+  } else if (service === "FRETE") {
     const rate = MERCHANDISE_RATE[merchandise] ?? 0.1 + stableUnit(`merch:${merchandise}`) * 0.3;
     price = rate * jetsonsDistanceKm(input.origin, input.destination);
   } else {

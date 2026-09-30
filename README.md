@@ -10,6 +10,18 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v10.21.20 — Modal Portuário e segmento Ferroviário + Portuário
+
+- **Segmentos**: a Oportunidade passa a aceitar **Ferroviário**, **Portuário** e **Ferroviário + Portuário**. As regras de cada modal ficam em `src/lib/segments.ts` e não reaproveitam silenciosamente as regras ferroviárias. Rodoviário continua fora do escopo.
+- **Catálogo portuário mock**: terminais TIPLAM (TPL · Santos), TPD (Vitória), TSL (São Luís), TMIB (TMB · Barra dos Coqueiros) e o ponto de navio NAV (Longo curso); mercadorias de granel (soja, milho, farelo, fertilizantes, açúcar) e fluxos portuários por Conta. Códigos de fluxo passaram a ser únicos por Conta, evitando colisão de `schedule_key` entre modais.
+- **Cotação portuária**: serviços **EMBARQUE**, **DESEMBARQUE**, **ARMAZENAGEM** e **PESAGEM** (sem FRETE). A operação de cais precisa ser coerente com o fluxo (terminal → navio = Embarque; navio → terminal = Desembarque). **Base Diesel não se aplica**: a Agenda portuária grava a sentinela técnica “NÃO SE APLICA · PORTO” e não aceita data de diesel. ARMAZENAGEM exige as **Condições portuárias · ANTAQ** da Cotação (free time padrão 7 dias, períodos de 5 dias), editáveis no card próprio.
+- **Reajuste por modal**: o ferro mantém Diesel + IGP-M/IPCA; o porto tem reajuste anual próprio IGP-M/IPCA (`port_igpm_pct`/`port_ipca_pct`, padrão 100% IGP-M como hipótese), sem diesel. No combinado, cada modal é validado separadamente, no screenflow e na Oportunidade.
+- **Take or Pay**: registros separados por modal (um fluxo com ferro + porto conta como dois registros); ferro e porto não podem ser misturados no mesmo registro.
+- **Jetsons mock**: preço recomendado portuário em R$/t por serviço, terminal, mercadoria, sazonalidade e inflação. A alçada segue a mesma regra de desvio da Cotação ferroviária até a definição do KT portuário.
+- **NetLex**: mesma integração simulada; a minuta mostra reajuste por modal (com aviso de 30 dias de antecedência da ANTAQ), franquia de armazenagem e registros de Take or Pay por modal.
+- **Aditivo**: o gerador de cenário (Embaralhar aditivo) altera apenas fluxos ferroviários; a Oportunidade derivada copia os campos portuários.
+- **Verificação**: build de produção aprovado; testes ponta a ponta locais para Portuário, Ferroviário + Portuário e regressão Ferroviário até o NetLex, incluindo bloqueios de Base Diesel, FRETE, operação de cais e mistura de modais no Take or Pay.
+
 ### v9.21.20 — Pós-contrato: Ordem de Vendas e Curva de Ajuste
 
 - **Decisão de arquitetura**: dois novos tipos de instrumento na Oportunidade, **Ordem de Vendas** e **Curva de Ajuste**, sempre originados de um Contrato em **Assinatura** (`base_contract_id`). ACS não gera nenhum dos dois. Eles reutilizam Path, Cotação, validação Jetsons e alçada; **nunca alteram os itens do contrato** — mudança permanente continua sendo Aditivo.
@@ -276,7 +288,7 @@ erDiagram
     OPPORTUNITIES ||--o| NETLEX_CONTRACTS : "gera snapshot"
     LOCATIONS ||--o{ PLANNED_FLOWS : "origem e destino"
     MERCHANDISE ||--o{ PLANNED_FLOWS : "classifica"
-    DIESEL_BASES ||--o{ QUOTE_SCHEDULES : "referência"
+    DIESEL_BASES ||--o{ QUOTE_SCHEDULES : "referência (ferro)"
     PLANNED_FLOWS ||--o{ RECOMMENDED_PRICES : "recomenda"
     QUOTES ||--o{ QUOTE_APPROVALS : "exige alçada"
     NETLEX_CONTRACTS ||--o{ OPPORTUNITIES : "base de Aditivo, Ordem de Vendas e Curva"
@@ -287,10 +299,10 @@ erDiagram
 | Conta           | `accounts`         | Registro pai de Contatos e Oportunidades                                                      | `/accounts`         | `/accounts/$id`         |
 | Contato         | `contacts`         | `account_id` obrigatório → Conta                                                              | `/contacts`         | `/contacts/$id`         |
 | Oportunidade    | `opportunities`    | `account_id` obrigatório → Conta de gestão                                                    | `/opportunities`    | `/opportunities/$id`    |
-| Fluxo Planejado | `planned_flows`    | Conta + Location de origem + Location de destino + Mercadoria; modal Ferroviário; origem FLOU | `/planned-flows`    | `/planned-flows/$id`    |
+| Fluxo Planejado | `planned_flows`    | Conta + Location de origem + Location de destino + Mercadoria; modal Ferroviário ou Portuário; origem FLOU | `/planned-flows`    | `/planned-flows/$id`    |
 | Location        | `locations`        | Dimensão geográfica usada como origem ou destino                                              | `/locations`        | `/locations/$id`        |
 | Mercadoria      | `merchandise`      | Dimensão de produto e unidade do fluxo                                                        | `/merchandise`      | `/merchandise/$id`      |
-| Base Diesel     | `diesel_bases`     | Referência exigida em cada Agenda ferroviária                                                 | `/diesel-bases`     | `/diesel-bases/$id`     |
+| Base Diesel     | `diesel_bases`     | Referência exigida em cada Agenda ferroviária; no porto, sentinela técnica “NÃO SE APLICA”   | `/diesel-bases`     | `/diesel-bases/$id`     |
 | Cotação         | `quotes`           | `opportunity_id` obrigatório → Oportunidade                                                   | `/quotes`           | `/quotes/$id`           |
 | Item da Cotação | `quote_line_items` | Cotação + Fluxo Planejado + Serviço                                                           | `/quote-line-items` | `/quote-line-items/$id` |
 | Agenda          | `quote_schedules`  | Item + período + tarifa + diesel + serviço e rateio                                           | `/quote-schedules`  | `/quote-schedules/$id`  |
@@ -312,6 +324,7 @@ erDiagram
 - Uma Cotação pertence a uma Oportunidade em Negociação. Ela pode conter vários Itens; cada Item representa uma combinação de fluxo e serviço; as Agendas guardam as linhas de período. Cada página tem sua própria rota, e a tela da Cotação permite expandir/recolher itens e agendas com chevrons.
 - Depois que uma Cotação aprovada é sincronizada e a Oportunidade chega à Formalização, o usuário pode gerar um snapshot de Contrato NetLex simulado. Cada Oportunidade pode gerar apenas um contrato nesta etapa.
 - A Cotação pode ser montada manualmente ou pelo gerador com seed. O gerador cria três fluxos da Conta, um Item por serviço e agendas mensais para cada grupo, incluindo FRETE e dois ou três serviços acessórios.
+- O catálogo portuário mock usa terminais VLI (TPL, TPD, TSL, TMB) com `location_type` Porto e o ponto NAV com `location_type` Navio. O sentido do fluxo define a operação de cais: terminal → navio é Embarque, navio → terminal é Desembarque.
 - O catálogo usa siglas de Location, mercadorias e Base Diesel ELDORADO documentadas. Esses cadastros e as tarifas são dados fictícios do playground, não registros consultados em Salesforce.
 - Uma Oportunidade aponta para a Conta de gestão, que representa o nível superior. Contas granulares e demais partes contratuais ainda não têm objeto/relacionamento próprio no playground.
 
@@ -320,9 +333,9 @@ erDiagram
 | Grupo       | Campos                                                                                                                                 |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Contexto    | Conta de gestão                                                                                                                        |
-| Comercial   | Tipo de instrumento (Contrato, ACS, Aditivo, Ordem de Vendas, Curva de Ajuste, Outros Serviços), segmento, estágio, valor e data prevista de fechamento |
-| Jurídico    | Vigência inicial/final, reajustes Diesel/IGP-M/IPCA, contratante(s), entidade VLI contratada, devedor solidário e tarifa de integração |
-| Compromisso | Take or Pay                                                                                                                            |
+| Comercial   | Tipo de instrumento (Contrato, ACS, Aditivo, Ordem de Vendas, Curva de Ajuste, Outros Serviços), segmento (Ferroviário, Portuário, Ferroviário + Portuário), estágio, valor e data prevista de fechamento |
+| Jurídico    | Vigência inicial/final, reajuste ferro (Diesel/IGP-M/IPCA), reajuste portuário (`port_igpm_pct`/`port_ipca_pct`), contratante(s), entidade VLI contratada, devedor solidário e tarifa de integração |
+| Compromisso | Take or Pay (registros separados por modal)                                                                                            |
 
 ### Path e validações atuais
 
@@ -338,6 +351,7 @@ Etapas apresentadas no registro: **Prospecção → Negociação → Aprovação
 - **Ordem de Vendas** e **Curva de Ajuste** não passam pelo NetLex: Formalização → Fechado exige a ordem **Aprovada pelo cliente** no portal (expirada bloqueia) ou a curva **Registrada**.
 - A transição de **Aprovação** para **Negociação** é permitida para representar rejeição ou cancelamento de aprovação.
 - A edição de outros campos da oportunidade não exige mudança de estágio.
+- O segmento define os modais da Cotação: reajuste Diesel e dia de aplicação só existem com ferro; o reajuste portuário só existe com porto; no segmento combinado os dois são validados separadamente.
 
 ### Contrato simulado no NetLex
 
@@ -369,7 +383,7 @@ Regra de ouro: tudo nasce de um **Contrato em Assinatura** e **nada disso altera
 - **Curva de Ajuste**: o painel mostra saldo por fluxo, linha do tempo contrato × curva e histórico de deslocamentos com justificativa (quebra de safra, disponibilidade operacional, manutenção, solicitação do cliente, outro). O destino precisa estar dentro da vigência; o volume movido não pode passar do disponível na origem; o total por fluxo precisa fechar. Não há validação de preço nem alçada.
 - **Take or Pay**: ordem e curva herdam a configuração do contrato. A apuração e a compensação continuam fora do Salesforce.
 
-### Cotação ferroviária: Contrato e ACS
+### Cotação ferroviária e portuária: Contrato e ACS
 
 - A lista relacionada de Cotações aparece na Oportunidade ferroviária de Contrato/ACS. Uma nova Cotação exige a Oportunidade em Negociação.
 - Status da Cotação: **Rascunho → Concluída → Sincronizada**. Há no máximo uma Cotação sincronizada por Oportunidade. Concluir valida toda a hierarquia; sincronizar replica o estado para a Oportunidade.
@@ -381,6 +395,8 @@ Regra de ouro: tudo nasce de um **Contrato em Assinatura** e **nada disso altera
 - `VLI_KeySchedule__c` é representada localmente como `schedule_key`: código do fluxo + AAAAMM + divisão + praça. A agenda repetida para outro serviço pode compartilhar a chave; o mesmo serviço na mesma chave é rejeitado dentro da Cotação. Cotações alternativas podem reutilizar chaves iguais.
 - DataBaseDiesel aceita `MM/AAAA` ou `DD/MM/AAAA`; a data precisa estar no mês da Agenda ou no mês anterior, com o dia de aplicação 1, 10 ou 20 salvo na Oportunidade. A Base Diesel e a data são iguais em todas as linhas do mesmo grupo. Um Fluxo mantém uma Base Diesel por Cotação. O catálogo mock inicial inclui ELDORADO.
 - Vigência inicial/final da Oportunidade deve cobrir as agendas. ACS exige vigência inferior a 12 meses e rejeita qualquer tolerância positiva; assim, ACS não cria Take or Pay. Em Contrato, as quatro tolerâncias, quando usadas, devem ser inteiras de 0 a 100 e preenchidas em conjunto.
+- **Portuário**: serviços EMBARQUE, DESEMBARQUE, ARMAZENAGEM e PESAGEM; sem FRETE obrigatório, sem Base Diesel (sentinela técnica) e sem data de diesel. EMBARQUE só em fluxo terminal → navio e DESEMBARQUE só em navio → terminal. ARMAZENAGEM exige free time e período de cobrança nas Condições portuárias da Cotação (padrão 7 e 5 dias, conforme tabela pública TIPLAM). O rateio segue a mesma regra de fechamento (R$ 0,02 e 100%).
+- **Ferroviário + Portuário**: a Cotação pode ter fluxos dos dois modais; cada Item segue a regra do modal do seu fluxo, e o screenflow ajusta etapas, serviços e reajuste ao modal.
 - Dados Faker são mockados e reproduzíveis por seed. O gerador não consulta Jetsons, não calcula recomendação real de preço e não representa sincronização com Salesforce.
 
 As regras de negócio já simuladas para Cotação, Aprovação, snapshot de Contrato, assinatura simulada e aditivo estão descritas nesta página. Envio real, questionário jurídico e retorno automático de status do NetLex continuam pendentes; a assinatura simulada e o fechamento da Oportunidade são fluxos ativos do Playground.
@@ -409,6 +425,14 @@ As regras de negócio já simuladas para Cotação, Aprovação, snapshot de Con
   - A solicitação vai para a fila da aba Aprovação; somente o **Perfil Aprovador** decide. O Perfil Vendas prepara as Cotações. Não existem aprovadores individuais ou níveis hierárquicos nesta simulação.
 - **Avanço**
   - Concluir e sincronizar a Cotação habilita a Oportunidade para Aprovação.
+
+**Portuário · Contrato e ACS**
+
+- **Fluxo**: Conta → terminal/navio de origem → terminal/navio de destino → Mercadoria → modal Portuário.
+- **Item e Agenda**: serviços do catálogo portuário; operação de cais coerente com o fluxo; sem Base Diesel; ARMAZENAGEM exige free time e período de cobrança.
+- **Reajuste**: anual próprio por IGP-M/IPCA (padrão 100% IGP-M, hipótese a confirmar no KT); sem diesel. A minuta registra o aviso de 30 dias de antecedência da ANTAQ.
+- **Take or Pay**: registro próprio do modal; não pode ser misturado com fluxos ferroviários.
+- **Preço e Alçada**: Jetsons mock em R$/t; mesma regra de desvio e fila de aprovação do ferro até a definição das alçadas portuárias.
 
 ### Tutorial: da Conta ao ponto final disponível
 
@@ -493,6 +517,7 @@ Os geradores vivem em `src/lib/generators/` e são registrados em `src/lib/gener
 | `src/components/SfShell.tsx`        | Navegação e cabeçalho do CRM                              |
 | `src/lib/crud.ts`                   | Server functions para leitura, gravação, exclusão e reset |
 | `src/lib/schema.ts`                 | Tabelas, campos e relações Drizzle                        |
+| `src/lib/segments.ts`               | Políticas por modal (ferro, porto, combinado): serviços, diesel, reajuste, cais, armazenagem e Take or Pay |
 | `src/lib/post-contract.ts`          | Regras puras de Ordem de Vendas e Curva de Ajuste (saldo, validade, status) |
 | `src/components/PostContract.tsx`   | Hub Pós-contrato, chips herdados, formalização da ordem/curva e painel Mover volume |
 | `src/lib/generators/`               | Geradores Faker por objeto                                |
@@ -537,7 +562,7 @@ O push/merge em `main` aciona o deploy configurado para o projeto. Para produç�
 
 - Integração externa com NetLex, questionário jurídico, preenchimento de complementos jurídicos e retorno automático de status. A mudança para Assinatura e o fechamento são simulados no Playground.
 - Integração direta com Salesforce e Jetsons; o catálogo, as rotas e os preços recomendados desta versão são dados mockados locais, e a notificação de aprovação por e-mail não existe (a decisão acontece na aba Aprovação).
-- Porto, Rodoviário, outros Record Types de Cotação e upload CSV do gerador v6.2.
+- Rodoviário, acessórios/alçadas portuárias definitivos (dependem do KT portuário), outros Record Types de Cotação e upload CSV do gerador v6.2.
 - Partes contratuais granulares como registros e relacionamentos próprios.
 - Campos customizados persistidos criados pela interface. A personalização existente cobre exibição e ordem das colunas.
 - Portal Experience Cloud e e-mail reais da ordem de vendas: o envio e o aceite são simulados dentro do Playground.

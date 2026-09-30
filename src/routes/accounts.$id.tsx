@@ -9,6 +9,7 @@ import type { FieldDef } from "@/components/SfRecordDialog";
 import { SfDeleteButton, SfRecordDialog } from "@/components/SfRecordDialog";
 import { fmtMoney, fmtDate, HealthPill, RiskPill, StatusPill } from "@/lib/format";
 import { PAPEIS } from "@/lib/options";
+import { OPPORTUNITY_SEGMENTS } from "@/lib/segments";
 
 export const Route = createFileRoute("/accounts/$id")({
   head: () => ({
@@ -78,7 +79,7 @@ const ACCOUNT_RELATED_LISTS: RelatedListDefinition[] = [
       { name: "name", label: "Nome da oportunidade", required: true },
       { name: "instrument_type", label: "Tipo de instrumento", type: "select", options: ["Contrato", "ACS", "Aditivo", "Outros Serviços"] },
       { name: "stage", label: "Estágio", type: "select", options: ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"] },
-      { name: "segment", label: "Segmento", type: "select", options: ["Ferroviário", "Portuário", "Rodoviário"] },
+      { name: "segment", label: "Segmento", type: "select", options: OPPORTUNITY_SEGMENTS },
       { name: "amount", label: "Valor da oportunidade", type: "number" },
       { name: "close_date", label: "Data de fechamento", type: "date" },
       { name: "contract_start", label: "Início da vigência", type: "date" },

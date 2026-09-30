@@ -4,6 +4,24 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { isDieselBaseDateApplicable } from "@/lib/business-rules";
 import {
+  DEFAULT_PORT_TERMS,
+  MODAL_POLICIES,
+  PORT,
+  PORT_MOVEMENT_SERVICES,
+  PORT_SERVICES,
+  RAIL,
+  expectedPortMovement,
+  isPortDieselBase,
+  modalPolicy,
+  modalReadjustmentError,
+  parsePortTerms,
+  portOperation,
+  portTermsRuleError,
+  segmentHasModal,
+  segmentLabel,
+  segmentModals,
+} from "@/lib/segments";
+import {
   applyRecommendedPrices,
   bulkAdjustQuotePrices,
   completeQuote,
@@ -14,6 +32,7 @@ import {
   listQuoteOptions,
   saveRecord,
   saveQuoteItemScreenflow,
+  updateQuotePortTerms,
   setAddendumScheduleExclusion,
   shuffleAddendumQuote,
   submitQuoteForApproval,
@@ -220,7 +239,7 @@ function QuotePage() {
         </td>
         {withContext && (
           <>
-            <td>{item.route}</td>
+            <td>{item.modal === PORT ? "⚓ " : ""}{item.route}</td>
             <td>{item.merchandise_name}</td>
             <td>{row.service}</td>
           </>
@@ -301,6 +320,10 @@ function QuotePage() {
     );
   }
   const baseLabels = new Map((options?.dieselBases ?? []).map((base: any) => [base.name, base.id]));
+  // Porto: sem Base Diesel (campo some) e serviços de terminal; ferro mantém FRETE + acessórios.
+  const scheduleModal = (editSchedule?.item ?? scheduleItem)?.modal;
+  const schedulePolicy = modalPolicy(scheduleModal);
+  const isPortSchedule = scheduleModal === PORT;
   const scheduleFields: FieldDef[] = [
     { name: "year", label: "Ano", type: "number", required: true },
     { name: "month", label: "Mês (1–12)", type: "number", required: true },
@@ -335,15 +358,19 @@ function QuotePage() {
     { name: "volume", label: "Volume inteiro", type: "number", required: true },
     { name: "tariff_cbs", label: `Tarifa CBS${tariffMode === "CBS" ? " (selecionada)" : " (não selecionada)"}`, type: "number" },
     { name: "tariff_net", label: `Tarifa líquida${tariffMode === "CBS" ? " (não selecionada)" : " (selecionada)"}`, type: "number" },
-    {
-      name: "diesel_label",
-      label: "Base de repasse diesel",
-      type: "select",
-      options: [...baseLabels.keys()],
-      required: true,
-    },
-    { name: "diesel_base_date", label: "Data base diesel (MM/AAAA)" },
-    { name: "service", label: "Serviço", type: "select", options: SERVICES, required: true },
+    ...(isPortSchedule
+      ? []
+      : ([
+          {
+            name: "diesel_label",
+            label: "Base de repasse diesel",
+            type: "select",
+            options: [...baseLabels.keys()],
+            required: true,
+          },
+          { name: "diesel_base_date", label: "Data base diesel (MM/AAAA)" },
+        ] as FieldDef[])),
+    { name: "service", label: `Serviço ${schedulePolicy.icon}`, type: "select", options: schedulePolicy.services, required: true },
     { name: "accessory_cbs", label: "Tarifa acessória CBS", type: "number" },
     { name: "accessory_cbs_pct", label: "Percentual acessório CBS", type: "number" },
     { name: "accessory_net", label: "Tarifa acessória líquida", type: "number" },
@@ -456,7 +483,7 @@ function QuotePage() {
             >
               {q.opportunity_name}
             </Link>{" "}
-            · {q.account_name} · {q.instrument_type} · Ferroviário
+            · {q.account_name} · {q.instrument_type} · {segmentLabel(q.segment)}
             {postContract?.baseContract && (
               <>
                 {" "}· contrato-base{" "}
@@ -638,6 +665,7 @@ function QuotePage() {
             <Field label="Oportunidade" value={q.opportunity_name} />
             <Field label="Conta de gestão" value={q.account_name} />
             <Field label="Record Type" value={q.record_type} />
+            <Field label="Segmento" value={`${q.segment ?? "—"} · ${segmentLabel(q.segment)}`} />
             <Field label="Status" value={q.is_synced ? "Sincronizada" : q.status} />
             <Field label="Seed de geração" value={String(q.seed)} />
           </div>
@@ -650,6 +678,17 @@ function QuotePage() {
             }}
           />
         </Section>
+        {segmentHasModal(q.segment, PORT) && (
+          <PortTermsCard
+            quoteId={id}
+            raw={q.port_terms}
+            editable={editable && !isPostContract}
+            usesStorage={items.some((item) => item.modal === PORT && item.service === "ARMAZENAGEM")}
+            onSaved={async () => {
+              await qc.invalidateQueries({ queryKey: ["quote-full", id] });
+            }}
+          />
+        )}
         {isPostContract && postContract && (
           <section className="sf-card sf-pc-inherited" aria-label="Condições herdadas">
             <div className="sf-card-header">
@@ -777,8 +816,11 @@ function QuotePage() {
                         <details key={route.key} className="sf-nested-accordion" open>
                           <summary>
                             <span>›</span>
-                            <strong>🛤️ {route.label}</strong>
-                            <small>🚂 {route.modal}</small>
+                            <strong>{route.modal === PORT ? "⚓" : "🛤️"} {route.label}</strong>
+                            <small>
+                              {modalPolicy(route.modal).icon} {route.modal}
+                              {route.modal === PORT && route.operation ? ` · ${route.operation}` : ""}
+                            </small>
                           </summary>
                           <div style={{ padding: "2px 0 8px 18px" }}>
                             {route.items.map((item) => (
@@ -889,6 +931,10 @@ function QuotePage() {
             igpm: Number(options?.opportunity?.igpm_pct ?? 0),
             ipca: Number(options?.opportunity?.ipca_pct ?? 0),
           }}
+          portReadjustment={{
+            igpm: Number(options?.opportunity?.port_igpm_pct ?? 100),
+            ipca: Number(options?.opportunity?.port_ipca_pct ?? 0),
+          }}
           integrationTariff={tariffMode}
           initialTakeOrPayConfig={parseTakeOrPayConfig(options?.opportunity?.take_or_pay_config)}
           applicationDay={applicationDay}
@@ -981,8 +1027,10 @@ function QuotePage() {
               ? {
                   ...editSchedule,
                   item: undefined,
-                  diesel_label:
-                    editSchedule.diesel_base_name ??
+                  diesel_base_date: isPortSchedule ? "" : editSchedule.diesel_base_date,
+                  diesel_label: isPortSchedule
+                    ? ""
+                    : editSchedule.diesel_base_name ??
                     [...baseLabels.keys()].find(
                       (label) => baseLabels.get(label) === editSchedule.diesel_base_id,
                     ) ??
@@ -998,9 +1046,11 @@ function QuotePage() {
                   volume: 1000,
                   tariff_cbs: tariffMode === "CBS" ? 400 : "",
                   tariff_net: tariffMode === "CBS" ? "" : 400,
-                  diesel_label: "ELDORADO",
-                  diesel_base_date: `${String(applicationDay).padStart(2, "0")}/${String(options?.opportunity?.contract_start?.slice(5, 7) ?? "10").padStart(2, "0")}/${options?.opportunity?.contract_start?.slice(0, 4) ?? "2026"}`,
-                  service: scheduleItem?.service ?? "FRETE",
+                  diesel_label: isPortSchedule ? "" : "ELDORADO",
+                  diesel_base_date: isPortSchedule
+                    ? ""
+                    : `${String(applicationDay).padStart(2, "0")}/${String(options?.opportunity?.contract_start?.slice(5, 7) ?? "10").padStart(2, "0")}/${options?.opportunity?.contract_start?.slice(0, 4) ?? "2026"}`,
+                  service: scheduleItem?.service ?? schedulePolicy.defaultService,
                   accessory_cbs: tariffMode === "CBS" ? 400 : "",
                   accessory_cbs_pct: tariffMode === "CBS" ? 100 : "",
                   accessory_net: tariffMode === "CBS" ? "" : 400,
@@ -1017,7 +1067,8 @@ function QuotePage() {
             return {
               ...rest,
               quote_line_item_id: parentItem.id,
-              diesel_base_id: baseLabels.get(diesel_label),
+              diesel_base_id: isPortSchedule ? null : baseLabels.get(diesel_label),
+              ...(isPortSchedule ? { diesel_base_date: null } : {}),
               schedule_key: "",
             };
           }}
@@ -1040,7 +1091,7 @@ function QuotePage() {
             );
             const division = String(form.division || "Todas");
             const plaza = String(form.plaza || "TODAS_PRACAS_NACIONAL");
-            const service = String(form.service || "FRETE");
+            const service = String(form.service || schedulePolicy.defaultService);
             const current = Number(form.year) * 100 + Number(form.month);
             for (
               let period = Math.max(firstMonth, current);
@@ -1055,7 +1106,9 @@ function QuotePage() {
                   year,
                   month,
                   service,
-                  diesel_base_date: `${String(applicationDay).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
+                  diesel_base_date: isPortSchedule
+                    ? ""
+                    : `${String(applicationDay).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
                 };
               }
             }
@@ -1081,6 +1134,109 @@ function Highlight({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+/** Condições portuárias: franquia de armazenagem (free time) e período adicional cobrado. */
+function PortTermsCard({
+  quoteId,
+  raw,
+  editable,
+  usesStorage,
+  onSaved,
+}: {
+  quoteId: string;
+  raw: string | null;
+  editable: boolean;
+  usesStorage: boolean;
+  onSaved: () => Promise<void>;
+}) {
+  const saved = parsePortTerms(raw);
+  const [draft, setDraft] = useState<{ freeTimeDays: string; extraPeriodDays: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const current = draft ?? {
+    freeTimeDays: String(saved?.freeTimeDays ?? DEFAULT_PORT_TERMS.freeTimeDays),
+    extraPeriodDays: String(saved?.extraPeriodDays ?? DEFAULT_PORT_TERMS.extraPeriodDays),
+  };
+  const policy = MODAL_POLICIES[PORT];
+  return (
+    <section className="sf-card" aria-label="Condições portuárias">
+      <div className="sf-card-header">
+        {policy.icon} Condições portuárias · {policy.regulator}
+      </div>
+      <div className="sf-card-body" style={{ display: "grid", gap: 10 }}>
+        <p className="sf-curve-muted" style={{ margin: 0 }}>
+          Porto não usa Base Diesel nem tem produto obrigatório. Reajuste por inflação (IGP-M/IPCA do porto) e Take or
+          Pay em registro separado do ferro.{" "}
+          {usesStorage
+            ? "Esta Cotação cobra ARMAZENAGEM: a franquia abaixo entra na minuta."
+            : "A franquia só é exigida quando a Cotação cobra ARMAZENAGEM."}
+        </p>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
+          <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+            Franquia de armazenagem (dias livres)
+            <input
+              className="sf-input"
+              type="number"
+              min={1}
+              max={60}
+              disabled={!editable || busy}
+              value={current.freeTimeDays}
+              onChange={(e) => setDraft({ ...current, freeTimeDays: e.target.value })}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+            Período adicional (dias)
+            <input
+              className="sf-input"
+              type="number"
+              min={1}
+              max={30}
+              disabled={!editable || busy}
+              value={current.extraPeriodDays}
+              onChange={(e) => setDraft({ ...current, extraPeriodDays: e.target.value })}
+            />
+          </label>
+          {editable && (
+            <button
+              type="button"
+              className="sf-btn"
+              disabled={busy || !draft}
+              onClick={() =>
+                void (async () => {
+                  setBusy(true);
+                  setError("");
+                  try {
+                    await updateQuotePortTerms({
+                      data: {
+                        id: quoteId,
+                        freeTimeDays: Number(current.freeTimeDays),
+                        extraPeriodDays: Number(current.extraPeriodDays),
+                      },
+                    });
+                    setDraft(null);
+                    await onSaved();
+                    toast.success("Condições portuárias salvas");
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Não foi possível salvar.");
+                  } finally {
+                    setBusy(false);
+                  }
+                })()
+              }
+            >
+              {busy ? "Salvando…" : "Salvar condições"}
+            </button>
+          )}
+        </div>
+        {error && <div style={{ color: "#ba0517", fontSize: 12 }}>{error}</div>}
+        <div className="sf-curve-muted" style={{ fontSize: 12 }}>
+          Referência pública TIPLAM: 7 dias livres e períodos adicionais de 5 dias. Valores do contrato real a confirmar no KT
+          portuário.
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="sf-field">
@@ -1110,7 +1266,7 @@ function getQuoteBusinessRules(
     items.length > 0 &&
     items.every(
       (item) =>
-        item.modal === "Ferroviário" &&
+        segmentHasModal(quote.segment, item.modal) &&
         item.origin_system === "FLOU" &&
         !!item.origin_id &&
         !!item.destination_id &&
@@ -1126,15 +1282,19 @@ function getQuoteBusinessRules(
         Number.isInteger(Number(row.volume)) && Number(row.volume) > 0 && selected > 0 && other <= 0
       );
     });
+  const modals = segmentModals(quote.segment);
+  const hasRail = modals.includes(RAIL);
+  const hasPort = modals.includes(PORT);
+  const railGroups = [...groups.values()].filter((rows) => rows[0].item.modal !== PORT);
+  const portSchedules = schedules.filter((row) => row.item.modal === PORT);
+  const railSchedules = schedules.filter((row) => row.item.modal !== PORT);
   const freightPass =
-    groups.size > 0 &&
-    [...groups.values()].every((rows) =>
-      rows.some((row) => String(row.service).toUpperCase() === "FRETE"),
-    );
+    railGroups.length > 0 &&
+    railGroups.every((rows) => rows.some((row) => String(row.service).toUpperCase() === "FRETE"));
   const dieselPass =
-    hasSchedules &&
-    schedules.every((row) => {
-      if (!row.diesel_base_id || !row.diesel_base_date) return false;
+    railSchedules.length > 0 &&
+    railSchedules.every((row) => {
+      if (!row.diesel_base_id || !row.diesel_base_date || isPortDieselBase(row.diesel_base_id)) return false;
       return isDieselBaseDateApplicable(
         row.diesel_base_date,
         applicationDay,
@@ -1167,12 +1327,25 @@ function getQuoteBusinessRules(
   const termDays = opportunity?.contract_start && opportunity?.contract_end
     ? Math.round((Date.parse(`${opportunity.contract_end}T00:00:00Z`) - Date.parse(`${opportunity.contract_start}T00:00:00Z`)) / 86400000)
     : 0;
-  const annualReadjustmentPass = termDays <= 365 || (
-    Math.abs(Number(opportunity?.diesel_pct ?? 0) + Number(opportunity?.igpm_pct ?? 0) + Number(opportunity?.ipca_pct ?? 0) - 100) <= 0.001 &&
-    !!opportunity?.first_readjustment_date &&
-    opportunity.first_readjustment_date >= opportunity.contract_start &&
-    opportunity.first_readjustment_date <= opportunity.contract_end
-  );
+  const annualReadjustmentPass =
+    termDays <= 365 || (!!opportunity && !modalReadjustmentError(RAIL, opportunity));
+  const portReadjustmentPass =
+    termDays <= 365 || (!!opportunity && !modalReadjustmentError(PORT, opportunity));
+  // Porto: sem Base Diesel, serviços do catálogo portuário e cais coerente com o sentido.
+  const portDieselPass =
+    portSchedules.length > 0 &&
+    portSchedules.every((row) => isPortDieselBase(row.diesel_base_id) && !row.diesel_base_date);
+  const portServicesPass =
+    portSchedules.length > 0 && portSchedules.every((row) => PORT_SERVICES.includes(String(row.service)));
+  const portMovementPass =
+    portSchedules.length > 0 &&
+    portSchedules.every((row) => {
+      const expected = expectedPortMovement(row.item.origin_type, row.item.destination_type);
+      return !expected || !PORT_MOVEMENT_SERVICES.includes(String(row.service)) || row.service === expected;
+    });
+  const usesStorage = portSchedules.some((row) => row.service === "ARMAZENAGEM");
+  const portTerms = parsePortTerms(quote.port_terms);
+  const portTermsError = portTermsRuleError(portTerms);
   const acsRulesPass =
     opportunity?.instrument_type !== "ACS" ||
     (termValid &&
@@ -1186,15 +1359,100 @@ function getQuoteBusinessRules(
       ));
   const synced = !!quote.is_synced && quote.status === "Sincronizada";
 
+  const railRules: BusinessRule[] = hasRail
+    ? [
+        {
+          label: "FRETE presente em cada grupo de Agenda",
+          passed: freightPass,
+          detail: freightPass
+            ? `${railGroups.length} grupo(s) ferroviário(s) conferidos.`
+            : "Cada grupo ferroviário de período e praça precisa conter uma linha FRETE.",
+          explanation:
+            "Cada grupo de Agenda é formado pelo Fluxo, período, divisão e praça. No ferroviário (ANTT), cada grupo precisa ter uma linha do serviço FRETE; serviços acessórios podem aparecer como linhas adicionais do mesmo grupo, sem repetir o mesmo serviço. O porto não tem produto obrigatório.",
+        },
+        {
+          label: "Base Diesel e data automática válidas",
+          passed: dieselPass,
+          detail: dieselPass
+            ? `Base e data compatíveis com o dia ${applicationDay}.`
+            : "Informe a Base Diesel e a data correspondente ao período; o dia vem da Oportunidade.",
+          explanation:
+            "Somente ferro. A Base Diesel precisa corresponder a uma base cadastrada e aplicável ao Fluxo. A Data Base Diesel é necessária para periodicidade anual ou quando o mesmo Fluxo tiver Agendas em mais de um mês. O dia efetivo é sempre herdado da Oportunidade (1, 10 ou 20), e as linhas do grupo devem compartilhar a mesma data.",
+        },
+      ]
+    : [];
+  const portRules: BusinessRule[] = hasPort
+    ? [
+        {
+          label: "Base Diesel vazia no porto",
+          passed: portDieselPass,
+          detail: portDieselPass
+            ? "Nenhuma Agenda portuária usa Base Diesel."
+            : "Remova Base Diesel e data das Agendas portuárias.",
+          explanation:
+            "No porto a Base Diesel é proibida: o campo fica vazio (a agenda aponta para o registro técnico “Não se aplica · Porto”). O reajuste do porto é por inflação, configurado à parte.",
+        },
+        {
+          label: "Serviços do catálogo portuário (ANTAQ)",
+          passed: portServicesPass,
+          detail: portServicesPass
+            ? `Serviços: ${[...new Set(portSchedules.map((row) => row.service))].join(", ")}.`
+            : `Use apenas ${PORT_SERVICES.join(", ")} nos fluxos portuários.`,
+          explanation:
+            "O porto é regido pela ANTAQ e não tem produto obrigatório (diferente do FRETE ferroviário, exigido pela ANTT). Os serviços seguem as tabelas públicas dos terminais VLI (embarque, desembarque, armazenagem e pesagem); a lista oficial ainda precisa ser confirmada no KT portuário.",
+        },
+        {
+          label: "Operação de cais coerente com o sentido do fluxo",
+          passed: portMovementPass,
+          detail: portMovementPass
+            ? "Exportação usa EMBARQUE e importação usa DESEMBARQUE."
+            : "Troque EMBARQUE/DESEMBARQUE conforme o sentido (terminal → navio ou navio → terminal).",
+          explanation:
+            "O sentido vem dos locais do Fluxo: terminal → navio é embarque (exportação); navio → terminal é desembarque (importação). Um fluxo não pode cobrar a operação de cais do sentido contrário.",
+        },
+        ...(usesStorage
+          ? [
+              {
+                label: "Franquia de armazenagem definida",
+                passed: !portTermsError,
+                detail: portTermsError
+                  ? portTermsError
+                  : `${portTerms!.freeTimeDays} dias livres; períodos adicionais de ${portTerms!.extraPeriodDays} dias.`,
+                explanation:
+                  "Quando a Cotação cobra ARMAZENAGEM, precisa dizer quantos dias a carga fica sem custo (free time) e o tamanho de cada período adicional cobrado. Referência pública do TIPLAM: 7 dias livres e períodos de 5 dias.",
+              },
+            ]
+          : []),
+      ]
+    : [];
+
   return [
-    {
-      label: "Reajuste anual configurado",
-      passed: annualReadjustmentPass,
-      detail: annualReadjustmentPass
-        ? termDays > 365 ? "Percentuais fecham 100% e a primeira data está na vigência." : "Percentuais anuais não são exigidos para esta vigência."
-        : "Some Diesel, IGP-M e IPCA em 100% e informe a primeira data dentro da vigência.",
-      explanation: "Quando a vigência passa de 365 dias, a Oportunidade precisa ter percentuais de reajuste cuja soma seja 100% e uma data para o primeiro reajuste dentro da vigência. O Playground valida os parâmetros cadastrados; o cálculo financeiro do reajuste ainda não está conectado ao objeto completo de reajustes.",
-    },
+    ...(hasRail || !hasPort
+      ? [
+          {
+            label: hasPort ? "Reajuste anual ferroviário configurado" : "Reajuste anual configurado",
+            passed: annualReadjustmentPass,
+            detail: annualReadjustmentPass
+              ? termDays > 365 ? "Percentuais fecham 100% e a primeira data está na vigência." : "Percentuais anuais não são exigidos para esta vigência."
+              : "Some Diesel, IGP-M e IPCA em 100% e informe a primeira data dentro da vigência.",
+            explanation: "Quando a vigência passa de 365 dias, a Oportunidade precisa ter percentuais de reajuste do ferro (Diesel + IGP-M + IPCA) cuja soma seja 100% e uma data para o primeiro reajuste dentro da vigência. O Playground valida os parâmetros cadastrados; o cálculo financeiro do reajuste ainda não está conectado ao objeto completo de reajustes.",
+          },
+        ]
+      : []),
+    ...(hasPort
+      ? [
+          {
+            label: "Reajuste anual portuário configurado",
+            passed: portReadjustmentPass,
+            detail: portReadjustmentPass
+              ? termDays > 365
+                ? `IGP-M ${Number(opportunity?.port_igpm_pct ?? 0)}% + IPCA ${Number(opportunity?.port_ipca_pct ?? 0)}% (sem diesel).`
+                : "Percentuais anuais não são exigidos para esta vigência."
+              : "Some IGP-M e IPCA do porto em 100% (sem diesel) e informe a primeira data dentro da vigência.",
+            explanation: "O porto tem configuração de reajuste própria e não usa diesel. Acima de 365 dias, IGP-M + IPCA do porto precisam somar 100%; o padrão IGP-M 100% foi citado no KT e ainda precisa ser confirmado. Pela ANTAQ, o reajuste de preços do terminal é informado com 30 dias de antecedência.",
+          },
+        ]
+      : []),
     {
       label: "Cliente igual à Conta de gestão",
       passed: accountMatches,
@@ -1208,10 +1466,10 @@ function getQuoteBusinessRules(
       label: "Origem, destino, mercadoria e modal definidos",
       passed: dimensionsComplete,
       detail: dimensionsComplete
-        ? "Os Itens usam Fluxos ferroviários completos."
-        : "Selecione um Fluxo ferroviário elegível em cada Item.",
+        ? `Os Itens usam Fluxos completos do segmento ${quote.segment ?? "—"}.`
+        : `Selecione um Fluxo elegível (${segmentLabel(quote.segment)}) em cada Item.`,
       explanation:
-        "Cada Item representa um Fluxo com origem, destino, mercadoria e modal definidos. O Fluxo precisa estar elegível para uso ferroviário e associado ao cliente da Oportunidade; o Playground seleciona esses Fluxos automaticamente dentro do catálogo permitido.",
+        "Cada Item representa um Fluxo com origem, destino, mercadoria e modal definidos. O modal do Fluxo precisa pertencer ao segmento da Oportunidade (ferro, porto ou os dois) e o Fluxo precisa estar associado ao cliente da Oportunidade; o Playground seleciona esses Fluxos automaticamente dentro do catálogo permitido.",
     },
     {
       label: "Volume inteiro e tarifa selecionada preenchidos",
@@ -1222,24 +1480,8 @@ function getQuoteBusinessRules(
       explanation:
         "O volume de cada Agenda deve ser um número inteiro maior que zero. Para a Cotação, escolha CBS ou tarifa líquida; todas as linhas devem preencher a modalidade escolhida com valor positivo e deixar a alternativa vazia. Isso mantém a unidade de cálculo uniforme no conjunto.",
     },
-    {
-      label: "FRETE presente em cada grupo de Agenda",
-      passed: freightPass,
-      detail: freightPass
-        ? `${groups.size} grupo(s) conferidos.`
-        : "Cada grupo de período e praça precisa conter uma linha FRETE.",
-      explanation:
-        "Cada grupo de Agenda é formado pelo Fluxo, período, divisão e praça. No ferroviário, cada grupo precisa ter uma linha do serviço FRETE; serviços acessórios podem aparecer como linhas adicionais do mesmo grupo, sem repetir o mesmo serviço.",
-    },
-    {
-      label: "Base Diesel e data automática válidas",
-      passed: dieselPass,
-      detail: dieselPass
-        ? `Base e data compatíveis com o dia ${applicationDay}.`
-        : "Informe a Base Diesel e a data correspondente ao período; o dia vem da Oportunidade.",
-      explanation:
-        "A Base Diesel precisa corresponder a uma base cadastrada e aplicável ao Fluxo. A Data Base Diesel é necessária para periodicidade anual ou quando o mesmo Fluxo tiver Agendas em mais de um mês. O dia efetivo é sempre herdado da Oportunidade (1, 10 ou 20), e as linhas do grupo devem compartilhar a mesma data.",
-    },
+    ...railRules,
+    ...portRules,
     {
       label: "Rateio fecha a tarifa e soma 100%",
       passed: allocationPass,
@@ -1278,7 +1520,7 @@ function getQuoteBusinessRules(
         ? `Desvio máximo de ${Number(quote.max_discount_pct ?? 0).toFixed(2)}%${quote.price_status === "Ok" ? " — sem aprovação" : " — aprovação concedida"}.`
         : "Use Validar preços para comparar cada Item com o preço recomendado do Jetsons.",
       explanation:
-        "No ferroviário a margem é avaliada por competitividade de preço: cada Item é comparado ao preço recomendado (Jetsons). O desvio percentual é o maior desconto praticado em relação ao recomendado. Use o botão Validar preços para ver o comparativo por Item e o veredito da Cotação.",
+        "No ferro e no porto a margem é avaliada por competitividade de preço: cada Item é comparado ao preço recomendado (Jetsons). O desvio percentual é o maior desconto praticado em relação ao recomendado. Use o botão Validar preços para ver o comparativo por Item e o veredito da Cotação.",
     },
     {
       label: "Aprovação registrada quando necessária",
@@ -1548,7 +1790,7 @@ function SituationChip({
   );
 }
 
-type GroupedRoute = { key: string; label: string; modal: string; items: any[] };
+type GroupedRoute = { key: string; label: string; modal: string; operation?: string | null; items: any[] };
 type GroupedMerchandise = {
   key: string;
   id: string;
@@ -1615,6 +1857,7 @@ function buildItemGroups(items: any[], accountName: string): GroupedCompany[] {
         key: routeKey,
         label: `${item.origin_name} (${item.origin_code}) → ${item.destination_name} (${item.destination_code})`,
         modal: item.modal,
+        operation: item.modal === PORT ? portOperation(item.origin_type, item.destination_type) : null,
         items: [],
       };
       merch.routes.push(route);

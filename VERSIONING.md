@@ -16,6 +16,8 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v10.21.20` — Add the Port modal and the combined Rail + Port segment: port catalog (TIPLAM, TPD, TSL, TMIB terminals and vessel point), port services (loading, unloading, storage, weighing) without FRETE or Diesel Base, berth-operation coherence, ANTAQ storage terms, per-modal annual readjustment, per-modal Take or Pay records, port Jetsons mock prices and per-modal NetLex draft.
+
 - `v9.21.20` — Add the post-contract instruments Sales Order (Ordem de Vendas) and Adjustment Curve (Curva de Ajuste): a single post-contract hub on signed contracts (Aditivo · Ordem de Vendas · Curva de Ajuste), inherited read-only conditions, a volume-redistribution panel with per-flow balance, customer-portal approval with 7-day validity, dedicated document pages, and a repaired README.
 
 - `v8.21.20` — Fix the price-validation modal approval action by connecting its direct route handler to the approval workspace.

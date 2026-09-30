@@ -23,7 +23,7 @@ const CONFIG: Record<string, Config> = {
       { name: "city", label: "Cidade", required: true },
       { name: "state", label: "Estado", required: true },
       { name: "microregion", label: "Microrregião", required: true },
-      { name: "location_type", label: "Tipo", type: "select", options: ["Pátio", "Terminal"] },
+      { name: "location_type", label: "Tipo", type: "select", options: ["Pátio", "Terminal", "Porto", "Navio"] },
     ],
     columns: ["code", "name", "city", "state", "microregion", "location_type"],
   },
@@ -54,7 +54,7 @@ const CONFIG: Record<string, Config> = {
       { name: "origin_id", label: "ID do Location de origem", required: true },
       { name: "destination_id", label: "ID do Location de destino", required: true },
       { name: "merchandise_id", label: "ID da Mercadoria", required: true },
-      { name: "modal", label: "Modal", type: "select", options: ["Ferroviário"] },
+      { name: "modal", label: "Modal", type: "select", options: ["Ferroviário", "Portuário"] },
       { name: "origin_system", label: "Origem do cadastro", type: "select", options: ["FLOU"] },
     ],
     columns: [

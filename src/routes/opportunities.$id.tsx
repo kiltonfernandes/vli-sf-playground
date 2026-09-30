@@ -32,10 +32,20 @@ import { SfListView, type Column } from "@/components/SfListView";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { BusinessRulesChecklist, type BusinessRule } from "@/components/BusinessRulesChecklist";
 import { parseTakeOrPayConfig, type TakeOrPayConfig } from "@/lib/take-or-pay";
+import {
+  MODAL_POLICIES,
+  OPPORTUNITY_SEGMENTS,
+  PORT,
+  RAIL,
+  isQuoteSegment,
+  modalReadjustmentError,
+  segmentHasModal,
+  segmentModals,
+} from "@/lib/segments";
 
 const INSTRUMENTS = ["Contrato", "ACS", "Aditivo", SALES_ORDER, ADJUSTMENT_CURVE, "Outros Serviços"];
 const STAGES = ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"];
-const SEGMENTS = ["Ferroviário", "Portuário", "Rodoviário"];
+const SEGMENTS = OPPORTUNITY_SEGMENTS;
 const quoteFieldsFor = (instrument: string): FieldDef[] => [
   { name: "name", label: "Nome da Cotação", required: true },
   {
@@ -209,11 +219,11 @@ function OpportunityRecordPage() {
         ]
       : []),
     {
-      label: "Segmento ferroviário",
-      passed: opportunity.segment === "Ferroviário",
-      detail: opportunity.segment ?? "Selecione Ferroviário.",
+      label: "Segmento atendido pela Cotação",
+      passed: isQuoteSegment(opportunity.segment),
+      detail: opportunity.segment ?? "Selecione Ferroviário, Portuário ou Ferroviário + Portuário.",
       explanation:
-        "A jornada de Item e Agenda disponível neste momento valida operações ferroviárias. O modal da Oportunidade precisa ser Ferroviário para que seus Fluxos, serviços e regras de tarifa sejam compatíveis.",
+        "A jornada de Item e Agenda atende Ferroviário (ANTT), Portuário (ANTAQ) e Ferroviário + Portuário, com regras por modal: o ferro exige FRETE e Base Diesel; o porto usa serviços de terminal, não tem produto obrigatório e não aceita Base Diesel. Rodoviário ainda não está disponível.",
     },
     {
       label: "Vigência preenchida e válida",
@@ -226,32 +236,43 @@ function OpportunityRecordPage() {
       explanation:
         "A data inicial e a final definem o intervalo em que as Agendas podem ocorrer. Para Contrato, informe uma vigência válida com início antes ou no fim. Para ACS, a duração deve ser inferior a 12 meses. As Agendas da Cotação precisam ficar dentro desse intervalo.",
     },
-    {
-      label: "Dia de aplicação do diesel definido",
-      passed: [1, 10, 20].includes(Number(opportunity.application_day)),
-      detail: `Dia atual: ${opportunity.application_day ?? "não definido"}`,
-      explanation:
-        "O dia de aplicação aceito é 1, 10 ou 20. Ele determina o dia efetivo da Data Base Diesel nas Agendas; ao montar a data, o Playground usa este valor da Oportunidade em vez do dia digitado.",
-    },
-    {
-      label: "Reajuste anual configurado",
-      passed:
-        !isTermOver365Days(opportunity) ||
-        (Math.abs(
-          Number(opportunity.diesel_pct) +
-            Number(opportunity.igpm_pct) +
-            Number(opportunity.ipca_pct) -
-            100,
-        ) <= 0.001 &&
-          !!opportunity.first_readjustment_date &&
-          String(opportunity.first_readjustment_date) >= String(opportunity.contract_start) &&
-          String(opportunity.first_readjustment_date) <= String(opportunity.contract_end)),
-      detail: !isTermOver365Days(opportunity)
-        ? "Percentuais anuais não exigidos para esta vigência."
-        : `Diesel ${Number(opportunity.diesel_pct).toFixed(2)}% + IGP-M ${Number(opportunity.igpm_pct).toFixed(2)}% + IPCA ${Number(opportunity.ipca_pct).toFixed(2)}%; primeiro reajuste ${opportunity.first_readjustment_date || "pendente"}.`,
-      explanation:
-        "Em contratos com vigência superior a 365 dias, os percentuais de Diesel, IGP-M e IPCA precisam somar exatamente 100%, e a data do primeiro reajuste deve estar preenchida dentro da vigência. Esses dados são configurados aqui e conferidos novamente no screenflow da Cotação.",
-    },
+    ...(segmentHasModal(opportunity.segment, RAIL) || !isQuoteSegment(opportunity.segment)
+      ? [
+          {
+            label: "Dia de aplicação do diesel definido",
+            passed: [1, 10, 20].includes(Number(opportunity.application_day)),
+            detail: `Dia atual: ${opportunity.application_day ?? "não definido"}`,
+            explanation:
+              "Somente ferro. O dia de aplicação aceito é 1, 10 ou 20. Ele determina o dia efetivo da Data Base Diesel nas Agendas ferroviárias; ao montar a data, o Playground usa este valor da Oportunidade em vez do dia digitado. O porto não usa Base Diesel.",
+          },
+        ]
+      : []),
+    ...(segmentHasModal(opportunity.segment, RAIL) || !isQuoteSegment(opportunity.segment)
+      ? [
+          {
+            label: "Reajuste anual ferroviário configurado",
+            passed: !isTermOver365Days(opportunity) || !modalReadjustmentError(RAIL, opportunity),
+            detail: !isTermOver365Days(opportunity)
+              ? "Percentuais anuais não exigidos para esta vigência."
+              : `Diesel ${Number(opportunity.diesel_pct).toFixed(2)}% + IGP-M ${Number(opportunity.igpm_pct).toFixed(2)}% + IPCA ${Number(opportunity.ipca_pct).toFixed(2)}%; primeiro reajuste ${opportunity.first_readjustment_date || "pendente"}.`,
+            explanation:
+              "Em contratos com vigência superior a 365 dias, os percentuais de Diesel, IGP-M e IPCA do ferro precisam somar exatamente 100%, e a data do primeiro reajuste deve estar preenchida dentro da vigência. Esses dados são configurados aqui e conferidos novamente no screenflow da Cotação.",
+          },
+        ]
+      : []),
+    ...(segmentHasModal(opportunity.segment, PORT)
+      ? [
+          {
+            label: "Reajuste anual portuário configurado",
+            passed: !isTermOver365Days(opportunity) || !modalReadjustmentError(PORT, opportunity),
+            detail: !isTermOver365Days(opportunity)
+              ? "Percentuais anuais não exigidos para esta vigência."
+              : `IGP-M ${Number(opportunity.port_igpm_pct ?? 0).toFixed(2)}% + IPCA ${Number(opportunity.port_ipca_pct ?? 0).toFixed(2)}% (sem diesel); primeiro reajuste ${opportunity.first_readjustment_date || "pendente"}.`,
+            explanation:
+              "O porto tem configuração de reajuste própria (IGP-M/IPCA_Harbor no Salesforce) e não usa diesel. Acima de 365 dias, IGP-M + IPCA do porto precisam somar 100%. O padrão do Playground é IGP-M 100%, valor citado no KT e ainda não confirmado. Pela regulação da ANTAQ, o reajuste de preços do terminal é informado ao cliente com 30 dias de antecedência.",
+          },
+        ]
+      : []),
     {
       label: "Oportunidade em Negociação",
       passed: STAGES.indexOf(opportunity.stage) >= STAGES.indexOf("Negociação"),
@@ -288,7 +309,7 @@ function OpportunityRecordPage() {
       label: "Take or Pay compatível com as Agendas",
       passed: !hasTopTolerance || !!savedTop || !!inheritedTop,
       detail: hasTopTolerance ? (savedTop || inheritedTop ? "Configuração salva com as tolerâncias da Cotação." : "Configure Take or Pay antes de avançar.") : "Sem tolerâncias de Take or Pay nas Agendas.",
-      explanation: "Qualquer tolerância positiva em volume ou tarifa nas Agendas exige configuração de Take or Pay. O Contrato registra datas, regra de compensação e fluxos; a apuração financeira ocorre fora deste app.",
+      explanation: "Qualquer tolerância positiva em volume ou tarifa nas Agendas exige configuração de Take or Pay. O Contrato registra datas, regra de compensação e fluxos; a apuração financeira ocorre fora deste app. Ferro e porto viram registros separados (ex.: 15 fluxos ferro + 1 porto = 2 registros): pares e grupos não podem misturar modais.",
     }] : []),
     {
       label: "Partes contratuais preenchidas",
@@ -388,6 +409,8 @@ function OpportunityRecordPage() {
     { name: "diesel_pct", label: "Reajuste diesel (%)", type: "number" },
     { name: "igpm_pct", label: "Reajuste IGP-M (%)", type: "number" },
     { name: "ipca_pct", label: "Reajuste IPCA (%)", type: "number" },
+    { name: "port_igpm_pct", label: "Reajuste portuário IGP-M (%)", type: "number" },
+    { name: "port_ipca_pct", label: "Reajuste portuário IPCA (%)", type: "number" },
     { name: "contracting_parties", label: "Contratante(s)" },
     { name: "vli_entity", label: "Entidade contratada VLI" },
     { name: "joint_debtor", label: "Devedor solidário" },
@@ -413,6 +436,8 @@ function OpportunityRecordPage() {
     diesel_pct: opportunity.diesel_pct ?? 0,
     igpm_pct: opportunity.igpm_pct ?? 0,
     ipca_pct: opportunity.ipca_pct ?? 0,
+    port_igpm_pct: opportunity.port_igpm_pct ?? 100,
+    port_ipca_pct: opportunity.port_ipca_pct ?? 0,
     contracting_parties: opportunity.contracting_parties ?? "",
     vli_entity: opportunity.vli_entity ?? "",
     joint_debtor: opportunity.joint_debtor ?? "",
@@ -428,7 +453,7 @@ function OpportunityRecordPage() {
   };
 
   const quoteDefinitions =
-    opportunity.segment === "Ferroviário" &&
+    isQuoteSegment(opportunity.segment) &&
     (["Contrato", "ACS"].includes(opportunity.instrument_type) || (derived && !!baseContract))
       ? [
           {
@@ -487,7 +512,7 @@ function OpportunityRecordPage() {
               { name: "seed", label: "Seed", type: "number" as const },
             ],
             createDefaults: () => ({
-              name: `${opportunity.name} · Ferroviário`,
+              name: `${opportunity.name} · ${opportunity.segment}`,
               record_type: recordTypeFor(opportunity.instrument_type),
               status: "Rascunho",
               is_synced: 0,
@@ -994,10 +1019,21 @@ function OpportunityRecordPage() {
                 label="Fim da vigência"
                 value={opportunity.contract_end ? fmtDate(opportunity.contract_end) : "—"}
               />
-              <Field label="Reajuste diesel" value={`${opportunity.diesel_pct}%`} />
-              <Field label="Dia de aplicação" value={String(opportunity.application_day ?? 10)} />
-              <Field label="Reajuste IGP-M" value={`${opportunity.igpm_pct}%`} />
-              <Field label="Reajuste IPCA" value={`${opportunity.ipca_pct}%`} />
+              {(segmentHasModal(opportunity.segment, RAIL) || !isQuoteSegment(opportunity.segment)) && (
+                <>
+                  <Field label="Reajuste diesel (ferro)" value={`${opportunity.diesel_pct}%`} />
+                  <Field label="Dia de aplicação (ferro)" value={String(opportunity.application_day ?? 10)} />
+                  <Field label="Reajuste IGP-M (ferro)" value={`${opportunity.igpm_pct}%`} />
+                  <Field label="Reajuste IPCA (ferro)" value={`${opportunity.ipca_pct}%`} />
+                </>
+              )}
+              {segmentHasModal(opportunity.segment, PORT) && (
+                <>
+                  <Field label="Reajuste IGP-M (porto)" value={`${opportunity.port_igpm_pct ?? 100}%`} />
+                  <Field label="Reajuste IPCA (porto)" value={`${opportunity.port_ipca_pct ?? 0}%`} />
+                  <Field label="Diesel (porto)" value="Não se aplica" />
+                </>
+              )}
               <Field
                 label="Primeiro reajuste"
                 value={
@@ -1032,6 +1068,11 @@ function OpportunityRecordPage() {
                     <p style={{ margin: 0, color: "#444" }}>
                 {hasTopTolerance ? "As Agendas têm tolerâncias. Preencha e salve os parâmetros antes de avançar." : savedTop ? "Configuração salva. Sem tolerâncias nas Agendas sincronizadas no momento." : "Sem tolerâncias nas Agendas sincronizadas. Adicione uma tolerância na Cotação para ativar Take or Pay."}
                     </p>
+                    {segmentModals(opportunity.segment).length > 1 && (
+                      <p style={{ margin: 0, color: "#444" }}>
+                        {MODAL_POLICIES[RAIL].icon} Ferro e {MODAL_POLICIES[PORT].icon} porto geram registros de Take or Pay separados: compense apenas fluxos do mesmo modal.
+                      </p>
+                    )}
                     <label>Data de apuração<input type="date" value={topConfig.auditDate} onChange={(e) => setTopDraft({ ...topConfig, auditDate: e.target.value })} /></label>
                     <label>Data de faturamento<input type="date" value={topConfig.billingDate} onChange={(e) => setTopDraft({ ...topConfig, billingDate: e.target.value })} /></label>
                     <label>Modelo de compensação<select value={topConfig.compensationMode} onChange={(e) => setTopDraft({ ...topConfig, compensationMode: e.target.value as TakeOrPayConfig["compensationMode"], pairs: [], groups: [] })}>
@@ -1089,7 +1130,7 @@ function OpportunityRecordPage() {
           table="quotes"
           fields={quoteFieldsFor(opportunity.instrument_type)}
           defaults={{
-            name: `${opportunity.name} · Ferroviário`,
+            name: `${opportunity.name} · ${opportunity.segment}`,
             record_type: recordTypeFor(opportunity.instrument_type),
             status: "Rascunho",
             is_synced: 0,
@@ -1138,7 +1179,7 @@ function OpportunityRecordPage() {
           fields={quoteFieldsFor(opportunity.instrument_type)}
           defaults={{
             opportunity_id: id,
-            name: `${opportunity.name} · Ferroviário`,
+            name: `${opportunity.name} · ${opportunity.segment}`,
             record_type: recordTypeFor(opportunity.instrument_type),
             status: "Rascunho",
             is_synced: 0,

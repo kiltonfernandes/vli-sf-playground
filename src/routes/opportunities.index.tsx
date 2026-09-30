@@ -8,12 +8,13 @@ import { SfRecordDialog, type FieldDef } from "@/components/SfRecordDialog";
 import { SfBulkRecordDialog } from "@/components/SfBulkRecordDialog";
 import { exportCsv } from "@/lib/csv";
 import { fmtMoney } from "@/lib/format";
+import { OPPORTUNITY_SEGMENTS } from "@/lib/segments";
 
 const INSTRUMENTS = ["Contrato", "ACS", "Aditivo", "Outros Serviços"];
 // Filtro da lista inclui os instrumentos pós-contrato, que só nascem de um Contrato em Assinatura.
 const FILTER_INSTRUMENTS = [...INSTRUMENTS.slice(0, 3), "Ordem de Vendas", "Curva de Ajuste", "Outros Serviços"];
 const STAGES = ["Prospecção", "Negociação", "Aprovação", "Formalização", "Fechado"];
-const SEGMENTS = ["Ferroviário", "Portuário", "Rodoviário"];
+const SEGMENTS = OPPORTUNITY_SEGMENTS;
 type Opportunity = {
   id: string; account_id: string; account_name: string; name: string; instrument_type: string; stage: string;
   segment: string | null; amount: number; close_date: string | null; contract_start: string | null; contract_end: string | null;

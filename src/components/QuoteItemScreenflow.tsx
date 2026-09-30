@@ -3,6 +3,19 @@ import { saveRecord, updateOpportunityReadjustment, updateOpportunityTerm } from
 import { contractDurationDays, readjustmentRuleError } from "@/lib/business-rules";
 import { takeOrPayRuleError, type TakeOrPayConfig } from "@/lib/take-or-pay";
 import { toast } from "sonner";
+import {
+  PORT,
+  PORT_DIESEL_BASE_ID,
+  PORT_MOVEMENT_SERVICES,
+  RAIL,
+  RAIL_SERVICES,
+  expectedPortMovement,
+  isPortDieselBase,
+  modalPolicy,
+  portOperation,
+  portReadjustmentRuleError,
+  servicesForModal,
+} from "@/lib/segments";
 
 type Flow = {
   id: string;
@@ -17,6 +30,8 @@ type Flow = {
   merchandise_id: string;
   merchandise: string;
   modal: string;
+  origin_type?: string | null;
+  destination_type?: string | null;
 };
 type AgendaGroup = {
   year: number;
@@ -45,6 +60,8 @@ type Props = {
   contractEnd: string;
   firstReadjustmentDate: string;
   readjustment: { diesel: number; igpm: number; ipca: number };
+  /** Reajuste do porto (sem diesel): IGP-M/IPCA_Harbor. */
+  portReadjustment?: { igpm: number; ipca: number };
   integrationTariff: string;
   applicationDay: number;
   canChangeTariff: boolean;
@@ -66,7 +83,7 @@ type Props = {
   }) => Promise<boolean>;
 };
 
-const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
+const SERVICES = RAIL_SERVICES;
 const WINDOWS = [
   "Mês",
   "1ª Dezena",
@@ -114,6 +131,7 @@ export function QuoteItemEditDialog({
     volume_total: number;
     revenue_total: number;
     top_eligible: number;
+    modal?: string;
   };
   quoteId: string;
   onClose: () => void;
@@ -168,7 +186,7 @@ export function QuoteItemEditDialog({
           <label style={labelStyle}>
             Serviço principal
             <select style={inputStyle} value={service} onChange={(e) => setService(e.target.value)}>
-              {SERVICES.map((value) => (
+              {servicesForModal(item.modal).map((value) => (
                 <option key={value}>{value}</option>
               ))}
             </select>
@@ -205,6 +223,7 @@ export function QuoteItemScreenflow({
   contractEnd,
   firstReadjustmentDate,
   readjustment,
+  portReadjustment,
   integrationTariff,
   applicationDay,
   canChangeTariff,
@@ -225,6 +244,12 @@ export function QuoteItemScreenflow({
   const [destinationId, setDestinationId] = useState(initial?.destination_id ?? "");
   const [merchandiseId, setMerchandiseId] = useState(initial?.merchandise_id ?? "");
   const [modal, setModal] = useState(initial?.modal ?? "");
+  // Regras por modal: porto (ANTAQ) sem Base Diesel e sem produto obrigatório; ferro com FRETE.
+  const isPort = modal === PORT;
+  const policy = modalPolicy(modal || RAIL);
+  const services = policy.services;
+  const dieselDateFor = (month: number, year: number) =>
+    isPort ? "" : applicationDate(applicationDay, month, year);
   const [itemService, setItemService] = useState(initialService);
   const [tariffMode, setTariffMode] = useState(integrationTariff);
   const [seed, setSeed] = useState(790043);
@@ -239,6 +264,8 @@ export function QuoteItemScreenflow({
   const [dieselPct, setDieselPct] = useState(readjustment.diesel);
   const [igpmPct, setIgpmPct] = useState(readjustment.igpm);
   const [ipcaPct, setIpcaPct] = useState(readjustment.ipca);
+  const [portIgpmPct, setPortIgpmPct] = useState(portReadjustment?.igpm ?? 100);
+  const [portIpcaPct, setPortIpcaPct] = useState(portReadjustment?.ipca ?? 0);
   const [firstDate, setFirstDate] = useState(firstReadjustmentDate);
   const [savingReadjustment, setSavingReadjustment] = useState(false);
   const [takeOrPay, setTakeOrPay] = useState<TakeOrPayConfig>(initialTakeOrPayConfig ?? {
@@ -251,9 +278,11 @@ export function QuoteItemScreenflow({
   const endMonth = Number(termEnd?.slice(5, 7) || 12);
   const termDays = termStart && termEnd ? (contractDurationDays(termStart, termEnd) ?? 0) : 0;
   const requiresAnnualSplit = termDays > 365;
-  const readjustmentTotal = dieselPct + igpmPct + ipcaPct;
+  const readjustmentTotal = isPort ? portIgpmPct + portIpcaPct : dieselPct + igpmPct + ipcaPct;
   const readjustmentError = termStart && termEnd
-    ? readjustmentRuleError({ contractStart: termStart, contractEnd: termEnd, dieselPct, igpmPct, ipcaPct, firstReadjustmentDate: firstDate })
+    ? isPort
+      ? portReadjustmentRuleError({ contractStart: termStart, contractEnd: termEnd, igpmPct: portIgpmPct, ipcaPct: portIpcaPct, firstReadjustmentDate: firstDate })
+      : readjustmentRuleError({ contractStart: termStart, contractEnd: termEnd, dieselPct, igpmPct, ipcaPct, firstReadjustmentDate: firstDate })
     : "Informe uma vigência válida antes de ajustar o reajuste anual.";
   const readjustmentValid = !readjustmentError;
   const yearMonths = useMemo(() => {
@@ -283,6 +312,51 @@ export function QuoteItemScreenflow({
       flow.merchandise_id === merchandiseId &&
       flow.modal === modal,
   );
+  const expectedMovement = isPort
+    ? expectedPortMovement(selectedFlow?.origin_type, selectedFlow?.destination_type)
+    : null;
+  const defaultServiceForFlow = expectedMovement ?? policy.defaultService;
+  /** Ajusta serviços e Base Diesel dos grupos ao modal do Fluxo escolhido. */
+  function normalizeForModal() {
+    setItemService((current) =>
+      services.includes(current) &&
+      !(expectedMovement && PORT_MOVEMENT_SERVICES.includes(current) && current !== expectedMovement)
+        ? current
+        : defaultServiceForFlow,
+    );
+    setGroups((old) =>
+      old.map((g) => {
+        let names = g.services
+          .map((entry) => entry.service)
+          .filter((name) => services.includes(name))
+          .filter(
+            (name) =>
+              !(expectedMovement && PORT_MOVEMENT_SERVICES.includes(name) && name !== expectedMovement),
+          );
+        if (policy.requiredService && !names.includes(policy.requiredService))
+          names.unshift(policy.requiredService);
+        if (!names.length) names = [defaultServiceForFlow];
+        const unchanged =
+          names.length === g.services.length && names.every((name, i) => g.services[i].service === name);
+        const percent = 100 / names.length;
+        return {
+          ...g,
+          diesel_base_id: isPort
+            ? PORT_DIESEL_BASE_ID
+            : !g.diesel_base_id || isPortDieselBase(g.diesel_base_id)
+              ? (dieselBases[0]?.id ?? "")
+              : g.diesel_base_id,
+          diesel_base_date: dieselDateFor(g.month, g.year),
+          services: unchanged
+            ? g.services
+            : names.map((name, n) => ({
+                service: name,
+                percent: n === names.length - 1 ? 100 - percent * (names.length - 1) : percent,
+              })),
+        };
+      }),
+    );
+  }
   const origins = unique(flows, (f) => f.origin_id);
   const destinations = unique(
     flows.filter((f) => f.origin_id === originId),
@@ -315,7 +389,7 @@ export function QuoteItemScreenflow({
         volume: 1000,
         tariff,
         diesel_base_id: dieselBases[0]?.id ?? "",
-        diesel_base_date: applicationDate(applicationDay, startMonth, startYear),
+        diesel_base_date: dieselDateFor(startMonth, startYear),
         tolerance_vli_volume: 0,
         tolerance_client_volume: 0,
         tolerance_vli_tariff: 0,
@@ -338,13 +412,16 @@ export function QuoteItemScreenflow({
       old.map((g, i) => {
         if (i !== index) return g;
         const selected = g.services.map((x) => x.service);
+        const required = policy.requiredService;
         const next =
-          service === "FRETE"
+          service === required
             ? selected
             : selected.includes(service)
               ? selected.filter((x) => x !== service)
               : [...selected, service];
-        if (!next.includes("FRETE")) next.unshift("FRETE");
+        if (required && !next.includes(required)) next.unshift(required);
+        // Porto não tem produto obrigatório, mas o grupo precisa de ao menos um serviço.
+        if (!next.length) return g;
         const percent = 100 / next.length;
         return {
           ...g,
@@ -367,7 +444,7 @@ export function QuoteItemScreenflow({
         ...last,
         year: nextPeriod.year,
         month: nextPeriod.month,
-        diesel_base_date: applicationDate(applicationDay, nextPeriod.month, nextPeriod.year),
+        diesel_base_date: dieselDateFor(nextPeriod.month, nextPeriod.year),
         services: last.services.map((s) => ({ ...s })),
       },
     ]);
@@ -468,7 +545,7 @@ export function QuoteItemScreenflow({
         ...template,
         year: period.year,
         month: period.month,
-        diesel_base_date: applicationDate(applicationDay, period.month, period.year),
+        diesel_base_date: dieselDateFor(period.month, period.year),
         ...tolerances,
         services: template.services.map((service) => ({ ...service })),
       });
@@ -518,7 +595,7 @@ export function QuoteItemScreenflow({
     const seeded = Math.abs(Math.imul(seed + index * 7919, 2654435761) >>> 0);
     updateGroup(index, {
       ...available,
-      diesel_base_date: applicationDate(applicationDay, available.month, available.year),
+      diesel_base_date: dieselDateFor(available.month, available.year),
       volume: 1000 + (seeded % 9000),
       tariff: 100 + ((Math.imul(seeded, 1097) >>> 0) % 9900) / 100,
     });
@@ -549,7 +626,7 @@ export function QuoteItemScreenflow({
           g.volume <= 0 ||
           !Number.isFinite(g.tariff) ||
           g.tariff <= 0 ||
-          !g.diesel_base_id ||
+          (!isPort && !g.diesel_base_id) ||
           [
             g.tolerance_vli_volume,
             g.tolerance_client_volume,
@@ -559,7 +636,11 @@ export function QuoteItemScreenflow({
           Math.abs(g.services.reduce((s, x) => s + x.percent, 0) - 100) > 0.2,
       )
     ) {
-      setError("Revise volume, tarifa, Base Diesel, tolerâncias e rateio de serviços de cada grupo.");
+      setError(
+        isPort
+          ? "Revise volume, tarifa, tolerâncias e rateio de serviços de cada grupo."
+          : "Revise volume, tarifa, Base Diesel, tolerâncias e rateio de serviços de cada grupo.",
+      );
       return false;
     }
     if (step === 3 && instrumentType === "Contrato" && takeOrPayError) {
@@ -606,8 +687,8 @@ export function QuoteItemScreenflow({
   const skipReadjustment = instrumentType === "ACS" || instrumentType === "Ordem de Vendas";
   const allSteps = [
     { id: 0, title: "Fluxo do Cliente" },
-    { id: 1, title: "Reajuste Ferro" },
-    { id: 2, title: "Agendas e Data Base Diesel" },
+    { id: 1, title: policy.readjustmentStepTitle },
+    { id: 2, title: policy.scheduleStepTitle },
     { id: 3, title: "Condições comerciais" },
     { id: 4, title: "Revisão" },
   ];
@@ -802,13 +883,23 @@ export function QuoteItemScreenflow({
                   setModal,
                   [
                     { value: "", label: "— Selecione —" },
-                    ...modals.map((f) => ({ value: f.modal, label: f.modal })),
+                    ...modals.map((f) => ({
+                      value: f.modal,
+                      label: `${modalPolicy(f.modal).icon} ${f.modal} · ${modalPolicy(f.modal).regulator}`,
+                    })),
                   ],
                   !!itemId || !merchandiseId,
                 )}
               </label>
               {!flows.length && (
-                <p role="status">Não há Fluxos Planejados ferroviários para esta Conta.</p>
+                <p role="status">Não há Fluxos Planejados do segmento para esta Conta.</p>
+              )}
+              {isPort && selectedFlow && (
+                <p role="status" style={{ color: "#706e6b", fontSize: 13 }}>
+                  ⚓ {portOperation(selectedFlow.origin_type, selectedFlow.destination_type)} · regras
+                  portuárias (ANTAQ): sem Base Diesel, sem produto obrigatório
+                  {expectedMovement ? `, operação de cais ${expectedMovement}` : ""}.
+                </p>
               )}
             </>
           )}
@@ -826,7 +917,9 @@ export function QuoteItemScreenflow({
                   marginBottom: 14,
                 }}
               >
-                <h3 style={{ marginTop: 0 }}>Percentuais do contrato</h3>
+                <h3 style={{ marginTop: 0 }}>
+                  {isPort ? "Percentuais do porto (sem diesel)" : "Percentuais do ferro"}
+                </h3>
                 <div
                   style={{
                     display: "grid",
@@ -834,11 +927,17 @@ export function QuoteItemScreenflow({
                     gap: 12,
                   }}
                 >
-                  {([
-                    ["Diesel", dieselPct, setDieselPct],
-                    ["IGP-M", igpmPct, setIgpmPct],
-                    ["IPCA", ipcaPct, setIpcaPct],
-                  ] as const).map(([label, value, setValue]) => (
+                  {(isPort
+                    ? ([
+                        ["IGP-M", portIgpmPct, setPortIgpmPct],
+                        ["IPCA", portIpcaPct, setPortIpcaPct],
+                      ] as const)
+                    : ([
+                        ["Diesel", dieselPct, setDieselPct],
+                        ["IGP-M", igpmPct, setIgpmPct],
+                        ["IPCA", ipcaPct, setIpcaPct],
+                      ] as const)
+                  ).map(([label, value, setValue]) => (
                     <div
                       key={String(label)}
                       style={{ padding: 12, background: "#f3f3f3", borderRadius: 4 }}
@@ -886,7 +985,9 @@ export function QuoteItemScreenflow({
                     aria-label="Explicação da soma dos percentuais anuais"
                     onClick={() =>
                       toast("Regra: percentuais de reajuste anual", {
-                        description: "Quando a vigência do contrato ultrapassa 365 dias, os percentuais de Diesel, IGP-M e IPCA precisam totalizar 100%. Os valores são configurados na Oportunidade e conferidos antes de avançar.",
+                        description: isPort
+                          ? "O porto tem reajuste próprio e não usa diesel. Quando a vigência ultrapassa 365 dias, IGP-M + IPCA do porto precisam totalizar 100% (padrão citado no KT: IGP-M 100%, a confirmar). Pela ANTAQ, o reajuste de preços é informado com 30 dias de antecedência."
+                          : "Quando a vigência do contrato ultrapassa 365 dias, os percentuais de Diesel, IGP-M e IPCA precisam totalizar 100%. Os valores são configurados na Oportunidade e conferidos antes de avançar.",
                         duration: Infinity,
                         action: { label: "Entendi", onClick: () => {} },
                       })
@@ -895,8 +996,8 @@ export function QuoteItemScreenflow({
                     i
                   </button>
                   <small style={{ display: "block", marginTop: 12 }}>
-                  Vigência: {termStart || "—"} a {termEnd || "—"} · {termDays} dias · Dia de
-                  aplicação: {applicationDay}
+                  Vigência: {termStart || "—"} a {termEnd || "—"} · {termDays} dias
+                  {isPort ? " · reajuste por inflação (sem diesel)" : ` · Dia de aplicação: ${applicationDay}`}
                 </small>
                 {readjustmentError && (
                   <p
@@ -919,13 +1020,22 @@ export function QuoteItemScreenflow({
                     setSavingReadjustment(true);
                     try {
                       await updateOpportunityReadjustment({
-                        data: {
-                          id: opportunityId,
-                          diesel_pct: dieselPct,
-                          igpm_pct: igpmPct,
-                          ipca_pct: ipcaPct,
-                          first_readjustment_date: firstDate,
-                        },
+                        data: isPort
+                          ? {
+                              id: opportunityId,
+                              modal: PORT,
+                              diesel_pct: 0,
+                              igpm_pct: portIgpmPct,
+                              ipca_pct: portIpcaPct,
+                              first_readjustment_date: firstDate,
+                            }
+                          : {
+                              id: opportunityId,
+                              diesel_pct: dieselPct,
+                              igpm_pct: igpmPct,
+                              ipca_pct: ipcaPct,
+                              first_readjustment_date: firstDate,
+                            },
                       });
                       toast.success("Parâmetros de reajuste atualizados na Oportunidade.");
                       await onTermSaved?.();
@@ -968,10 +1078,14 @@ export function QuoteItemScreenflow({
                     onChange={(event) => setFirstDate(event.target.value)}
                     style={{ ...inputStyle, width: "auto", margin: "0 8px" }}
                   />
-                  As aplicações seguem o dia {applicationDay} de cada período.
+                  {isPort
+                    ? "O porto reajusta por índice de inflação na data de aniversário."
+                    : `As aplicações seguem o dia ${applicationDay} de cada período.`}
                 </p>
                 <small>
-                  A Data Base Diesel e a base aplicável serão definidas por fluxo na próxima etapa.
+                  {isPort
+                    ? "Porto não usa Base Diesel: a próxima etapa não pede base nem data."
+                    : "A Data Base Diesel e a base aplicável serão definidas por fluxo na próxima etapa."}{" "}
                   O cálculo financeiro do reajuste permanece como gap técnico registrado.
                 </small>
               </section>
@@ -981,7 +1095,10 @@ export function QuoteItemScreenflow({
             <>
               <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
                 Adicione os períodos que desejar. Os serviços do mesmo período são rateados para
-                fechar 100%; FRETE é obrigatório.
+                fechar 100%;{" "}
+                {isPort
+                  ? `porto não tem produto obrigatório nem Base Diesel${expectedMovement ? `; o cais deste fluxo é ${expectedMovement}` : ""}.`
+                  : "FRETE é obrigatório."}
               </p>
               <label style={labelStyle}>
                 Tarifa usada nesta Cotação
@@ -1006,7 +1123,12 @@ export function QuoteItemScreenflow({
                   {select(
                     itemService,
                     setItemService,
-                    SERVICES.map((s) => ({ value: s, label: s })),
+                    services
+                      .filter(
+                        (s) =>
+                          !(expectedMovement && PORT_MOVEMENT_SERVICES.includes(s) && s !== expectedMovement),
+                      )
+                      .map((s) => ({ value: s, label: s })),
                   )}
                 </label>
               )}
@@ -1143,7 +1265,7 @@ export function QuoteItemScreenflow({
                         (v) =>
                           updateGroup(index, {
                             year: Number(v),
-                            diesel_base_date: applicationDate(applicationDay, g.month, Number(v)),
+                            diesel_base_date: dieselDateFor(g.month, Number(v)),
                           }),
                         unique(yearMonths, (p) => String(p.year)).map((p) => ({
                           value: String(p.year),
@@ -1158,7 +1280,7 @@ export function QuoteItemScreenflow({
                         (v) =>
                           updateGroup(index, {
                             month: Number(v),
-                            diesel_base_date: applicationDate(applicationDay, Number(v), g.year),
+                            diesel_base_date: dieselDateFor(Number(v), g.year),
                           }),
                         yearMonths
                           .filter((p) => p.year === g.year)
@@ -1222,6 +1344,13 @@ export function QuoteItemScreenflow({
                         onChange={(e) => updateGroup(index, { tariff: Number(e.target.value) })}
                       />
                     </label>
+                    {isPort ? (
+                      <label style={labelStyle}>
+                        Base Diesel
+                        <input style={inputStyle} aria-label="Base Diesel do porto" value="Não se aplica (porto)" readOnly />
+                      </label>
+                    ) : (
+                      <>
                     <label style={labelStyle}>
                       Base Diesel do fluxo
                       {select(g.diesel_base_id, (v) => updateGroup(index, { diesel_base_id: v }), [
@@ -1238,6 +1367,8 @@ export function QuoteItemScreenflow({
                         readOnly
                       />
                     </label>
+                      </>
+                    )}
                   </div>
                   {instrumentType === "Contrato" ? (
                     <section
@@ -1318,12 +1449,15 @@ export function QuoteItemScreenflow({
                   <div style={{ marginTop: 8 }}>
                     <b style={{ fontSize: 12 }}>Serviços e rateio</b>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "8px 0" }}>
-                      {SERVICES.map((s) => (
+                      {services.map((s) => (
                         <label key={s} style={{ fontSize: 12 }}>
                           <input
                             type="checkbox"
                             checked={g.services.some((x) => x.service === s)}
-                            disabled={s === "FRETE"}
+                            disabled={
+                              s === policy.requiredService ||
+                              (!!expectedMovement && PORT_MOVEMENT_SERVICES.includes(s) && s !== expectedMovement)
+                            }
                             onChange={() => toggleService(index, s)}
                           />{" "}
                           {s}
@@ -1460,7 +1594,11 @@ export function QuoteItemScreenflow({
                     " — será estendida até o último mês das Agendas"}
                 </li>
                 <li>Tarifa configurada pela Oportunidade: {integrationTariff}</li>
-                <li>FRETE incluído e rateio de cada grupo validado em 100%</li>
+                <li>
+                  {isPort
+                    ? "Porto: sem Base Diesel, serviços do catálogo portuário e rateio de cada grupo validado em 100%"
+                    : "FRETE incluído e rateio de cada grupo validado em 100%"}
+                </li>
               </ul>
               <p>Item e Agendas serão gravados como uma operação única.</p>
             </>
@@ -1495,6 +1633,7 @@ export function QuoteItemScreenflow({
               className="sf-btn sf-btn--brand"
               onClick={() => {
                 if (!validateCurrent()) return;
+                if (step === 0) normalizeForModal();
                 if (skipReadjustment && step === 0) setStep(2);
                 else setStep((s) => s + 1);
               }}
