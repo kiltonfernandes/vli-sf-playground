@@ -80,6 +80,7 @@ export function ensureSchema(): Promise<void> {
       joint_debtor text,
       integration_tariff text NOT NULL DEFAULT 'Líquida',
       take_or_pay integer NOT NULL DEFAULT 0,
+      take_or_pay_config text,
       created_at text NOT NULL,
       updated_at text NOT NULL
     )`);
@@ -103,6 +104,8 @@ export function ensureSchema(): Promise<void> {
       );
     if (!opportunityColumns.rows.some((row) => row.name === "first_readjustment_date"))
       await client.execute(`ALTER TABLE opportunities ADD COLUMN first_readjustment_date text`);
+    if (!opportunityColumns.rows.some((row) => row.name === "take_or_pay_config"))
+      await client.execute(`ALTER TABLE opportunities ADD COLUMN take_or_pay_config text`);
 
     await client.execute(
       `CREATE TABLE IF NOT EXISTS locations (id text PRIMARY KEY, name text NOT NULL, code text NOT NULL, city text NOT NULL, state text NOT NULL, microregion text NOT NULL, location_type text NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,

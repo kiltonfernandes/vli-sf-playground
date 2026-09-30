@@ -16,6 +16,8 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v8.21.07` — Add end-to-end Take or Pay setup, validation, Contract and addendum clauses; prohibit ACS Take or Pay; persist review/billing dates and compensation rules while keeping financial settlement external.
+
 - `v7.21.07` — Make Ferro readjustment values editable with shared client/server rules; align diesel base dates to the Schedule month or previous month; repair single-service price edits by recalculating the full group allocation; add four Opportunity/Quote-specific contract clauses; update the README's current flow and addendum documentation.
 - `v6.21.07` — Default Quote Schedule grouping to Período, add bulk price editing to the Jetsons comparison (percent adjustment or target deviation over Jetsons with live preview, allocation kept at 100%), add a one-click “Criar aditivo” action on contract Quotes that spawns the addendum Opportunity and Quote from the signed NetLex contract, and rename the initial NetLex status to “Análise jurídica” with an automatic migration of existing documents.
 - `v6.20.07` — Add the “Embaralhar aditivo” shuffle to addendum Quotes: seeded scenario with at least 60% of the baseline Schedules changed or deleted and about 30% new Schedules, enforcing the app's date rules (unique Flow+month, no past or pre-term months, term extension for Schedules after the end, valid diesel base dates, annual readjustment when the term exceeds 365 days).

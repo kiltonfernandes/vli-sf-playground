@@ -72,6 +72,7 @@ export const opportunities = sqliteTable(
     joint_debtor: text("joint_debtor"),
     integration_tariff: text("integration_tariff").notNull().default("Líquida"),
     take_or_pay: integer("take_or_pay").notNull().default(0),
+    take_or_pay_config: text("take_or_pay_config"),
     /** Aditivo: contrato NetLex (vigente/assinado) que esta oportunidade modifica. */
     base_contract_id: text("base_contract_id"),
     created_at: text("created_at").notNull(),

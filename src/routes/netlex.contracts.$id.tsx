@@ -426,6 +426,15 @@ function NetlexContractPage() {
                   : "Não configurado para esta Oportunidade."}
               </p>
               {takeOrPay.enabled && (
+                <>
+                {takeOrPay.config && <div className="sf-fields">
+                  <Fact label="Data de apuração" value={takeOrPay.config.auditDate ? fmtDate(takeOrPay.config.auditDate) : "Não informada"} />
+                  <Fact label="Data de faturamento" value={takeOrPay.config.billingDate ? fmtDate(takeOrPay.config.billingDate) : "Não informada"} />
+                  <Fact label="Compensação" value={({ individual: "Fluxos individuais", "all-flows": "Todos os fluxos", "flow-pairs": "Pares de fluxos", groups: "Grupos de fluxos" } as Record<string, string>)[takeOrPay.config.compensationMode] ?? "—"} />
+                  <Fact label="Base" value={({ volume: "Volume", tariff: "Tarifa", both: "Volume e tarifa" } as Record<string, string>)[takeOrPay.config.calculationBasis] ?? "—"} />
+                  {takeOrPay.config.pairs?.map((pair: any, index: number) => <Fact key={`pair-${index}`} label={`Par ${index + 1}`} value={`${flowLabel(pair.compensatedFlowId, items)} → ${flowLabel(pair.compensatingFlowId, items)} (${pair.ratioFrom}:${pair.ratioTo})`} />)}
+                  {takeOrPay.config.groups?.map((group: any, index: number) => <Fact key={`group-${index}`} label={`Grupo ${group.name || index + 1}`} value={group.flowIds.map((flowId: string) => flowLabel(flowId, items)).join(", ")} />)}
+                </div>}
                 <div className="sf-netlex-table-wrap">
                   <table className="sf-netlex-table sf-netlex-table--compact">
                     <thead>
@@ -458,6 +467,8 @@ function NetlexContractPage() {
                     </tbody>
                   </table>
                 </div>
+                <p>Registro dos parâmetros comerciais. A apuração operacional e financeira ocorre fora do aplicativo.</p>
+                </>
               )}
             </section>
 
@@ -624,6 +635,11 @@ function Fact({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function flowLabel(flowId: string, items: Array<Record<string, any>>) {
+  const item = items.find((row) => row.plannedFlowId === flowId);
+  return item ? `${item.flowCode} · ${item.origin} → ${item.destination}` : flowId;
 }
 
 function toleranceValue(value: unknown) {

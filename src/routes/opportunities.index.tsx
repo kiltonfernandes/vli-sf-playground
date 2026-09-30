@@ -53,7 +53,6 @@ function OpportunitiesPage() {
     { name: "vli_entity", label: "Entidade contratada VLI" },
     { name: "joint_debtor", label: "Devedor solidário" },
     { name: "integration_tariff", label: "Tarifa padrão para novas Cotações", type: "select", options: ["CBS", "Líquida"] },
-    { name: "take_or_pay", label: "Take or Pay", type: "checkbox" },
   ];
   const columns: Column<Opportunity>[] = [
     { key: "name", label: "Oportunidade", render: (row) => <Link to="/opportunities/$id" params={{ id: row.id }} style={{ color: "#0176d3", fontWeight: 600 }}>{row.name}</Link>, sortValue: (row) => row.name, searchValue: (row) => row.name },
@@ -66,7 +65,8 @@ function OpportunitiesPage() {
   ];
   const transform = (form: Record<string, any>) => {
     const { account_name, ...rest } = form;
-    return { ...rest, application_day: Number(rest.application_day ?? 10), account_id: accountIdByName.get(account_name), take_or_pay: rest.take_or_pay ? 1 : 0 };
+    const { take_or_pay: _legacyTop, take_or_pay_config: _topConfig, ...opportunityData } = rest;
+    return { ...opportunityData, application_day: Number(rest.application_day ?? 10), account_id: accountIdByName.get(account_name) };
   };
   const defaults = (row?: Opportunity | null) => ({
     name: row?.name ?? "", account_name: row?.account_name ?? "",
@@ -77,7 +77,6 @@ function OpportunitiesPage() {
     diesel_pct: row?.diesel_pct ?? 0, igpm_pct: row?.igpm_pct ?? 0, ipca_pct: row?.ipca_pct ?? 0,
     contracting_parties: row?.contracting_parties ?? "", vli_entity: row?.vli_entity ?? "VLI Multimodal S.A.",
     joint_debtor: row?.joint_debtor ?? "", integration_tariff: row?.integration_tariff ?? "Líquida",
-    take_or_pay: !!row?.take_or_pay,
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ["opportunities"] });
   async function remove(row: Opportunity) {

@@ -230,6 +230,8 @@ export type AddendumInput = {
   newReadjustment?: { dieselPct: number; igpmPct: number; ipcaPct: number } | null;
   baseTakeOrPay?: boolean;
   newTakeOrPay?: boolean;
+  baseTakeOrPayConfig?: unknown;
+  newTakeOrPayConfig?: unknown;
   changes: AddendumChange[];
   tariffBasis: string;
   applicationDay: number;
@@ -268,6 +270,33 @@ export function buildAddendumClauses(input: AddendumInput): AddendumClause[] {
       title: "Composição do reajuste anual",
       text: `A composição do reajuste anual passa a ser Diesel ${nr.dieselPct.toFixed(2)}%, IGP-M ${nr.igpmPct.toFixed(2)}% e IPCA ${nr.ipcaPct.toFixed(2)}%.`,
     });
+
+  const normalizedTop = (value: unknown) => {
+    if (value == null) return null;
+    const sort = (item: any): any => Array.isArray(item)
+      ? item.map(sort)
+      : item && typeof item === "object"
+        ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, sort(item[key])]))
+        : item;
+    return JSON.stringify(sort(value));
+  };
+  if (
+    (input.baseTakeOrPay ?? false) !== (input.newTakeOrPay ?? false) ||
+    normalizedTop(input.baseTakeOrPayConfig) !== normalizedTop(input.newTakeOrPayConfig)
+  ) {
+    const config = input.newTakeOrPayConfig as {
+      auditDate?: string; billingDate?: string; compensationMode?: string; calculationBasis?: string;
+    } | null | undefined;
+    const modes: Record<string, string> = {
+      individual: "cada fluxo individualmente", "all-flows": "todos os fluxos em conjunto",
+      "flow-pairs": "pares de fluxos compensados e compensadores", groups: "grupos de fluxos",
+    };
+    const bases: Record<string, string> = { volume: "volume", tariff: "tarifa", both: "volume e tarifa" };
+    const text = config
+      ? `O Take or Pay passa a ser apurado em ${brDate(config.auditDate ?? "")}, com faturamento em ${brDate(config.billingDate ?? "")}. A compensação será ${modes[config.compensationMode ?? ""] ?? "conforme configuração registrada"}, considerando ${bases[config.calculationBasis ?? ""] ?? "a base definida"}.`
+      : "Fica removida a configuração de Take or Pay anteriormente prevista.";
+    clauses.push({ kind: "Take or Pay", title: "Configuração do Take or Pay", text });
+  }
 
   const byItem = (rows: AddendumChange[]) =>
     groupBy(rows, (row) => `${row.flowCode}|${row.service}|${row.plaza}`);
