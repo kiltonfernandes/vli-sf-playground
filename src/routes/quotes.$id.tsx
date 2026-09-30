@@ -10,6 +10,7 @@ import {
   listQuoteOptions,
   saveRecord,
   saveQuoteItemScreenflow,
+  setAddendumScheduleExclusion,
   submitQuoteForApproval,
   syncQuote,
   updateOpportunityTerm,
@@ -20,7 +21,9 @@ import { SfShell } from "@/components/SfShell";
 import { SfRecordDialog, SfDeleteButton, type FieldDef } from "@/components/SfRecordDialog";
 import { QuoteItemEditDialog, QuoteItemScreenflow } from "@/components/QuoteItemScreenflow";
 import { fmtMoney } from "@/lib/format";
-import { BusinessRulesChecklist } from "@/components/BusinessRulesChecklist";
+import { BusinessRulesChecklist, type BusinessRule } from "@/components/BusinessRulesChecklist";
+import { SfPath } from "@/components/SfPath";
+import { FIELD_LABELS } from "@/lib/addendum";
 
 const SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
 export const Route = createFileRoute("/quotes/$id")({
@@ -38,7 +41,8 @@ function QuotePage() {
     [editSchedule, setEditSchedule] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
-    [pricePanel, setPricePanel] = useState<any>(null);
+    [pricePanel, setPricePanel] = useState<any>(null),
+    [groupMode, setGroupMode] = useState<"structure" | "period">("structure");
   const { data, isLoading } = useQuery({
     queryKey: ["quote-full", id],
     queryFn: () => getQuoteFull({ data: { id } }) as Promise<any>,
@@ -69,7 +73,166 @@ function QuotePage() {
   const tariffMode = q.tariff_mode || options?.opportunity?.integration_tariff || "Líquida";
   const canChangeTariff = !items.some((item) => item.schedules?.length);
   const applicationDay = Number(options?.opportunity?.application_day ?? 10);
-  const businessRules = getQuoteBusinessRules(q, items, options, tariffMode, applicationDay);
+  const addendum = data.addendum as any | null;
+  const isAddendum = q.instrument_type === "Aditivo";
+  const editable = q.status === "Rascunho" && !q.is_synced;
+  const businessRules = [
+    ...getQuoteBusinessRules(q, items, options, tariffMode, applicationDay),
+    ...(isAddendum
+      ? [
+          {
+            label: "Aditivo com ao menos uma mudança",
+            passed: !!addendum?.hasChanges,
+            detail: addendum
+              ? `${addendum.summary.Incluir} incluir · ${addendum.summary.Alterar} alterar · ${addendum.summary.Excluir} excluir${addendum.termChanged ? " · vigência alterada" : ""}`
+              : "Sem contrato original vinculado.",
+            explanation:
+              "A Cotação do aditivo começa com as Agendas do contrato vigente marcadas como Manter. Para concluir, inclua uma Agenda, altere volume/preço/Base Diesel de uma Agenda existente, marque uma como Excluir ou altere a vigência. A alçada de preço considera somente as Agendas incluídas ou alteradas.",
+          },
+        ]
+      : []),
+  ];
+  const priceOk = ["Ok", "Aprovada"].includes(String(q.price_status));
+  const needsApproval =
+    ["Pendente alçada", "Aprovada", "Rejeitada"].includes(String(q.price_status)) ||
+    (q.alcada_level && q.alcada_level !== "Sem alçada");
+  const hasSchedules = items.some((item) => item.schedules?.length);
+  const pathSteps = [
+    { label: "Rascunho", hint: hasSchedules ? `${items.length} itens` : "Adicione Itens e Agendas" },
+    { label: "Validação de preços", hint: String(q.price_status) },
+    ...(needsApproval
+      ? [{ label: "Aprovação", hint: q.price_status === "Aprovada" ? "Aprovada" : q.price_status === "Rejeitada" ? "Rejeitada" : "Pendente" }]
+      : []),
+    { label: "Concluída" },
+    { label: "Sincronizada" },
+  ];
+  const pathIndex = (() => {
+    const approvalOffset = needsApproval ? 1 : 0;
+    if (q.is_synced) return pathSteps.length - 1;
+    if (q.status === "Concluída") return 3 + approvalOffset;
+    if (!hasSchedules) return 0;
+    if (needsApproval && q.price_status !== "Aprovada") return q.price_status === "Não validada" ? 1 : 2;
+    if (!priceOk) return 1;
+    return 2 + approvalOffset;
+  })();
+  const pathBlocked = q.price_status === "Rejeitada";
+  function scheduleRow(row: any, item: any, withContext = false) {
+    const practiced = Number(
+      tariffMode === "CBS"
+        ? (row.accessory_cbs ?? row.tariff_cbs ?? 0)
+        : (row.accessory_net ?? row.tariff_net ?? 0),
+    );
+    const jetsons = row.recommended_unit;
+    const deviation = jetsons && jetsons > 0 ? ((practiced - jetsons) / jetsons) * 100 : null;
+    const situation = priceSituation(deviation, thresholds, q.price_status === "Aprovada");
+    const operation = row.operation as string | null;
+    const baseline = !!row.base_snapshot;
+    const excluded = operation === "Excluir";
+    return (
+      <tr
+        key={row.id}
+        style={{
+          ...situationRowStyle(situation),
+          ...(excluded ? { opacity: 0.55, textDecoration: "line-through" } : {}),
+        }}
+      >
+        {isAddendum && (
+          <td>
+            <span
+              className={`sf-op-chip sf-op-chip--${operation ?? "Incluir"}`}
+              title={
+                operation === "Alterar"
+                  ? `Alterado: ${changedLabels(row).join(", ")}`
+                  : operation === "Manter"
+                    ? "Sem mudança em relação ao contrato"
+                    : undefined
+              }
+            >
+              {operation ?? "Incluir"}
+            </span>
+          </td>
+        )}
+        <td>
+          <Link to="/quote-schedules/$id" params={{ id: row.id }} style={{ color: "#0176d3" }}>
+            {String(row.month).padStart(2, "0")}/{row.year} · {row.period_window}
+          </Link>
+        </td>
+        {withContext && (
+          <>
+            <td>{item.route}</td>
+            <td>{item.merchandise_name}</td>
+            <td>{row.service}</td>
+          </>
+        )}
+        <td>{row.plaza}</td>
+        <td>
+          {row.volume.toLocaleString("pt-BR")} {item.unit}
+        </td>
+        <td>{fmtMoney(Number(tariffMode === "CBS" ? row.tariff_cbs : row.tariff_net))}</td>
+        <td>{fmtMoney(practiced)}</td>
+        <td>{jetsons ? fmtMoney(Number(jetsons)) : "—"}</td>
+        <td style={{ color: deviationColor(deviation, thresholds), fontWeight: 600 }}>
+          {deviation === null ? "—" : `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%`}
+        </td>
+        <td>
+          <SituationChip situation={situation} thresholds={thresholds} />
+        </td>
+        <td style={{ whiteSpace: "nowrap", textDecoration: "none" }}>
+          {!excluded && (
+            <>
+              <button className="sf-link" onClick={() => setEditSchedule({ ...row, item })}>
+                Editar
+              </button>{" "}
+              ·{" "}
+            </>
+          )}
+          {baseline ? (
+            <button
+              className="sf-link"
+              style={{ color: excluded ? "#0176d3" : "#ba0517" }}
+              disabled={!editable}
+              onClick={async () => {
+                try {
+                  await setAddendumScheduleExclusion({
+                    data: { quoteId: id, scheduleKey: row.schedule_key, exclude: !excluded },
+                  });
+                  await refresh();
+                  toast.success(excluded ? "Agenda restaurada no aditivo" : "Agenda marcada como Excluir", {
+                    description: "Todas as linhas de serviço desse período seguem a mesma marcação.",
+                  });
+                } catch (error) {
+                  toast.error("Não foi possível alterar a Agenda", {
+                    description: error instanceof Error ? error.message : undefined,
+                  });
+                }
+              }}
+            >
+              {excluded ? "Restaurar" : "Excluir no aditivo"}
+            </button>
+          ) : (
+            <button
+              className="sf-link"
+              style={{ color: "#ba0517" }}
+              onClick={async () => {
+                if (confirm("Excluir esta Agenda?")) {
+                  try {
+                    await deleteRecord({ data: { table: "quote_schedules", id: row.id } });
+                    await refresh();
+                  } catch (error) {
+                    toast.error("Não foi possível excluir", {
+                      description: error instanceof Error ? error.message : undefined,
+                    });
+                  }
+                }
+              }}
+            >
+              Excluir
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  }
   const baseLabels = new Map((options?.dieselBases ?? []).map((base: any) => [base.name, base.id]));
   const scheduleFields: FieldDef[] = [
     { name: "year", label: "Ano", type: "number", required: true },
@@ -236,6 +399,75 @@ function QuotePage() {
           <SfDeleteButton table="quotes" id={id} redirectTo="/quotes" />
         </div>
       </div>
+      <SfPath
+        label="Caminho da Cotação"
+        steps={pathSteps}
+        currentIndex={pathIndex}
+        done={!!q.is_synced}
+        blocked={pathBlocked}
+        actions={<>
+            <button
+              className="sf-btn"
+              disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
+              title="Abre o comparativo do Jetsons com todas as Agendas: desvio por linha, cores de alçada e edição de preço"
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const result = await validateQuotePrices({ data: { id } });
+                  setPricePanel(result);
+                  await refresh();
+                } catch (error) {
+                  toast.error("Não foi possível validar os preços", {
+                    description: error instanceof Error ? error.message : undefined,
+                  });
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? "Validando…" : "Validar preços"}
+            </button>
+            {q.price_status === "Pendente alçada" && (
+              <button
+                className="sf-btn sf-btn--brand"
+                disabled={busy}
+                title="Envia os preços desta Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
+                onClick={() => doSubmitApproval()}
+              >
+                {busy ? "Enviando…" : "Enviar preços para aprovação"}
+              </button>
+            )}
+            <button
+              className="sf-btn"
+              disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
+              onClick={() => doAction("complete")}
+            >
+              {busy ? "Validando…" : "Validar e concluir"}
+            </button>
+            <button
+              className="sf-btn sf-btn--brand"
+              disabled={busy || q.status !== "Concluída" || !!q.is_synced}
+              onClick={() => doAction("sync")}
+            >
+              {busy ? "Sincronizando…" : "Sincronizar com Oportunidade"}
+            </button>
+          </>}
+        message={
+          <span style={{ display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <PriceStatusBadge quote={q} />
+            {message && (
+              <span
+                style={{
+                  color:
+                    message.includes("não") || message.includes("precisa") ? "#ba0517" : "#2e844a",
+                }}
+              >
+                {message}
+              </span>
+            )}
+          </span>
+        }
+      />
       <div className="sf-highlights">
         <Highlight label="Número" value={q.quote_number} />
         <Highlight label="Tipo" value={q.record_type} />
@@ -266,12 +498,45 @@ function QuotePage() {
             }}
           />
         </Section>
+        {isAddendum && addendum && <AddendumPanel addendum={addendum} />}
         <Section
           id="items"
           title="Itens da Cotação"
-          subtitle={`${items.length} itens · agrupados por Companhia, Mercadoria, Trecho, Modal e Serviço`}
+          subtitle={
+            groupMode === "period"
+              ? `${items.length} itens · agrupados por Período`
+              : `${items.length} itens · agrupados por Companhia, Mercadoria, Trecho, Modal e Serviço`
+          }
         >
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              marginBottom: 10,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#514f4d" }}>
+              Agrupar por
+              <div className="sf-segmented" role="group" aria-label="Agrupar Agendas">
+                <button
+                  type="button"
+                  aria-pressed={groupMode === "structure"}
+                  onClick={() => setGroupMode("structure")}
+                >
+                  Estrutura
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={groupMode === "period"}
+                  onClick={() => setGroupMode("period")}
+                >
+                  Período
+                </button>
+              </div>
+            </div>
             <button
               className="sf-btn sf-btn--brand"
               onClick={() => setNewItem(true)}
@@ -286,7 +551,15 @@ function QuotePage() {
               Serviço.
             </p>
           )}
-          {buildItemGroups(items, q.account_name).map((company) => (
+          {groupMode === "period" && (
+            <PeriodGroups
+              items={items}
+              isAddendum={isAddendum}
+              tariffMode={tariffMode}
+              renderRow={(row, item) => scheduleRow(row, item, true)}
+            />
+          )}
+          {groupMode === "structure" && buildItemGroups(items, q.account_name).map((company) => (
             <details key={company.id} className="sf-nested-accordion" open>
               <summary>
                 <span>›</span>
@@ -369,6 +642,7 @@ function QuotePage() {
                                       <table className="sf-table">
                                         <thead>
                                           <tr>
+                                            {isAddendum && <th>Operação</th>}
                                             <th>Período</th>
                                             <th>Praça</th>
                                             <th>Volume</th>
@@ -381,96 +655,7 @@ function QuotePage() {
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {item.schedules.map((row: any) => {
-                                            const practiced = Number(
-                                              tariffMode === "CBS"
-                                                ? (row.accessory_cbs ?? row.tariff_cbs ?? 0)
-                                                : (row.accessory_net ?? row.tariff_net ?? 0),
-                                            );
-                                            const jetsons = row.recommended_unit;
-                                            const deviation =
-                                              jetsons && jetsons > 0
-                                                ? ((practiced - jetsons) / jetsons) * 100
-                                                : null;
-                                            const situation = priceSituation(
-                                              deviation,
-                                              thresholds,
-                                              q.price_status === "Aprovada",
-                                            );
-                                            return (
-                                              <tr key={row.id} style={situationRowStyle(situation)}>
-                                                <td>
-                                                  <Link
-                                                    to="/quote-schedules/$id"
-                                                    params={{ id: row.id }}
-                                                    style={{ color: "#0176d3" }}
-                                                  >
-                                                    {String(row.month).padStart(2, "0")}/{row.year} ·{" "}
-                                                    {row.period_window}
-                                                  </Link>
-                                                </td>
-                                                <td>{row.plaza}</td>
-                                                <td>
-                                                  {row.volume.toLocaleString("pt-BR")} {item.unit}
-                                                </td>
-                                                <td>
-                                                  {fmtMoney(
-                                                    Number(
-                                                      tariffMode === "CBS"
-                                                        ? row.tariff_cbs
-                                                        : row.tariff_net,
-                                                    ),
-                                                  )}
-                                                </td>
-                                                <td>{fmtMoney(practiced)}</td>
-                                                <td>
-                                                  {jetsons ? fmtMoney(Number(jetsons)) : "—"}
-                                                </td>
-                                                <td
-                                                  style={{
-                                                    color: deviationColor(deviation, thresholds),
-                                                    fontWeight: 600,
-                                                  }}
-                                                >
-                                                  {deviation === null
-                                                    ? "—"
-                                                    : `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%`}
-                                                </td>
-                                                <td>
-                                                  <SituationChip
-                                                    situation={situation}
-                                                    thresholds={thresholds}
-                                                  />
-                                                </td>
-                                                <td>
-                                                  <button
-                                                    className="sf-link"
-                                                    onClick={() => setEditSchedule({ ...row, item })}
-                                                  >
-                                                    Editar
-                                                  </button>{" "}
-                                                  ·{" "}
-                                                  <button
-                                                    className="sf-link"
-                                                    style={{ color: "#ba0517" }}
-                                                    onClick={async () => {
-                                                      if (confirm("Excluir esta Agenda?")) {
-                                                        await deleteRecord({
-                                                          data: {
-                                                            table: "quote_schedules",
-                                                            id: row.id,
-                                                          },
-                                                        });
-                                                        await refresh();
-                                                      }
-                                                    }}
-                                                  >
-                                                    Excluir
-                                                  </button>
-                                                </td>
-                                              </tr>
-                                            );
-                                          })}
+                                          {item.schedules.map((row: any) => scheduleRow(row, item))}
                                         </tbody>
                                       </table>
                                     </div>
@@ -490,85 +675,6 @@ function QuotePage() {
             </details>
           ))}
         </Section>
-        <div
-          className="sf-card"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: 14,
-            gap: 12,
-          }}
-        >
-          <div>
-            <strong>Etapas da Cotação</strong>
-            <div style={{ fontSize: 12, color: "#706e6b" }}>
-              Rascunho → Concluída → Sincronizada
-            </div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>
-              <PriceStatusBadge quote={q} />
-            </div>
-            {message && (
-              <div
-                role="status"
-                style={{
-                  color:
-                    message.includes("não") || message.includes("precisa") ? "#ba0517" : "#2e844a",
-                  marginTop: 6,
-                }}
-              >
-                {message}
-              </div>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              className="sf-btn"
-              disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
-              title="Abre o comparativo do Jetsons com todas as Agendas: desvio por linha, cores de alçada e edição de preço"
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  const result = await validateQuotePrices({ data: { id } });
-                  setPricePanel(result);
-                  await refresh();
-                } catch (error) {
-                  toast.error("Não foi possível validar os preços", {
-                    description: error instanceof Error ? error.message : undefined,
-                  });
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              {busy ? "Validando…" : "Validar preços"}
-            </button>
-            {q.price_status === "Pendente alçada" && (
-              <button
-                className="sf-btn sf-btn--brand"
-                disabled={busy}
-                title="Envia os preços desta Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
-                onClick={() => doSubmitApproval()}
-              >
-                {busy ? "Enviando…" : "Enviar preços para aprovação"}
-              </button>
-            )}
-            <button
-              className="sf-btn"
-              disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
-              onClick={() => doAction("complete")}
-            >
-              {busy ? "Validando…" : "Validar e concluir"}
-            </button>
-            <button
-              className="sf-btn sf-btn--brand"
-              disabled={busy || q.status !== "Concluída" || !!q.is_synced}
-              onClick={() => doAction("sync")}
-            >
-              {busy ? "Sincronizando…" : "Sincronizar com Oportunidade"}
-            </button>
-          </div>
-        </div>
         </div>
         <aside className="quote-record-aside">
           <BusinessRulesChecklist rules={businessRules} />
@@ -592,7 +698,8 @@ function QuotePage() {
           integrationTariff={tariffMode}
           applicationDay={applicationDay}
           canChangeTariff={canChangeTariff}
-          usedSchedules={options?.usedSchedules ?? []}
+          usedSchedules={(options?.usedSchedules ?? []).filter((row: any) => row.quote_id === id)}
+          allowExtendTerm
           initialFlowId={scheduleItem?.flow_id}
           initialService={scheduleItem?.service}
           itemId={scheduleItem?.id}
@@ -620,8 +727,13 @@ function QuotePage() {
               await refresh();
               toast.success(
                 scheduleItem ? "Agendas adicionadas ao Item" : "Item e Agendas salvos",
-                { description: `${result.scheduleCount} linhas de Agenda criadas.` },
+                {
+                  description: result.extendedEnd
+                    ? `${result.scheduleCount} linhas de Agenda criadas. Vigência estendida até ${result.extendedEnd.split("-").reverse().join("/")}.`
+                    : `${result.scheduleCount} linhas de Agenda criadas.`,
+                },
               );
+              if (result.extendedEnd) await qc.invalidateQueries({ queryKey: ["opportunity-full"] });
               return true;
             } catch (error) {
               toast.error("Não foi possível salvar o Item e as Agendas", {
@@ -850,18 +962,8 @@ function getQuoteBusinessRules(
     const key = `${row.schedule_key}|${row.service}`;
     localCounts.set(key, (localCounts.get(key) ?? 0) + 1);
   }
-  const otherQuoteSchedules = (options?.usedSchedules ?? []).filter(
-    (row: any) => row.quote_id !== quote.id,
-  );
-  const noDuplicates =
-    hasSchedules &&
-    [...localCounts.values()].every((count) => count === 1) &&
-    schedules.every(
-      (row) =>
-        !otherQuoteSchedules.some(
-          (other: any) => other.schedule_key === row.schedule_key && other.service === row.service,
-        ),
-    );
+  // A duplicidade vale dentro da Cotação: outras Cotações (inclusive aditivos) podem repetir a chave.
+  const noDuplicates = hasSchedules && [...localCounts.values()].every((count) => count === 1);
   const opportunity = options?.opportunity;
   const termValid = isQuoteTermValid(opportunity);
   const termDays = opportunity?.contract_start && opportunity?.contract_end
@@ -953,10 +1055,10 @@ function getQuoteBusinessRules(
       label: "Sem serviço duplicado na chave da Agenda",
       passed: noDuplicates,
       detail: noDuplicates
-        ? "Nenhum serviço repetido nesta ou em outra Cotação."
+        ? "Nenhum serviço repetido nesta Cotação."
         : "A mesma chave de Agenda já contém esse serviço.",
       explanation:
-        "A duplicidade é verificada pela combinação funcional do Fluxo, ano e mês, divisão, praça e serviço, inclusive contra outras Cotações. Um serviço só pode aparecer uma vez para essa combinação. Ajuste o período, a praça ou remova a linha repetida.",
+        "A duplicidade é verificada pela combinação funcional do Fluxo, ano e mês, divisão, praça e serviço. Um serviço só pode aparecer uma vez para essa combinação dentro da mesma Cotação. Ajuste o período, a praça ou remova a linha repetida.",
     },
     ...(opportunity?.instrument_type === "ACS"
       ? [
@@ -1745,5 +1847,164 @@ function PricePanel({
         </div>
       </section>
     </div>
+  );
+}
+
+function changedLabels(row: any) {
+  if (!row.base_snapshot) return [];
+  try {
+    const base = JSON.parse(row.base_snapshot) as Record<string, unknown>;
+    return Object.keys(FIELD_LABELS)
+      .filter((field) => {
+        const a = base[field],
+          b = row[field];
+        const empty = (value: unknown) => value === null || value === undefined || value === "";
+        if (empty(a) && empty(b)) return false;
+        if ((empty(a) && Number(b) === 0) || (empty(b) && Number(a) === 0)) return false;
+        if (typeof a === "number" || typeof b === "number")
+          return Math.abs(Number(a) - Number(b)) >= 0.005;
+        return String(a) !== String(b);
+      })
+      .map((field) => FIELD_LABELS[field]);
+  } catch {
+    return [];
+  }
+}
+
+function PeriodGroups({
+  items,
+  isAddendum,
+  tariffMode,
+  renderRow,
+}: {
+  items: any[];
+  isAddendum: boolean;
+  tariffMode: string;
+  renderRow: (row: any, item: any) => React.ReactNode;
+}) {
+  const periods = new Map<string, Array<{ row: any; item: any }>>();
+  for (const item of items)
+    for (const row of item.schedules ?? []) {
+      const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+      periods.set(key, [...(periods.get(key) ?? []), { row, item }]);
+    }
+  const sorted = [...periods.entries()].sort(([a], [b]) => a.localeCompare(b));
+  if (!sorted.length) return null;
+  return (
+    <>
+      {sorted.map(([key, rows]) => {
+        const [year, month] = key.split("-");
+        const volume = rows
+          .filter(({ row }) => row.service === "FRETE")
+          .reduce((sum, { row }) => sum + Number(row.volume), 0);
+        const practiced = rows.reduce((sum, { row }) => {
+          const unit = Number(
+            tariffMode === "CBS"
+              ? (row.accessory_cbs ?? row.tariff_cbs ?? 0)
+              : (row.accessory_net ?? row.tariff_net ?? 0),
+          );
+          return sum + unit * Number(row.volume);
+        }, 0);
+        const flows = new Set(rows.map(({ item }) => item.flow_id)).size;
+        return (
+          <details key={key} className="sf-nested-accordion" open>
+            <summary>
+              <span>›</span>
+              <strong>📅 {month}/{year}</strong>
+              <small>
+                {rows.length} agendas · {flows} fluxo(s) · volume {volume.toLocaleString("pt-BR")} ·
+                praticado {fmtMoney(practiced)}
+              </small>
+            </summary>
+            <div style={{ padding: 8, overflowX: "auto" }}>
+              <table className="sf-table">
+                <thead>
+                  <tr>
+                    {isAddendum && <th>Operação</th>}
+                    <th>Período</th>
+                    <th>Trecho</th>
+                    <th>Mercadoria</th>
+                    <th>Serviço</th>
+                    <th>Praça</th>
+                    <th>Volume</th>
+                    <th>Tarifa grupo</th>
+                    <th>Praticada</th>
+                    <th>Jetsons</th>
+                    <th>Desvio</th>
+                    <th>Situação</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>{rows.map(({ row, item }) => renderRow(row, item))}</tbody>
+              </table>
+            </div>
+          </details>
+        );
+      })}
+    </>
+  );
+}
+
+function AddendumPanel({ addendum }: { addendum: any }) {
+  const summary = addendum.summary ?? {};
+  const fmt = (iso: string | null | undefined) => (iso ? iso.split("-").reverse().join("/") : "—");
+  return (
+    <section className="sf-card" style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div className="sf-next-step-eyebrow">Motor de aditivo</div>
+          <strong style={{ fontSize: 16, color: "#032d60" }}>
+            Mudanças sobre o contrato{" "}
+            <a
+              href={`/netlex/contracts/${addendum.baseContract.id}`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "#0176d3" }}
+            >
+              Nº {addendum.baseContract.netlex_number}
+            </a>
+          </strong>
+          <div style={{ fontSize: 12, color: "#514f4d", marginTop: 4 }}>
+            Vigência do contrato: {fmt(addendum.baseTerm.start)} a {fmt(addendum.baseTerm.end)}
+            {addendum.termChanged && (
+              <>
+                {" "}
+                → <strong>{fmt(addendum.newTerm.start)} a {fmt(addendum.newTerm.end)}</strong>
+              </>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {(["Manter", "Incluir", "Alterar", "Excluir"] as const).map((operation) => (
+            <span key={operation} className={`sf-op-chip sf-op-chip--${operation}`}>
+              {operation}: {summary[operation] ?? 0}
+            </span>
+          ))}
+        </div>
+      </div>
+      <p style={{ fontSize: 12, color: "#514f4d", margin: "10px 0 6px" }}>
+        As Agendas do contrato entram como <b>Manter</b>. Editar volume, preço ou Base Diesel vira{" "}
+        <b>Alterar</b>; “Excluir no aditivo” marca <b>Excluir</b>; Agendas novas, inclusive depois do
+        fim original da vigência, entram como <b>Incluir</b>. A alçada considera só Incluir e Alterar.
+      </p>
+      <strong style={{ fontSize: 13 }}>Cláusulas geradas ({addendum.clauses.length})</strong>
+      {addendum.clauses.length ? (
+        <ol className="sf-clause-list">
+          {addendum.clauses.map((clause: any) => (
+            <li key={clause.number}>
+              <strong>
+                {clause.number}. {clause.title}
+              </strong>
+              {clause.text}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p style={{ fontSize: 12, color: "#706e6b" }}>
+          Nenhuma mudança ainda. O aditivo precisa de ao menos uma inclusão, alteração, exclusão ou
+          mudança de vigência.
+        </p>
+      )}
+    </section>
   );
 }

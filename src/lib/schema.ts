@@ -72,6 +72,8 @@ export const opportunities = sqliteTable(
     joint_debtor: text("joint_debtor"),
     integration_tariff: text("integration_tariff").notNull().default("Líquida"),
     take_or_pay: integer("take_or_pay").notNull().default(0),
+    /** Aditivo: contrato NetLex (vigente/assinado) que esta oportunidade modifica. */
+    base_contract_id: text("base_contract_id"),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
   },
@@ -89,6 +91,11 @@ export const netlex_contracts = sqliteTable(
     netlex_number: text("netlex_number").notNull(),
     title: text("title").notNull(),
     status: text("status").notNull().default("Aguardando retorno da NetLex"),
+    /** Contrato, ACS ou Aditivo (RAT). */
+    kind: text("kind").notNull().default("Contrato"),
+    /** Aditivo: contrato original que recebe as mudanças na assinatura. */
+    base_contract_id: text("base_contract_id"),
+    signed_at: text("signed_at"),
     document_json: text("document_json").notNull(),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
@@ -221,6 +228,10 @@ export const quote_schedules = sqliteTable(
     tolerance_client_volume: integer("tolerance_client_volume"),
     tolerance_vli_tariff: integer("tolerance_vli_tariff"),
     tolerance_client_tariff: integer("tolerance_client_tariff"),
+    /** Aditivo: Manter, Incluir, Alterar ou Excluir. Nulo fora do aditivo. */
+    operation: text("operation"),
+    /** Aditivo: valores da Agenda no contrato vigente (JSON), base da comparação. */
+    base_snapshot: text("base_snapshot"),
     created_at: text("created_at").notNull(),
     updated_at: text("updated_at").notNull(),
   },

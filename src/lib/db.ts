@@ -122,6 +122,16 @@ export function ensureSchema(): Promise<void> {
     await client.execute(
       `CREATE TABLE IF NOT EXISTS quotes (id text PRIMARY KEY, opportunity_id text NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE, quote_number text NOT NULL, name text NOT NULL, record_type text NOT NULL DEFAULT 'VLI_General', tariff_mode text, status text NOT NULL DEFAULT 'Rascunho', is_synced integer NOT NULL DEFAULT 0, seed integer NOT NULL, created_at text NOT NULL, updated_at text NOT NULL)`,
     );
+    const addendumColumns: Array<{ table: string; name: string; sql: string }> = [
+      { table: "opportunities", name: "base_contract_id", sql: `ALTER TABLE opportunities ADD COLUMN base_contract_id text` },
+      { table: "netlex_contracts", name: "kind", sql: `ALTER TABLE netlex_contracts ADD COLUMN kind text NOT NULL DEFAULT 'Contrato'` },
+      { table: "netlex_contracts", name: "base_contract_id", sql: `ALTER TABLE netlex_contracts ADD COLUMN base_contract_id text` },
+      { table: "netlex_contracts", name: "signed_at", sql: `ALTER TABLE netlex_contracts ADD COLUMN signed_at text` },
+    ];
+    for (const column of addendumColumns) {
+      const info = await client.execute(`PRAGMA table_info(${column.table})`);
+      if (!info.rows.some((row) => row.name === column.name)) await client.execute(column.sql);
+    }
     const quoteColumns = await client.execute(`PRAGMA table_info(quotes)`);
     if (!quoteColumns.rows.some((row) => row.name === "tariff_mode"))
       await client.execute(`ALTER TABLE quotes ADD COLUMN tariff_mode text`);
@@ -150,6 +160,11 @@ export function ensureSchema(): Promise<void> {
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_quote_schedules_key ON quote_schedules(schedule_key)`,
     );
+    const scheduleColumns = await client.execute(`PRAGMA table_info(quote_schedules)`);
+    if (!scheduleColumns.rows.some((row) => row.name === "operation"))
+      await client.execute(`ALTER TABLE quote_schedules ADD COLUMN operation text`);
+    if (!scheduleColumns.rows.some((row) => row.name === "base_snapshot"))
+      await client.execute(`ALTER TABLE quote_schedules ADD COLUMN base_snapshot text`);
     await client.execute(`CREATE TABLE IF NOT EXISTS approvers (
       id text PRIMARY KEY,
       name text NOT NULL,

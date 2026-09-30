@@ -1840,3 +1840,180 @@ body[data-lab-accent] .sf-icon-btn:hover {
     flex-direction: column;
   }
 }
+
+/* Path reutilizável (Cotação e NetLex) */
+.sf-path-step-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.sf-path-step-text > span {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.sf-path-step-text small {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 10px;
+  font-weight: 400;
+  opacity: .9;
+  text-overflow: ellipsis;
+}
+.sf-path-step.is-current.is-blocked {
+  background: #ba0517;
+}
+.sf-path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.sf-path-actions .sf-btn {
+  height: 34px;
+  border-radius: 18px;
+  font-size: 12px;
+}
+.sf-path-actions .sf-btn:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+.sf-path-panels--single {
+  grid-template-columns: 1fr;
+}
+.sf-next-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 12px 16px 0;
+  padding: 14px 18px;
+  border: 1px solid #9ec5eb;
+  border-left: 5px solid #0176d3;
+  border-radius: 8px;
+  background: #f3f9ff;
+}
+.sf-next-step.is-warning {
+  border-color: #f2cc60;
+  border-left-color: #dd7a01;
+  background: #fff7e6;
+}
+.sf-next-step.is-success {
+  border-color: #91db8b;
+  border-left-color: #2e844a;
+  background: #f1fbf0;
+}
+.sf-next-step-eyebrow {
+  color: #5c5c5c;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.sf-next-step-title {
+  margin-top: 3px;
+  color: #032d60;
+  font-size: 17px;
+  font-weight: 700;
+}
+.sf-next-step-detail {
+  margin-top: 3px;
+  color: #444;
+  font-size: 13px;
+}
+.sf-next-step-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sf-op-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sf-op-chip--Manter { background: #ecebea; color: #514f4d; }
+.sf-op-chip--Incluir { background: #cdefc4; color: #194e2c; }
+.sf-op-chip--Alterar { background: #fef0c3; color: #5c4204; }
+.sf-op-chip--Excluir { background: #feded2; color: #8e030f; }
+.sf-segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+}
+.sf-segmented button {
+  padding: 5px 12px;
+  border: 0;
+  border-right: 1px solid #c9c9c9;
+  background: #fff;
+  color: #0176d3;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sf-segmented button:last-child {
+  border-right: 0;
+}
+.sf-segmented button[aria-pressed="true"] {
+  background: #0176d3;
+  color: #fff;
+  font-weight: 700;
+}
+.sf-clause-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sf-clause-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid #f3f2f2;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.sf-clause-list li strong {
+  display: block;
+  color: #032d60;
+}
+.sf-netlex-status {
+  padding: 8px 14px;
+  border: 1px solid #f2cc60;
+  border-radius: 20px;
+  background: #fff7e6;
+  color: #5c4000;
+  font-size: 13px;
+  font-weight: 700;
+}
+.sf-netlex-status.is-signed,
+.sf-netlex-stamp.is-signed {
+  border-color: #91db8b;
+  background: #ebf7e6;
+  color: #194e2c;
+}
+.sf-nested-accordion > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  list-style: none;
+  cursor: pointer;
+}
+.sf-nested-accordion > summary::-webkit-details-marker {
+  display: none;
+}
+.sf-nested-accordion > summary > span:first-child {
+  display: inline-block;
+  width: 12px;
+  color: #706e6b;
+  transition: transform 0.15s ease;
+}
+.sf-nested-accordion[open] > summary > span:first-child {
+  transform: rotate(90deg);
+}
+.sf-nested-accordion > summary small {
+  color: #706e6b;
+}

@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import {
   listOpportunityQuotes,
   saveRecord,
   sendOpportunityToNetlex,
+  createAddendumOpportunity,
   deleteRecord,
   deleteRecordsBulk,
 } from "@/lib/crud";
@@ -46,6 +47,8 @@ export const Route = createFileRoute("/opportunities/$id")({
 function OpportunityRecordPage() {
   const { id } = Route.useParams();
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [creatingAddendum, setCreatingAddendum] = useState(false);
   const [editing, setEditing] = useState(false);
   const [activeTab, setActiveTab] = useState("quotes");
   const [bulkQuoteRows, setBulkQuoteRows] = useState<any[] | null>(null);
@@ -105,9 +108,17 @@ function OpportunityRecordPage() {
   const priceApproved =
     !!syncedQuote && ["Ok", "Aprovada"].includes(String(syncedQuote.price_status));
   const netlexContract = data.netlexContract ?? sentContract;
+  const baseContract = data.baseContract;
+  const addenda = (data.addenda ?? []) as any[];
+  const isAddendum = opportunity.instrument_type === "Aditivo";
+  const netlexInstrument = ["Contrato", "ACS", "Aditivo"].includes(opportunity.instrument_type);
+  const netlexSigned = netlexContract?.status === "Assinatura";
+  const inFormalization = ["Formalização", "Fechado"].includes(opportunity.stage);
+  const baseContractSigned = !isAddendum || baseContract?.status === "Assinatura";
   const canSendContract =
     opportunity.stage === "Formalização" &&
-    opportunity.instrument_type === "Contrato" &&
+    netlexInstrument &&
+    baseContractSigned &&
     !netlexContract &&
     priceApproved &&
     isOpportunityTermValid(opportunity) &&
@@ -123,13 +134,30 @@ function OpportunityRecordPage() {
     },
     {
       label: "Instrumento aceito para Cotação",
-      passed: ["Contrato", "ACS"].includes(opportunity.instrument_type),
+      passed: ["Contrato", "ACS"].includes(opportunity.instrument_type) || (isAddendum && !!baseContract),
       detail: ["Contrato", "ACS"].includes(opportunity.instrument_type)
         ? opportunity.instrument_type
-        : "O fluxo atual aceita Contrato ou ACS.",
+        : isAddendum
+          ? baseContract
+            ? `Aditivo ao contrato Nº ${baseContract.netlex_number}`
+            : "Crie o aditivo a partir de um Contrato em Assinatura no NetLex."
+          : "O fluxo atual aceita Contrato, ACS ou Aditivo.",
       explanation:
-        "Neste escopo ferroviário, a preparação da Cotação atende aos instrumentos Contrato e ACS. Outros instrumentos, como Aditivo, ainda não fazem parte desta jornada.",
+        "Neste escopo ferroviário, a Cotação atende Contrato, ACS e Aditivo. O Aditivo nunca nasce solto: ele é criado a partir de um Contrato em Assinatura no NetLex (ACS não gera aditivo) e herda partes, vigência, reajustes e Agendas desse contrato.",
     },
+    ...(isAddendum
+      ? [
+          {
+            label: "Contrato original em Assinatura",
+            passed: baseContract?.status === "Assinatura",
+            detail: baseContract
+              ? `Nº ${baseContract.netlex_number} · ${baseContract.status}`
+              : "Sem contrato original vinculado.",
+            explanation:
+              "O aditivo modifica um contrato que já existe; o contrato original continua valendo. Ele precisa estar em Assinatura no NetLex. Quando o aditivo chegar em Assinatura, as mudanças são aplicadas no contrato original e a versão anterior fica guardada no histórico.",
+          },
+        ]
+      : []),
     {
       label: "Segmento ferroviário",
       passed: opportunity.segment === "Ferroviário",
@@ -216,6 +244,30 @@ function OpportunityRecordPage() {
       explanation:
         "A minuta deve identificar a parte cliente que contrata e a empresa VLI prestadora. O devedor solidário é opcional.",
     },
+    ...(inFormalization
+      ? [
+          {
+            label: "Formalizar no NetLex",
+            passed: !!netlexContract,
+            detail: netlexContract
+              ? `Documento Nº ${netlexContract.netlex_number} enviado.`
+              : "Use “Enviar ao NetLex” no topo desta página.",
+            explanation:
+              "Na Formalização, Contrato, ACS e Aditivo passam pelo NetLex. O envio gera o número do documento com o status inicial “Aguardando retorno da NetLex”. No aditivo, o NetLex recebe somente as mudanças (RAT), não o contrato inteiro.",
+          },
+          {
+            label: "Status Assinatura no NetLex",
+            passed: netlexSigned,
+            detail: netlexSigned
+              ? "Documento em Assinatura. A Oportunidade pode ser fechada."
+              : netlexContract
+                ? `Status atual: ${netlexContract.status}. Abra o documento no NetLex e mude para Assinatura.`
+                : "Disponível depois do envio ao NetLex.",
+            explanation:
+              "O fechamento da Oportunidade depende do retorno do NetLex. Abra o documento e use “Mover para Assinatura” (simula o analista do NetLex). Só então o Path libera Formalização → Fechado.",
+          },
+        ]
+      : []),
   ];
   const fields: FieldDef[] = [
     { name: "name", label: "Nome da oportunidade", required: true },
@@ -294,7 +346,7 @@ function OpportunityRecordPage() {
 
   const quoteDefinitions =
     opportunity.segment === "Ferroviário" &&
-    ["Contrato", "ACS"].includes(opportunity.instrument_type)
+    (["Contrato", "ACS"].includes(opportunity.instrument_type) || (isAddendum && !!baseContract))
       ? [
           {
             key: "quotes",
@@ -483,7 +535,7 @@ function OpportunityRecordPage() {
             Editar
           </button>
           {opportunity.stage === "Formalização" &&
-            opportunity.instrument_type === "Contrato" &&
+            netlexInstrument &&
             !netlexContract && (
               <button
                 className="sf-btn sf-btn--brand"
@@ -498,7 +550,7 @@ function OpportunityRecordPage() {
                   setNetlexModalOpen(true);
                 }}
               >
-                Enviar contrato ao NetLex
+                Enviar ao NetLex
               </button>
             )}
           <SfDeleteButton table="opportunities" id={id} redirectTo="/opportunities" />
@@ -509,6 +561,7 @@ function OpportunityRecordPage() {
         stage={opportunity.stage}
         hasSyncedQuote={hasSyncedQuote}
         priceApproved={priceApproved}
+        netlexSigned={netlexSigned}
         rules={opportunityRules}
         opportunityId={id}
         accountName={account?.name ?? "—"}
@@ -528,7 +581,9 @@ function OpportunityRecordPage() {
               ? "Negociação"
               : opportunity.stage === "Negociação"
                 ? "Aprovação"
-                : "Formalização";
+                : opportunity.stage === "Aprovação"
+                  ? "Formalização"
+                  : "Fechado";
           try {
             await saveRecord({
               data: { table: "opportunities", recordId: id, data: { stage: nextStage } },
@@ -560,43 +615,52 @@ function OpportunityRecordPage() {
           value={opportunity.close_date ? fmtDate(opportunity.close_date) : "—"}
         />
       </div>
-      {netlexContract && (
-        <div
-          style={{
-            margin: "0 24px",
-            padding: "16px 20px",
-            border: "1px solid #9ec5eb",
-            borderLeft: "5px solid #0176d3",
-            borderRadius: 8,
-            background: "#f3f9ff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 16,
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <div style={{ color: "#5c5c5c", fontSize: 12, fontWeight: 700 }}>
-              CONTRATO NETLEX · SIMULAÇÃO
-            </div>
-            <div style={{ fontSize: 20, color: "#014486", fontWeight: 700, marginTop: 4 }}>
-              Nº {netlexContract.netlex_number}
-            </div>
-            <div style={{ color: "#444", fontSize: 13, marginTop: 3 }}>
-              {netlexContract.status}
-            </div>
-          </div>
-          <a
-            className="sf-btn sf-btn--brand"
-            href={`/netlex/contracts/${netlexContract.id}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Abrir contrato ↗
-          </a>
-        </div>
-      )}
+      <FormalizationBanner
+        stage={opportunity.stage}
+        instrument={opportunity.instrument_type}
+        contract={netlexContract}
+        baseContract={baseContract}
+        addenda={addenda}
+        canSend={canSendContract}
+        blockers={opportunityRules.filter((rule) => !rule.passed && !["Formalizar no NetLex", "Status Assinatura no NetLex"].includes(rule.label)).map((rule) => rule.label)}
+        creatingAddendum={creatingAddendum}
+        onSend={() => {
+          setNetlexError("");
+          setNetlexModalOpen(true);
+        }}
+        onClose={async () => {
+          try {
+            await saveRecord({ data: { table: "opportunities", recordId: id, data: { stage: "Fechado" } } });
+            await Promise.all([
+              qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
+              qc.invalidateQueries({ queryKey: ["opportunities"] }),
+            ]);
+            toast.success("Oportunidade fechada");
+          } catch (error) {
+            toast.error("Não foi possível fechar", {
+              description: error instanceof Error ? error.message : undefined,
+            });
+          }
+        }}
+        onCreateAddendum={async () => {
+          if (!netlexContract) return;
+          setCreatingAddendum(true);
+          try {
+            const result = await createAddendumOpportunity({ data: { contractId: netlexContract.id } });
+            await qc.invalidateQueries({ queryKey: ["opportunities"] });
+            toast.success("Oportunidade de aditivo criada", {
+              description: "Ela herda partes, vigência, reajustes e Agendas do contrato.",
+            });
+            await navigate({ to: "/opportunities/$id", params: { id: result.id } });
+          } catch (error) {
+            toast.error("Não foi possível criar o aditivo", {
+              description: error instanceof Error ? error.message : undefined,
+            });
+          } finally {
+            setCreatingAddendum(false);
+          }
+        }}
+      />
 
       <div style={{ padding: 24 }}>
         <div
@@ -901,7 +965,7 @@ function OpportunityRecordPage() {
               ×
             </button>
             <h2 id="netlex-modal-title" style={{ margin: "0 28px 8px 0", fontSize: 20 }}>
-              Enviar contrato ao NetLex
+              {isAddendum ? "Enviar aditivo ao NetLex" : "Enviar ao NetLex"}
             </h2>
             <p style={{ margin: "0 0 20px", color: "#5c5c5c", fontSize: 14 }}>
               A Cotação aprovada e os dados contratuais serão reunidos em uma minuta demonstrativa.
@@ -979,7 +1043,7 @@ function OpportunityRecordPage() {
                             qc.invalidateQueries({ queryKey: ["opportunity-full", id] }),
                             qc.invalidateQueries({ queryKey: ["opportunities"] }),
                           ]);
-                          toast.success("Contrato preparado no NetLex simulado", {
+                          toast.success(`${isAddendum ? "Aditivo" : opportunity.instrument_type === "ACS" ? "ACS" : "Contrato"} preparado no NetLex simulado`, {
                             description: `Número ${response.contract.netlex_number} · aguardando retorno.`,
                           });
                         } catch (error) {
@@ -1013,6 +1077,7 @@ function OpportunityPath({
   stage,
   hasSyncedQuote,
   priceApproved,
+  netlexSigned,
   rules,
   accountName,
   instrument,
@@ -1028,7 +1093,9 @@ function OpportunityPath({
   stage: string;
   hasSyncedQuote: boolean;
   priceApproved: boolean;
+  netlexSigned: boolean;
   rules: BusinessRule[];
+  opportunityId?: string;
   accountName: string;
   instrument: string;
   segment: string;
@@ -1044,7 +1111,8 @@ function OpportunityPath({
   const canAdvance =
     stage === "Prospecção" ||
     (stage === "Negociação" && hasSyncedQuote) ||
-    (stage === "Aprovação" && hasSyncedQuote && priceApproved);
+    (stage === "Aprovação" && hasSyncedQuote && priceApproved) ||
+    (stage === "Formalização" && netlexSigned);
   return (
     <section className="sf-path-card" aria-label="Caminho da oportunidade">
       <button
@@ -1084,7 +1152,11 @@ function OpportunityPath({
                 ? "Salvando…"
                 : stage === "Aprovação"
                   ? "✓  Liberar para Formalização"
-                  : "✓  Marcar etapa como concluída"}
+                  : stage === "Formalização"
+                    ? "✓  Fechar oportunidade"
+                    : stage === "Fechado"
+                      ? "✓  Oportunidade fechada"
+                      : "✓  Marcar etapa como concluída"}
             </button>
           </div>
           <div className="sf-path-panels">
@@ -1122,6 +1194,139 @@ function OpportunityPath({
         </>
       )}
     </section>
+  );
+}
+
+function FormalizationBanner({
+  stage,
+  instrument,
+  contract,
+  baseContract,
+  addenda,
+  canSend,
+  blockers,
+  creatingAddendum,
+  onSend,
+  onClose,
+  onCreateAddendum,
+}: {
+  stage: string;
+  instrument: string;
+  contract: any | null;
+  baseContract: any | null;
+  addenda: any[];
+  canSend: boolean;
+  blockers: string[];
+  creatingAddendum: boolean;
+  onSend: () => void;
+  onClose: () => void;
+  onCreateAddendum: () => void;
+}) {
+  const isAddendum = instrument === "Aditivo";
+  const netlexInstrument = ["Contrato", "ACS", "Aditivo"].includes(instrument);
+  const openLink = (target: any, label = "Abrir no NetLex ↗") => (
+    <a className="sf-btn" href={`/netlex/contracts/${target.id}`} target="_blank" rel="noreferrer">
+      {label}
+    </a>
+  );
+  const baseLine = isAddendum && baseContract && (
+    <div className="sf-next-step-detail">
+      Aditivo ao contrato{" "}
+      <a href={`/netlex/contracts/${baseContract.id}`} target="_blank" rel="noreferrer" style={{ color: "#0176d3" }}>
+        Nº {baseContract.netlex_number}
+      </a>{" "}
+      · {baseContract.status}
+    </div>
+  );
+  if (!contract) {
+    if (stage !== "Formalização") {
+      if (!isAddendum || !baseContract) return null;
+      return (
+        <div className="sf-next-step">
+          <div>
+            <div className="sf-next-step-eyebrow">Aditivo</div>
+            <div className="sf-next-step-title">Mudanças sobre o contrato Nº {baseContract.netlex_number}</div>
+            <div className="sf-next-step-detail">
+              A Cotação começa com as Agendas do contrato (Manter). Altere, exclua ou inclua Agendas; o NetLex recebe só o que mudou.
+            </div>
+          </div>
+          <div className="sf-next-step-actions">{openLink(baseContract, "Contrato original ↗")}</div>
+        </div>
+      );
+    }
+    if (!netlexInstrument) return null;
+    return (
+      <div className={"sf-next-step" + (canSend ? "" : " is-warning")}>
+        <div>
+          <div className="sf-next-step-eyebrow">Formalização · próximo passo</div>
+          <div className="sf-next-step-title">
+            {isAddendum ? "Enviar o aditivo ao NetLex" : `Enviar ${instrument === "ACS" ? "o ACS" : "o contrato"} ao NetLex`}
+          </div>
+          <div className="sf-next-step-detail">
+            {canSend
+              ? "Tudo pronto. O envio gera o número do documento com status “Aguardando retorno da NetLex”."
+              : `Pendências: ${blockers.join(" · ") || "confira as regras de negócio"}.`}
+          </div>
+          {baseLine}
+        </div>
+        <div className="sf-next-step-actions">
+          <button className="sf-btn sf-btn--brand" disabled={!canSend} onClick={onSend}>
+            Enviar ao NetLex
+          </button>
+        </div>
+      </div>
+    );
+  }
+  const signed = contract.status === "Assinatura";
+  return (
+    <div className={"sf-next-step" + (signed ? " is-success" : " is-warning")}>
+      <div>
+        <div className="sf-next-step-eyebrow">
+          {isAddendum ? "Aditivo" : instrument === "ACS" ? "ACS" : "Contrato"} NetLex · simulação
+        </div>
+        <div className="sf-next-step-title">
+          Nº {contract.netlex_number} · {contract.status}
+        </div>
+        <div className="sf-next-step-detail">
+          {!signed
+            ? "Próximo passo: abra o documento no NetLex e mude o status para Assinatura."
+            : stage === "Formalização"
+              ? "Documento em Assinatura. Feche a Oportunidade para concluir a Formalização."
+              : isAddendum
+                ? "Aditivo em Assinatura: as mudanças já foram aplicadas no contrato original."
+                : instrument === "Contrato"
+                  ? `Contrato em Assinatura. ${addenda.length ? `${addenda.length} aditivo(s) vinculado(s).` : "Pode receber aditivos."}`
+                  : "Documento em Assinatura. ACS não gera aditivo."}
+        </div>
+        {baseLine}
+        {!isAddendum && addenda.length > 0 && (
+          <div className="sf-next-step-detail">
+            {addenda.map((entry, index) => (
+              <span key={entry.id}>
+                {index > 0 && " · "}
+                <Link to="/opportunities/$id" params={{ id: entry.id }} style={{ color: "#0176d3" }}>
+                  {entry.name}
+                </Link>{" "}
+                ({entry.document ? entry.document.status : entry.stage})
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="sf-next-step-actions">
+        {openLink(contract)}
+        {signed && stage === "Formalização" && (
+          <button className="sf-btn sf-btn--brand" onClick={onClose}>
+            ✓ Fechar oportunidade
+          </button>
+        )}
+        {signed && instrument === "Contrato" && (
+          <button className="sf-btn sf-btn--brand" disabled={creatingAddendum} onClick={onCreateAddendum}>
+            {creatingAddendum ? "Criando…" : "+ Nova oportunidade de aditivo"}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

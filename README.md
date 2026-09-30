@@ -10,6 +10,19 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v6.19.07 — Aditivo, Assinatura no NetLex e Paths estilizados
+
+- **Aditivo implementado**: um Contrato em **Assinatura** no NetLex gera “+ Nova oportunidade de aditivo”. A Oportunidade aditiva herda partes, vigência, reajustes e tarifa; a Cotação nasce com as Agendas vigentes do contrato como **Manter**. Editar volume, preço, Base Diesel ou tolerância vira **Alterar**; “Excluir no aditivo” marca **Excluir**; Agendas novas (inclusive depois do fim original) entram como **Incluir**. Vários aditivos por contrato são permitidos; **ACS nunca gera aditivo**.
+- **Motor de aditivo** (`src/lib/addendum.ts`): compara com a linha de base e gera as cláusulas (prorrogação de prazo, reajuste, inclusão, alteração, exclusão, Data Base Diesel, Take or Pay). A alçada considera só Incluir/Alterar e a Cotação exige ao menos uma mudança.
+- **NetLex**: Contrato, ACS e Aditivo passam pelo NetLex. Status inicial **Aguardando retorno da NetLex** e novo status **Assinatura** (simulado pelo botão “Mover para Assinatura”). O aditivo recebe número `NNNN-A{n}`, envia só as mudanças e, na Assinatura, é aplicado ao contrato original como nova versão (histórico “Versões e aditivos”). A data de efeito é a da Assinatura.
+- **Formalização clara**: regras “Formalizar no NetLex” e “Status Assinatura no NetLex” ficam vermelhas até serem cumpridas; um banner mostra o próximo passo, e Fechar só é liberado com Assinatura.
+- **Paths estilizados** (`SfPath`) na Cotação (Rascunho → Validação de preços → Aprovação → Concluída → Sincronizada) e no documento NetLex (Enviado → Aguardando retorno → Assinatura).
+- **Cotação**: Agendas podem ser agrupadas por **Estrutura** ou por **Período**; acordeões com seta única.
+- **Agendas em lote**: o mês inicial fica dentro da vigência e o mês final é livre; ao salvar, a vigência é estendida até o último mês. No aditivo, dá para agendar depois do término original.
+- Correções: a regra de duplicidade da Cotação vale só dentro da Cotação (igual ao servidor); fechar a Oportunidade após a Assinatura não esbarra mais no bloqueio de minuta enviada.
+- Fora do escopo: data de efeito futura, cotação de ajuste, OV, portuário/rodoviário e integração real com o NetLex.
+- Verificação: build de produção aprovado; E2E local cobriu contrato → Assinatura → fechamento → aditivo (Manter/Alterar/Excluir/Incluir após o fim) → validação/sincronização → envio 18001-A1 → Assinatura → contrato original atualizado (versão 2) → segundo aditivo partindo do contrato atualizado.
+
 ### v5.19.07 — Aprovação simplificada e etapa de contrato NetLex
 
 - Amplia o Comparativo Jetsons para até 1280px; remove nomes e níveis de aprovadores e deixa apenas os perfis **Vendas** e **Aprovador**.

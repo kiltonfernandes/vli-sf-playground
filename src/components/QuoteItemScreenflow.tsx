@@ -43,6 +43,8 @@ type Props = {
   applicationDay: number;
   canChangeTariff: boolean;
   usedSchedules: Array<{ schedule_key: string; service: string }>;
+  /** O mês final do lote é livre: meses após o fim estendem a vigência ao salvar. */
+  allowExtendTerm?: boolean;
   initialFlowId?: string;
   initialService?: string;
   itemId?: string;
@@ -199,6 +201,7 @@ export function QuoteItemScreenflow({
   applicationDay,
   canChangeTariff,
   usedSchedules,
+  allowExtendTerm = false,
   initialFlowId,
   initialService = "FRETE",
   itemId,
@@ -240,11 +243,24 @@ export function QuoteItemScreenflow({
   const readjustmentValid = !requiresAnnualSplit || Math.abs(readjustmentTotal - 100) < 0.001;
   const yearMonths = useMemo(() => {
     const result: Array<{ year: number; month: number }> = [];
-    for (let y = startYear; y <= endYear; y++)
-      for (let m = y === startYear ? startMonth : 1; m <= (y === endYear ? endMonth : 12); m++)
+    // Com fim livre, os seletores oferecem até 36 meses depois do término atual.
+    const lastKey = allowExtendTerm
+      ? (endYear + 3) * 100 + endMonth
+      : endYear * 100 + endMonth;
+    for (let y = startYear; y <= Math.floor(lastKey / 100); y++)
+      for (
+        let m = y === startYear ? startMonth : 1;
+        m <= (y === Math.floor(lastKey / 100) ? lastKey % 100 : 12);
+        m++
+      )
         result.push({ year: y, month: m });
     return result;
-  }, [startYear, startMonth, endYear, endMonth]);
+  }, [startYear, startMonth, endYear, endMonth, allowExtendTerm]);
+  // Mês inicial do lote: sempre dentro da vigência atual (o fim pode ser livre).
+  const termMonths = useMemo(
+    () => yearMonths.filter((period) => period.year * 100 + period.month <= endYear * 100 + endMonth),
+    [yearMonths, endYear, endMonth],
+  );
   const selectedFlow = flows.find(
     (flow) =>
       flow.origin_id === originId &&
@@ -334,7 +350,9 @@ export function QuoteItemScreenflow({
   function openBatch(index: number) {
     const group = groups[index];
     setBatchTarget(index);
-    setBatchStart(`${group.year}-${String(group.month).padStart(2, "0")}`);
+    const groupKey = group.year * 100 + group.month;
+    const startKey = Math.min(groupKey, endYear * 100 + endMonth);
+    setBatchStart(`${Math.floor(startKey / 100)}-${String(startKey % 100).padStart(2, "0")}`);
     setBatchEnd(`${endYear}-${String(endMonth).padStart(2, "0")}`);
     setError("");
   }
@@ -346,10 +364,31 @@ export function QuoteItemScreenflow({
       setError("Escolha um intervalo válido, com o início antes do fim.");
       return;
     }
-    const selectedPeriods = yearMonths.filter((period) => {
-      const key = period.year * 100 + period.month;
-      return key >= startKey && key <= endKey;
-    });
+    const termStartKey = startYear * 100 + startMonth;
+    if (startKey < termStartKey || startKey > endYear * 100 + endMonth) {
+      setError("O mês inicial precisa estar dentro da vigência da Oportunidade.");
+      return;
+    }
+    const selectedPeriods: Array<{ year: number; month: number }> = [];
+    if (allowExtendTerm) {
+      // Fim livre: gera todos os meses do intervalo, inclusive depois do término.
+      let year = Math.floor(startKey / 100),
+        month = startKey % 100;
+      while (year * 100 + month <= endKey && selectedPeriods.length < 120) {
+        selectedPeriods.push({ year, month });
+        month++;
+        if (month > 12) {
+          month = 1;
+          year++;
+        }
+      }
+    } else
+      selectedPeriods.push(
+        ...yearMonths.filter((period) => {
+          const key = period.year * 100 + period.month;
+          return key >= startKey && key <= endKey;
+        }),
+      );
     if (!selectedPeriods.length) {
       setError("O intervalo precisa ficar dentro da vigência da Oportunidade.");
       return;
@@ -386,11 +425,20 @@ export function QuoteItemScreenflow({
       );
       return;
     }
-    setGroups((old) => [...old, ...additions]);
+    // Se o grupo usado como modelo já existe como Agenda, ele é trocado pelos meses novos.
+    const templateKey = `${selectedFlow?.code}|${template.year}${String(template.month).padStart(2, "0")}|${template.division}|${template.plaza}`;
+    const replaceTemplate = usedKeys.has(templateKey);
+    const target = batchTarget;
+    setGroups((old) => [
+      ...(replaceTemplate ? old.filter((_, index) => index !== target) : old),
+      ...additions,
+    ]);
     setBatchTarget(null);
     setError("");
     toast.success(`${additions.length} novo(s) grupo(s) de Agenda adicionado(s)`, {
-      description: skipped
+      description: replaceTemplate
+        ? "O grupo modelo já existia como Agenda e foi substituído pelos meses novos. A Data Base Diesel foi ajustada automaticamente."
+        : skipped
         ? `${skipped} mês(es) já tinham grupo no formulário ou Agenda nessa chave. A Data Base Diesel foi ajustada automaticamente.`
         : `Períodos de ${batchStart} a ${batchEnd}; Data Base Diesel ajustada automaticamente.`,
     });
@@ -911,7 +959,7 @@ export function QuoteItemScreenflow({
                         {select(
                           batchStart,
                           setBatchStart,
-                          yearMonths.map((period) => {
+                          termMonths.map((period) => {
                             const value = `${period.year}-${String(period.month).padStart(2, "0")}`;
                             return {
                               value,
@@ -922,16 +970,26 @@ export function QuoteItemScreenflow({
                       </label>
                       <label style={labelStyle}>
                         Mês final
-                        {select(
-                          batchEnd,
-                          setBatchEnd,
-                          yearMonths.map((period) => {
-                            const value = `${period.year}-${String(period.month).padStart(2, "0")}`;
-                            return {
-                              value,
-                              label: `${String(period.month).padStart(2, "0")}/${period.year}`,
-                            };
-                          }),
+                        {allowExtendTerm ? (
+                          <input
+                            type="month"
+                            value={batchEnd}
+                            min={batchStart}
+                            onChange={(event) => setBatchEnd(event.target.value)}
+                            style={{ padding: "6px 8px", border: "1px solid #c9c9c9", borderRadius: 4 }}
+                          />
+                        ) : (
+                          select(
+                            batchEnd,
+                            setBatchEnd,
+                            yearMonths.map((period) => {
+                              const value = `${period.year}-${String(period.month).padStart(2, "0")}`;
+                              return {
+                                value,
+                                label: `${String(period.month).padStart(2, "0")}/${period.year}`,
+                              };
+                            }),
+                          )
                         )}
                       </label>
                       <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
@@ -953,8 +1011,13 @@ export function QuoteItemScreenflow({
                       <small style={{ gridColumn: "1 / -1", color: "#514f4d" }}>
                         Adiciona um grupo por mês no intervalo, copiando os dados e o rateio deste
                         grupo. Se o mês inicial já estiver representado no formulário, ele será
-                        mantido e os outros meses serão adicionados. Meses fora da vigência ou com
-                        Agenda nessa chave serão ignorados.
+                        mantido e os outros meses serão adicionados. Meses com Agenda nessa chave
+                        serão ignorados.
+                        {allowExtendTerm
+                          ? instrumentType === "Aditivo"
+                            ? " O mês final é livre: meses depois do fim original estendem a vigência e geram a cláusula de prorrogação do aditivo."
+                            : " O mês final é livre: meses depois do fim atual estendem a vigência da Oportunidade ao salvar."
+                          : " Meses fora da vigência serão ignorados."}
                       </small>
                     </div>
                   )}
@@ -1152,7 +1215,14 @@ export function QuoteItemScreenflow({
                   linha(s) de Agenda
                 </li>
                 <li>
-                  Vigência permitida: {contractStart} a {contractEnd}
+                  Vigência: {contractStart} a {contractEnd}
+                  {allowExtendTerm &&
+                    groups.some(
+                      (g) =>
+                        g.year * 100 + g.month >
+                        Number(contractEnd.slice(0, 4)) * 100 + Number(contractEnd.slice(5, 7)),
+                    ) &&
+                    " — será estendida até o último mês das Agendas"}
                 </li>
                 <li>Tarifa configurada pela Oportunidade: {integrationTariff}</li>
                 <li>FRETE incluído e rateio de cada grupo validado em 100%</li>
