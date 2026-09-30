@@ -16,6 +16,8 @@ Start each batch commit subject with `vPREVIOUS → vNEW | scope: short descript
 
 ## Version history
 
+- `v8.21.15` — Randomize Take or Pay tolerances per Agenda when creating a batch, while keeping all-zero batches without Take or Pay.
+
 - `v8.21.14` — Fix the Take or Pay screenflow runtime crash caused by a stale loading-state reference on the Continue button.
 
 - `v8.21.13` — Persist Agenda tolerances before saving the linked Take or Pay configuration, keeping the new commercial-conditions step atomic from the user's perspective.

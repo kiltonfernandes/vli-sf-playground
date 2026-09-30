@@ -381,6 +381,33 @@ export function QuoteItemScreenflow({
     setBatchEnd(`${endYear}-${String(endMonth).padStart(2, "0")}`);
     setError("");
   }
+  function randomizedBatchTolerances(template: AgendaGroup, index: number) {
+    const hasTakeOrPay = [
+      template.tolerance_vli_volume,
+      template.tolerance_client_volume,
+      template.tolerance_vli_tariff,
+      template.tolerance_client_tariff,
+    ].some((value) => value > 0);
+    if (!hasTakeOrPay) {
+      return {
+        tolerance_vli_volume: 0,
+        tolerance_client_volume: 0,
+        tolerance_vli_tariff: 0,
+        tolerance_client_tariff: 0,
+      };
+    }
+    // Usa o Seed da cotação para que o lote seja variado, mas reproduzível.
+    const valueFor = (offset: number) => {
+      const mixed = Math.imul(seed + index * 7919 + offset * 104729, 2654435761) >>> 0;
+      return 1 + (mixed % 10);
+    };
+    return {
+      tolerance_vli_volume: valueFor(1),
+      tolerance_client_volume: valueFor(2),
+      tolerance_vli_tariff: valueFor(3),
+      tolerance_client_tariff: valueFor(4),
+    };
+  }
   function createBatch() {
     if (batchTarget === null) return;
     const startKey = Number(batchStart.replace("-", ""));
@@ -436,11 +463,13 @@ export function QuoteItemScreenflow({
         continue;
       }
       existingKeys.add(key);
+      const tolerances = randomizedBatchTolerances(template, additions.length);
       additions.push({
         ...template,
         year: period.year,
         month: period.month,
         diesel_base_date: applicationDate(applicationDay, period.month, period.year),
+        ...tolerances,
         services: template.services.map((service) => ({ ...service })),
       });
     }
