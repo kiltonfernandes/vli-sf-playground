@@ -461,7 +461,7 @@ export function AdjustmentCurvePanel({
   };
 
   return (
-    <section className="sf-card sf-curve" aria-label="Curva de ajuste">
+    <section id="curve-volume" className="sf-card sf-curve" aria-label="Curva de ajuste">
       <div className="sf-card-header sf-curve-header">
         <span>📈 Curva de ajuste · redistribuição de volumes</span>
         <span className={"sf-status-chip sf-status-chip--" + (curve.changed && curve.balanced ? "success" : curve.changed ? "danger" : "neutral")}>

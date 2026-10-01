@@ -10,6 +10,13 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v11.21.20 — Revisão do fluxo de Cotação e aprovação
+
+- **Caminho da Cotação**: as etapas de aprovação, conclusão e sincronização agora indicam o estado correto, inclusive quando a alçada é necessária. Um painel contextual aponta a próxima ação e leva diretamente à Oportunidade depois da sincronização.
+- **Solicitações de alçada**: reenviar os mesmos preços preserva a solicitação pendente e abre seu acompanhamento. Alterar Itens, Agendas ou tarifas cancela a pendência anterior; uma decisão sobre preços desatualizados é recusada no servidor. O envio só é permitido enquanto a Cotação está em Rascunho.
+- **Cabeçalho**: o campo de busca sem função foi substituído por um seletor de áreas do CRM; o botão de notificações sem ação foi removido. A interface mantém os componentes e cores do Salesforce Lightning.
+- **Verificação**: build de produção aprovado; `tsc --noEmit` ainda aponta erros anteriores de tipagem das server functions em diversas páginas.
+
 ### v10.21.20 — Modal Portuário e segmento Ferroviário + Portuário
 
 - **Segmentos**: a Oportunidade passa a aceitar **Ferroviário**, **Portuário** e **Ferroviário + Portuário**. As regras de cada modal ficam em `src/lib/segments.ts` e não reaproveitam silenciosamente as regras ferroviárias. Rodoviário continua fora do escopo.

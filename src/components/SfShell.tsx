@@ -1,4 +1,4 @@
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { APP_VERSION } from "../lib/version";
 import { useEffect, useState } from "react";
@@ -30,6 +30,7 @@ const TABS: Array<{ label: string; to: string }> = [
 export function SfShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const path = location.pathname;
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
@@ -67,7 +68,17 @@ export function SfShell({ children }: { children: ReactNode }) {
           </span>
         </div>
         <div className="sf-gh-search">
-          <input className="sf-search-input" placeholder="Pesquisar" />
+          <select
+            className="sf-search-input"
+            aria-label="Ir para uma área do CRM"
+            value=""
+            onChange={(event) => {
+              if (event.target.value) navigate({ to: event.target.value });
+            }}
+          >
+            <option value="">Ir para uma área do CRM…</option>
+            {visibleTabs.map((tab) => <option key={tab.to} value={tab.to}>{tab.label}</option>)}
+          </select>
         </div>
         <div className="sf-gh-right">
           <span className="sf-gh-approver" title="Perfil ativo da simulação">
@@ -76,7 +87,6 @@ export function SfShell({ children }: { children: ReactNode }) {
           <button className="sf-btn" onClick={() => setSettingsOpen(true)}>
             Configurações
           </button>
-          <button className="sf-icon-btn" title="Notificações"></button>
           <div className="sf-avatar" title="Usuário">
             US
           </div>

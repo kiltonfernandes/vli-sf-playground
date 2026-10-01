@@ -113,6 +113,7 @@ function QuotePage() {
   const isSalesOrder = q.instrument_type === SALES_ORDER;
   const isPostContract = isPostContractInstrument(q.instrument_type);
   const postContract = (data as any).postContract as any | null;
+  const openApprovalId = data.openApprovalId as string | null;
   const curve = postContract?.curve ?? null;
   const editable = q.status === "Rascunho" && !q.is_synced;
   const CURVE_SKIPPED_RULES = [
@@ -187,13 +188,11 @@ function QuotePage() {
     { label: "Sincronizada" },
   ];
   const pathIndex = (() => {
-    const approvalOffset = needsApproval ? 1 : 0;
     if (q.is_synced) return pathSteps.length - 1;
-    if (q.status === "Concluída") return 3 + approvalOffset;
+    if (q.status === "Concluída") return pathSteps.length - 2;
     if (!hasSchedules) return 0;
-    if (needsApproval && q.price_status !== "Aprovada") return q.price_status === "Não validada" ? 1 : 2;
-    if (!priceOk) return 1;
-    return 2 + approvalOffset;
+    if (needsApproval && q.price_status !== "Não validada") return 2;
+    return 1;
   })();
   const pathBlocked = q.price_status === "Rejeitada";
   function scheduleRow(row: any, item: any, withContext = false) {
@@ -423,9 +422,24 @@ function QuotePage() {
       });
       await refresh();
       await qc.invalidateQueries({ queryKey: ["approvals"] });
+      await navigate({ to: "/approvals/$id", params: { id: response.approval_id } });
     } catch (e) {
       toast.error("Não foi possível enviar para aprovação", {
         description: e instanceof Error ? e.message : "Tente novamente.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function doValidatePrices() {
+    setBusy(true);
+    try {
+      const result = await validateQuotePrices({ data: { id } });
+      setPricePanel(result);
+      await refresh();
+    } catch (error) {
+      toast.error("Não foi possível validar os preços", {
+        description: error instanceof Error ? error.message : undefined,
       });
     } finally {
       setBusy(false);
@@ -517,33 +531,22 @@ function QuotePage() {
               className="sf-btn"
               disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
               title="Abre o comparativo do Jetsons com todas as Agendas: desvio por linha, cores de alçada e edição de preço"
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  const result = await validateQuotePrices({ data: { id } });
-                  setPricePanel(result);
-                  await refresh();
-                } catch (error) {
-                  toast.error("Não foi possível validar os preços", {
-                    description: error instanceof Error ? error.message : undefined,
-                  });
-                } finally {
-                  setBusy(false);
-                }
-              }}
+              onClick={doValidatePrices}
             >
               {busy ? "Validando…" : "Validar preços"}
             </button>}
-            {q.price_status === "Pendente alçada" && (
-              <button
+            {q.price_status === "Pendente alçada" && (openApprovalId ? (
+              <Link className="sf-btn sf-btn--brand" to="/approvals/$id" params={{ id: openApprovalId }}>
+                Acompanhar aprovação
+              </Link>
+            ) : <button
                 className="sf-btn sf-btn--brand"
                 disabled={busy}
                 title="Envia os preços desta Cotação para a fila da aba Aprovação, onde um aprovador logado decide"
                 onClick={() => doSubmitApproval()}
               >
                 {busy ? "Enviando…" : "Enviar preços para aprovação"}
-              </button>
-            )}
+              </button>)}
             <button
               className="sf-btn"
               disabled={busy || q.status !== "Rascunho" || !!q.is_synced}
@@ -647,6 +650,47 @@ function QuotePage() {
           </span>
         }
       />
+      <section
+        className={"sf-next-step" + (openApprovalId || q.price_status === "Rejeitada" ? " is-warning" : q.is_synced ? " is-success" : "")}
+        aria-label="Próximo passo da Cotação"
+      >
+        <div>
+          <div className="sf-next-step-eyebrow">Próximo passo da Cotação</div>
+          <div className="sf-next-step-title">
+            {q.is_synced ? "Continue na Oportunidade" :
+              q.status === "Concluída" ? "Sincronize a Cotação" :
+              !hasSchedules ? "Monte os Itens e as Agendas" :
+              isCurve ? "Confira o deslocamento de volume" :
+              openApprovalId ? "Acompanhe a aprovação dos preços" :
+              q.price_status === "Pendente alçada" ? "Envie os preços para aprovação" :
+              q.price_status === "Rejeitada" ? "Revise os preços rejeitados" :
+              !priceOk ? "Valide os preços no Jetsons" : "Conclua a Cotação"}
+          </div>
+          <div className="sf-next-step-detail">
+            {q.is_synced ? "A Cotação já está vinculada. Abra a Oportunidade para avançar o caminho." :
+              q.status === "Concluída" ? "As regras foram validadas. A sincronização libera o avanço da Oportunidade." :
+              !hasSchedules ? "Adicione um Item com suas Agendas pelo fluxo guiado." :
+              isCurve ? "Mova volume entre períodos, confira o saldo por fluxo e conclua." :
+              openApprovalId ? "A solicitação está pendente. O Perfil Aprovador registra a decisão na tela de acompanhamento." :
+              q.price_status === "Pendente alçada" ? "O desvio ultrapassou o limite configurado; registre a solicitação para seguir." :
+              q.price_status === "Rejeitada" ? "Ajuste as tarifas e valide novamente antes de reenviar." :
+              !priceOk ? "Compare cada Agenda com o preço recomendado e veja a alçada necessária." :
+              "Os preços estão resolvidos; valide as demais regras e conclua."}
+          </div>
+        </div>
+        <div className="sf-next-step-actions">
+          {q.is_synced ? <Link className="sf-btn sf-btn--brand" to="/opportunities/$id" params={{ id: q.opportunity_id }}>Abrir Oportunidade</Link> :
+            q.status === "Concluída" ? <button className="sf-btn sf-btn--brand" disabled={busy} onClick={() => doAction("sync")}>Sincronizar</button> :
+            !hasSchedules ? <button className="sf-btn sf-btn--brand" disabled={!options || busy} onClick={() => setNewItem(true)}>Novo Item e Agendas</button> :
+            isCurve ? curve?.changed && curve?.balanced
+              ? <button className="sf-btn sf-btn--brand" disabled={busy} onClick={() => doAction("complete")}>Validar e concluir</button>
+              : <a className="sf-btn sf-btn--brand" href="#curve-volume">Abrir curva de ajuste</a> :
+            openApprovalId ? <Link className="sf-btn sf-btn--brand" to="/approvals/$id" params={{ id: openApprovalId }}>Acompanhar solicitação</Link> :
+            q.price_status === "Pendente alçada" ? <button className="sf-btn sf-btn--brand" disabled={busy} onClick={doSubmitApproval}>Enviar para aprovação</button> :
+            !priceOk ? <button className="sf-btn sf-btn--brand" disabled={busy} onClick={doValidatePrices}>Validar preços</button> :
+            <button className="sf-btn sf-btn--brand" disabled={busy} onClick={() => doAction("complete")}>Validar e concluir</button>}
+        </div>
+      </section>
       <div className="sf-highlights">
         <Highlight label="Número" value={q.quote_number} />
         <Highlight label="Tipo" value={q.record_type} />
@@ -2396,13 +2440,12 @@ function PricePanel({
                   }
                   setBusy(true);
                   try {
-                    await submitQuoteForApproval({ data: { id: result.quote_id } });
+                    const submitted = await submitQuoteForApproval({ data: { id: result.quote_id } });
                     await invalidateAll();
                     toast.success("Preços enviados para aprovação", {
                       description: `A fila de Aprovação aguarda um aprovador ${result.alcada_level}.`,
                     });
-                    const fresh = await validateQuotePrices({ data: { id: result.quote_id } });
-                    onRefreshed(fresh);
+                    await navigate({ to: "/approvals/$id", params: { id: submitted.approval_id } });
                   } catch (error) {
                     toast.error("Não foi possível enviar para aprovação", {
                       description: error instanceof Error ? error.message : "Tente novamente.",
