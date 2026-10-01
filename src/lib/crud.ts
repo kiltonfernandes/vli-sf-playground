@@ -1801,10 +1801,16 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
             .orderBy(desc(netlex_contracts.created_at))
         )[0] ?? null)
       : null;
+  const [openApproval] = await db
+    .select({ id: quote_approvals.id })
+    .from(quote_approvals)
+    .where(and(eq(quote_approvals.quote_id, id), eq(quote_approvals.status, "Pendente")))
+    .orderBy(desc(quote_approvals.requested_at))
+    .limit(1);
   const postContract = isPostContractInstrument(quote.instrument_type)
     ? await buildQuotePostContract(id, itemsWithPrices)
     : null;
-  return { quote, items: itemsWithPrices, thresholds, addendum, netlexContract, postContract };
+  return { quote, items: itemsWithPrices, thresholds, addendum, netlexContract, postContract, openApprovalId: openApproval?.id ?? null };
 });
 
 export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
@@ -4752,10 +4758,15 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
 /** Marca os preços da Cotação como desatualizados após editar itens ou agendas. */
 async function markQuotePricesStale(quoteId: string) {
   if (!quoteId) return;
+  const now = new Date().toISOString();
   await db
     .update(quotes)
-    .set({ price_status: "Não validada", updated_at: new Date().toISOString() })
+    .set({ price_status: "Não validada", updated_at: now })
     .where(eq(quotes.id, quoteId));
+  await db
+    .update(quote_approvals)
+    .set({ status: "Cancelada", updated_at: now })
+    .where(and(eq(quote_approvals.quote_id, quoteId), eq(quote_approvals.status, "Pendente")));
   await refreshAddendumOperations(quoteId);
 }
 
@@ -4876,14 +4887,22 @@ async function upsertOpenApproval(quoteId: string, result: PriceComparison) {
     .select()
     .from(quote_approvals)
     .where(eq(quote_approvals.quote_id, quoteId));
+  const matching = open.find(
+    (approval) =>
+      approval.status === "Pendente" &&
+      approval.alcada_level === result.alcada_level &&
+      Number(approval.max_discount_pct) === Number(result.max_discount_pct),
+  );
   for (const approval of open)
-    if (approval.status === "Pendente")
+    if (approval.status === "Pendente" && approval.id !== matching?.id)
       await db
         .update(quote_approvals)
         .set({ status: "Cancelada", updated_at: now })
         .where(eq(quote_approvals.id, approval.id));
+  if (matching) return matching.id;
+  const approvalId = crypto.randomUUID();
   await db.insert(quote_approvals).values({
-    id: crypto.randomUUID(),
+    id: approvalId,
     quote_id: quoteId,
     alcada_level: result.alcada_level,
     status: "Pendente",
@@ -4892,6 +4911,7 @@ async function upsertOpenApproval(quoteId: string, result: PriceComparison) {
     created_at: now,
     updated_at: now,
   });
+  return approvalId;
 }
 
 /** Envia a Cotação (com desvio acima do limite) para a fila de aprovação de alçada. */
@@ -4899,12 +4919,17 @@ export const submitQuoteForApproval = createServerFn({ method: "POST" }).handler
   async ({ data: input }) => {
     await ensureSchema();
     const { id } = input as { id: string };
+    const [quote] = await db.select({ status: quotes.status, is_synced: quotes.is_synced }).from(quotes).where(eq(quotes.id, id));
+    if (!quote) throw new Error("Cotação não encontrada.");
+    if (quote.status !== "Rascunho" || quote.is_synced)
+      throw new Error("Só é possível enviar preços de uma Cotação em Rascunho.");
     const result = await computeQuotePriceComparison(id);
     if (result.price_status !== "Pendente alçada")
       throw new Error("Somente cotações com desvio acima do limite podem ser enviadas.");
-    await upsertOpenApproval(id, result);
+    const approvalId = await upsertOpenApproval(id, result);
     return {
       ok: true,
+      approval_id: approvalId,
       alcada_level: result.alcada_level,
       max_discount_pct: result.max_discount_pct,
     };
@@ -5351,6 +5376,12 @@ export const decideQuoteApproval = createServerFn({ method: "POST" }).handler(
     if (!approval) throw new Error("Solicitação de alçada não encontrada.");
     if (approval.status !== "Pendente")
       throw new Error("Esta solicitação já foi decidida.");
+    const [quote] = await db
+      .select({ price_status: quotes.price_status })
+      .from(quotes)
+      .where(eq(quotes.id, approval.quote_id));
+    if (quote?.price_status !== "Pendente alçada")
+      throw new Error("Os preços desta Cotação mudaram. Valide e envie uma nova solicitação.");
     const { currentApprover } = await readAppSettings();
     if (!currentApprover)
       throw new Error("Logue como aprovador em Configurações para decidir alçadas.");
