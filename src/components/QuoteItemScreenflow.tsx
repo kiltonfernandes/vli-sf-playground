@@ -8,6 +8,7 @@ import {
   PORT_DIESEL_BASE_ID,
   PORT_MOVEMENT_SERVICES,
   RAIL,
+  ROAD,
   RAIL_SERVICES,
   expectedPortMovement,
   isPortDieselBase,
@@ -15,6 +16,7 @@ import {
   portOperation,
   portReadjustmentRuleError,
   servicesForModal,
+  scheduleIdentityKey,
 } from "@/lib/segments";
 
 type Flow = {
@@ -62,6 +64,7 @@ type Props = {
   readjustment: { diesel: number; igpm: number; ipca: number };
   /** Reajuste do porto (sem diesel): IGP-M/IPCA_Harbor. */
   portReadjustment?: { igpm: number; ipca: number };
+  roadReadjustment?: { period: string; percent: number; base: string; referenceMargin: number };
   integrationTariff: string;
   applicationDay: number;
   canChangeTariff: boolean;
@@ -224,6 +227,7 @@ export function QuoteItemScreenflow({
   firstReadjustmentDate,
   readjustment,
   portReadjustment,
+  roadReadjustment,
   integrationTariff,
   applicationDay,
   canChangeTariff,
@@ -246,16 +250,18 @@ export function QuoteItemScreenflow({
   const [modal, setModal] = useState(initial?.modal ?? "");
   // Regras por modal: porto (ANTAQ) sem Base Diesel e sem produto obrigatório; ferro com FRETE.
   const isPort = modal === PORT;
+  const isRoad = modal === ROAD;
   const policy = modalPolicy(modal || RAIL);
   const services = policy.services;
   const dieselDateFor = (month: number, year: number) =>
-    isPort ? "" : applicationDate(applicationDay, month, year);
+    isPort || isRoad ? "" : applicationDate(applicationDay, month, year);
   const [itemService, setItemService] = useState(initialService);
-  const [tariffMode, setTariffMode] = useState(integrationTariff);
+  const [tariffMode, setTariffMode] = useState(initial?.modal === ROAD ? "Líquida" : integrationTariff);
   const [seed, setSeed] = useState(790043);
   const [batchTarget, setBatchTarget] = useState<number | null>(null);
   const [batchStart, setBatchStart] = useState("");
   const [batchEnd, setBatchEnd] = useState("");
+  const [batchCadence, setBatchCadence] = useState("Mensal");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [termStart, setTermStart] = useState(contractStart);
@@ -266,6 +272,9 @@ export function QuoteItemScreenflow({
   const [ipcaPct, setIpcaPct] = useState(readjustment.ipca);
   const [portIgpmPct, setPortIgpmPct] = useState(portReadjustment?.igpm ?? 100);
   const [portIpcaPct, setPortIpcaPct] = useState(portReadjustment?.ipca ?? 0);
+  const [roadDieselPeriod, setRoadDieselPeriod] = useState(roadReadjustment?.period ?? "");
+  const [roadDieselPct, setRoadDieselPct] = useState(roadReadjustment?.percent ?? 0);
+  const [roadDieselBase, setRoadDieselBase] = useState(roadReadjustment?.base ?? "S10");
   const [firstDate, setFirstDate] = useState(firstReadjustmentDate);
   const [savingReadjustment, setSavingReadjustment] = useState(false);
   const [takeOrPay, setTakeOrPay] = useState<TakeOrPayConfig>(initialTakeOrPayConfig ?? {
@@ -279,12 +288,12 @@ export function QuoteItemScreenflow({
   const termDays = termStart && termEnd ? (contractDurationDays(termStart, termEnd) ?? 0) : 0;
   const requiresAnnualSplit = termDays > 365;
   const readjustmentTotal = isPort ? portIgpmPct + portIpcaPct : dieselPct + igpmPct + ipcaPct;
-  const readjustmentError = termStart && termEnd
+  const readjustmentError = isRoad ? null : termStart && termEnd
     ? isPort
       ? portReadjustmentRuleError({ contractStart: termStart, contractEnd: termEnd, igpmPct: portIgpmPct, ipcaPct: portIpcaPct, firstReadjustmentDate: firstDate })
       : readjustmentRuleError({ contractStart: termStart, contractEnd: termEnd, dieselPct, igpmPct, ipcaPct, firstReadjustmentDate: firstDate })
     : "Informe uma vigência válida antes de ajustar o reajuste anual.";
-  const readjustmentValid = !readjustmentError;
+  const readjustmentValid = isRoad || !readjustmentError;
   const yearMonths = useMemo(() => {
     const result: Array<{ year: number; month: number }> = [];
     // Com fim livre, os seletores oferecem até 36 meses depois do término atual.
@@ -339,11 +348,14 @@ export function QuoteItemScreenflow({
         const unchanged =
           names.length === g.services.length && names.every((name, i) => g.services[i].service === name);
         const percent = 100 / names.length;
+        const preferredRoadBase = dieselBases.find((base) => base.name === roadDieselBase)?.id ?? dieselBases[0]?.id ?? "";
         return {
           ...g,
           diesel_base_id: isPort
             ? PORT_DIESEL_BASE_ID
-            : !g.diesel_base_id || isPortDieselBase(g.diesel_base_id)
+            : isRoad
+              ? preferredRoadBase
+              : !g.diesel_base_id || isPortDieselBase(g.diesel_base_id)
               ? (dieselBases[0]?.id ?? "")
               : g.diesel_base_id,
           diesel_base_date: dieselDateFor(g.month, g.year),
@@ -524,17 +536,16 @@ export function QuoteItemScreenflow({
     }
 
     const template = groups[batchTarget];
+    const windows = isRoad && batchCadence === "Quinzenal" ? ["1ª Quinzena", "2ª Quinzena"] : ["Mês"];
+    const batchPeriods = selectedPeriods.flatMap((period) => windows.map((window) => ({ ...period, window })));
     const usedKeys = new Set(usedSchedules.map((row) => row.schedule_key));
     const existingKeys = new Set(
-      groups.map(
-        (group) =>
-          `${selectedFlow?.code}|${group.year}${String(group.month).padStart(2, "0")}|${group.division}|${group.plaza}`,
-      ),
+      groups.map((group) => scheduleIdentityKey(selectedFlow?.code ?? "", group.year, group.month, group.division, group.plaza, modal, group.period_window)),
     );
     const additions: AgendaGroup[] = [];
     let skipped = 0;
-    for (const period of selectedPeriods) {
-      const key = `${selectedFlow?.code}|${period.year}${String(period.month).padStart(2, "0")}|${template.division}|${template.plaza}`;
+    for (const period of batchPeriods) {
+      const key = scheduleIdentityKey(selectedFlow?.code ?? "", period.year, period.month, template.division, template.plaza, modal, period.window);
       if (usedKeys.has(key) || existingKeys.has(key)) {
         skipped++;
         continue;
@@ -545,6 +556,9 @@ export function QuoteItemScreenflow({
         ...template,
         year: period.year,
         month: period.month,
+        frequency: isRoad && batchCadence === "Quinzenal" ? "Quinzenal" : "Mensal",
+        period_window: period.window,
+        diesel_base_id: isRoad ? (dieselBases.find((base) => base.name === roadDieselBase)?.id ?? template.diesel_base_id) : template.diesel_base_id,
         diesel_base_date: dieselDateFor(period.month, period.year),
         ...tolerances,
         services: template.services.map((service) => ({ ...service })),
@@ -557,8 +571,8 @@ export function QuoteItemScreenflow({
       return;
     }
     // Se o grupo usado como modelo já existe como Agenda, ele é trocado pelos meses novos.
-    const templateKey = `${selectedFlow?.code}|${template.year}${String(template.month).padStart(2, "0")}|${template.division}|${template.plaza}`;
-    const replaceTemplate = usedKeys.has(templateKey);
+    const templateKey = scheduleIdentityKey(selectedFlow?.code ?? "", template.year, template.month, template.division, template.plaza, modal, template.period_window);
+    const replaceTemplate = isRoad || usedKeys.has(templateKey);
     const target = batchTarget;
     setGroups((old) => [
       ...(replaceTemplate ? old.filter((_, index) => index !== target) : old),
@@ -568,7 +582,7 @@ export function QuoteItemScreenflow({
     setError("");
     toast.success(`${additions.length} novo(s) grupo(s) de Agenda adicionado(s)`, {
       description: replaceTemplate
-        ? "O grupo modelo já existia como Agenda e foi substituído pelos meses novos. A Data Base Diesel foi ajustada automaticamente."
+        ? isRoad ? "O grupo modelo foi substituído pela cadência escolhida. A base diesel segue os parâmetros da Oportunidade." : "O grupo modelo já existia como Agenda e foi substituído pelos meses novos. A Data Base Diesel foi ajustada automaticamente."
         : skipped
         ? `${skipped} mês(es) já tinham grupo no formulário ou Agenda nessa chave. A Data Base Diesel foi ajustada automaticamente.`
         : `Períodos de ${batchStart} a ${batchEnd}; Data Base Diesel ajustada automaticamente.`,
@@ -579,13 +593,11 @@ export function QuoteItemScreenflow({
     const blocked = new Set(usedSchedules.map((row) => row.schedule_key));
     groups.forEach((candidate, candidateIndex) => {
       if (candidateIndex === index) return;
-      blocked.add(
-        `${selectedFlow?.code}|${candidate.year}${String(candidate.month).padStart(2, "0")}|${candidate.division}|${candidate.plaza}`,
-      );
+      blocked.add(scheduleIdentityKey(selectedFlow?.code ?? "", candidate.year, candidate.month, candidate.division, candidate.plaza, modal, candidate.period_window));
     });
     const available = yearMonths.find((period) => {
       if (period.year * 100 + period.month < group.year * 100 + group.month) return false;
-      const key = `${selectedFlow?.code}|${period.year}${String(period.month).padStart(2, "0")}|${group.division}|${group.plaza}`;
+      const key = scheduleIdentityKey(selectedFlow?.code ?? "", period.year, period.month, group.division, group.plaza, modal, group.period_window);
       return !blocked.has(key);
     });
     if (!available) {
@@ -880,7 +892,7 @@ export function QuoteItemScreenflow({
                 🚆 Modal
                 {select(
                   modal,
-                  setModal,
+                  (value) => { setModal(value); if (value === ROAD) setTariffMode("Líquida"); },
                   [
                     { value: "", label: "— Selecione —" },
                     ...modals.map((f) => ({
@@ -903,7 +915,29 @@ export function QuoteItemScreenflow({
               )}
             </>
           )}
-          {step === 1 && (
+          {step === 1 && (isRoad ? (
+            <section style={{ border: "1px solid #dddbda", borderRadius: 6, padding: 16 }}>
+              <h3 style={{ marginTop: 0 }}>Reajuste do diesel rodoviário</h3>
+              <p style={{ color: "#514f4d" }}>Informe os parâmetros registrados no contrato. O Playground guarda a configuração sem impor um calendário único.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+                <label style={labelStyle}>Período de apuração<input style={inputStyle} value={roadDieselPeriod} onChange={(event) => setRoadDieselPeriod(event.target.value)} placeholder="Ex.: dia 25 ao dia 26" /></label>
+                <label style={labelStyle}>Repasse da variação do diesel (%)<input style={inputStyle} type="number" min="0" max="100" step="0.01" value={roadDieselPct} onChange={(event) => setRoadDieselPct(Number(event.target.value))} /></label>
+                <label style={labelStyle}>Base diesel<select style={inputStyle} value={roadDieselBase} onChange={(event) => setRoadDieselBase(event.target.value)}><option>S10</option><option>S500</option></select></label>
+                <label style={labelStyle}>Margem de referência para fluxo novo (%)<input style={inputStyle} type="number" value={roadReadjustment?.referenceMargin ?? 5} readOnly /></label>
+              </div>
+              <small>Os dados ficam registrados na Oportunidade e no documento simulado. Valores de período e percentual seguem o que foi negociado.</small>
+              <div style={{ marginTop: 12 }}><button className="sf-btn" type="button" disabled={savingReadjustment} onClick={async () => {
+                setSavingReadjustment(true);
+                try {
+                  await updateOpportunityReadjustment({ data: { id: opportunityId, modal: ROAD, diesel_pct: roadDieselPct, igpm_pct: 0, ipca_pct: 0, first_readjustment_date: null, road_diesel_period: roadDieselPeriod, road_diesel_base: roadDieselBase } as any });
+                  toast.success("Parâmetros rodoviários atualizados na Oportunidade.");
+                  await onTermSaved?.();
+                } catch (error) {
+                  toast.error("Não foi possível salvar os parâmetros", { description: error instanceof Error ? error.message : undefined });
+                } finally { setSavingReadjustment(false); }
+              }}>{savingReadjustment ? "Salvando…" : "Salvar parâmetros rodoviários"}</button></div>
+            </section>
+          ) : (
             <>
               <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
                 Confira os parâmetros anuais cadastrados na Oportunidade antes de montar as Agendas.
@@ -1090,7 +1124,7 @@ export function QuoteItemScreenflow({
                 </small>
               </section>
             </>
-          )}
+          ))}
           {step === 2 && (
             <>
               <p style={{ marginTop: 0, color: "#706e6b", fontSize: 13 }}>
@@ -1104,16 +1138,16 @@ export function QuoteItemScreenflow({
                 Tarifa usada nesta Cotação
                 {select(
                   tariffMode,
-                  setTariffMode,
+                  (value) => { if (!isRoad) setTariffMode(value); },
                   [
                     { value: "CBS", label: "Tarifa CBS" },
                     { value: "Líquida", label: "Tarifa líquida" },
                   ],
-                  !canChangeTariff,
+                  isRoad || !canChangeTariff,
                 )}
                 <small>
                   {canChangeTariff
-                    ? "Escolha a modalidade usada em todos os valores desta Cotação."
+                  ? isRoad ? "Rodoviário usa tarifa líquida." : "Escolha a modalidade usada em todos os valores desta Cotação."
                     : "A modalidade fica fixa depois que a Cotação recebe sua primeira Agenda."}
                 </small>
               </label>
@@ -1184,6 +1218,15 @@ export function QuoteItemScreenflow({
                         background: "#f8f8f8",
                       }}
                     >
+                      {isRoad && (
+                        <label style={labelStyle}>
+                          Cadência das agendas
+                          {select(batchCadence, setBatchCadence, [
+                            { value: "Mensal", label: "Uma agenda por mês" },
+                            { value: "Quinzenal", label: "Duas agendas por mês (quinzenas 1–15 e 16–fim)" },
+                          ])}
+                        </label>
+                      )}
                       <label style={labelStyle}>
                         Mês inicial
                         {select(
@@ -1239,10 +1282,9 @@ export function QuoteItemScreenflow({
                         </button>
                       </div>
                       <small style={{ gridColumn: "1 / -1", color: "#514f4d" }}>
-                        Adiciona um grupo por mês no intervalo, copiando os dados e o rateio deste
-                        grupo. Se o mês inicial já estiver representado no formulário, ele será
-                        mantido e os outros meses serão adicionados. Meses com Agenda nessa chave
-                        serão ignorados.
+                        {isRoad
+                          ? "Gera uma agenda mensal ou duas agendas quinzenais (dias 1–15 e 16–último dia), copiando volume, tarifa e serviço do grupo. Períodos que já existirem serão ignorados."
+                          : "Adiciona um grupo por mês no intervalo, copiando os dados e o rateio deste grupo. Se o mês inicial já estiver representado no formulário, ele será mantido e os outros meses serão adicionados. Meses com Agenda nessa chave serão ignorados."}
                         {allowExtendTerm
                           ? instrumentType === "Aditivo"
                             ? " O mês final é livre: meses depois do fim original estendem a vigência e geram a cláusula de prorrogação do aditivo."
@@ -1295,7 +1337,7 @@ export function QuoteItemScreenflow({
                       {select(
                         g.frequency,
                         (v) => updateGroup(index, { frequency: v }),
-                        ["Mensal", "Anual"].map((v) => ({ value: v, label: v })),
+                        (isRoad ? ["Mensal", "Quinzenal"] : ["Mensal", "Anual"]).map((v) => ({ value: v, label: v })),
                       )}
                     </label>
                     <label style={labelStyle}>
@@ -1303,7 +1345,7 @@ export function QuoteItemScreenflow({
                       {select(
                         g.period_window,
                         (v) => updateGroup(index, { period_window: v }),
-                        WINDOWS.map((v) => ({ value: v, label: v })),
+                        (isRoad ? ["Mês", "1ª Quinzena", "2ª Quinzena"] : WINDOWS).map((v) => ({ value: v, label: v })),
                       )}
                     </label>
                     <label style={labelStyle}>
@@ -1349,6 +1391,11 @@ export function QuoteItemScreenflow({
                         Base Diesel
                         <input style={inputStyle} aria-label="Base Diesel do porto" value="Não se aplica (porto)" readOnly />
                       </label>
+                    ) : isRoad ? (
+                      <>
+                        <label style={labelStyle}>Base diesel do contrato<input style={inputStyle} value={roadDieselBase} readOnly /></label>
+                        <small>O período de apuração e o percentual de repasse estão configurados na etapa Reajuste Rodoviário.</small>
+                      </>
                     ) : (
                       <>
                     <label style={labelStyle}>
@@ -1631,9 +1678,30 @@ export function QuoteItemScreenflow({
           {step < 4 ? (
             <button
               className="sf-btn sf-btn--brand"
-              onClick={() => {
+              onClick={async () => {
                 if (!validateCurrent()) return;
                 if (step === 0) normalizeForModal();
+                if (step === 1 && isRoad) {
+                  setSavingReadjustment(true);
+                  try {
+                    await updateOpportunityReadjustment({ data: {
+                      id: opportunityId,
+                      modal: ROAD,
+                      diesel_pct: roadDieselPct,
+                      igpm_pct: 0,
+                      ipca_pct: 0,
+                      first_readjustment_date: null,
+                      road_diesel_period: roadDieselPeriod,
+                      road_diesel_base: roadDieselBase,
+                    } as any });
+                    await onTermSaved?.();
+                  } catch (error) {
+                    setError(error instanceof Error ? error.message : "Não foi possível salvar os parâmetros rodoviários.");
+                    return;
+                  } finally {
+                    setSavingReadjustment(false);
+                  }
+                }
                 if (skipReadjustment && step === 0) setStep(2);
                 else setStep((s) => s + 1);
               }}

@@ -14,26 +14,29 @@ export const RAIL = "Ferroviário" as const;
 export const PORT = "Portuário" as const;
 export const RAIL_PORT = "Ferroviário + Portuário" as const;
 export const ROAD = "Rodoviário" as const;
-export type Modal = typeof RAIL | typeof PORT;
-export const MODALS: Modal[] = [RAIL, PORT];
+export type Modal = typeof RAIL | typeof PORT | typeof ROAD;
+export const MODALS: Modal[] = [RAIL, PORT, ROAD];
 
 /** Segmento (operação) da Oportunidade: define quais modais a Cotação aceita. */
 export const OPPORTUNITY_SEGMENTS = [RAIL, PORT, RAIL_PORT, ROAD];
-export const QUOTE_SEGMENTS = [RAIL, PORT, RAIL_PORT];
+export const QUOTE_SEGMENTS = [RAIL, PORT, RAIL_PORT, ROAD];
 
 export function segmentModals(segment: string | null | undefined): Modal[] {
   if (segment === RAIL) return [RAIL];
   if (segment === PORT) return [PORT];
   if (segment === RAIL_PORT) return [RAIL, PORT];
+  if (segment === ROAD) return [ROAD];
   return [];
 }
 export const isQuoteSegment = (segment: string | null | undefined) => segmentModals(segment).length > 0;
 export const segmentHasModal = (segment: string | null | undefined, modal: string) =>
   segmentModals(segment).includes(modal as Modal);
-export const isModal = (value: unknown): value is Modal => value === RAIL || value === PORT;
+export const isModal = (value: unknown): value is Modal => value === RAIL || value === PORT || value === ROAD;
 
 /** Ferro = FRETE + acessórios (regra ANTT). Porto = serviços de terminal (ANTAQ), sem obrigatório. */
 export const RAIL_SERVICES = ["FRETE", "CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"];
+/** No Playground rodoviário, a cotação registra tarifa líquida por Agenda. */
+export const ROAD_SERVICES = ["FRETE"];
 /** Serviços das tabelas públicas dos terminais VLI (TIPLAM/TMIB). Lista oficial a confirmar no KT. */
 export const PORT_SERVICES = ["EMBARQUE", "DESEMBARQUE", "ARMAZENAGEM", "PESAGEM"];
 /** Serviços que movimentam a carga no cais: definem o sentido da operação portuária. */
@@ -103,22 +106,54 @@ export const MODAL_POLICIES: Record<Modal, ModalPolicy> = {
     unit: "tonelada",
     takeOrPayLabel: "Take or Pay portuário",
   },
+  [ROAD]: {
+    modal: ROAD,
+    short: "Rodo",
+    icon: "🚚",
+    regulator: "ANTT",
+    productFamily: "Serviço de Transporte Rodoviário",
+    services: ROAD_SERVICES,
+    defaultService: "FRETE",
+    requiredService: "FRETE",
+    dieselBase: "required",
+    applicationDayRequired: false,
+    readjustmentIndexes: ["Diesel"],
+    readjustmentStepTitle: "Reajuste Rodoviário",
+    scheduleStepTitle: "Agendas e Diesel Rodoviário",
+    unit: "tonelada",
+    takeOrPayLabel: "Take or Pay rodoviário",
+  },
 };
 
 export function modalPolicy(modal: string | null | undefined): ModalPolicy {
-  return MODAL_POLICIES[(modal === PORT ? PORT : RAIL) as Modal];
+  return MODAL_POLICIES[(modal === PORT ? PORT : modal === ROAD ? ROAD : RAIL) as Modal];
 }
 export const servicesForModal = (modal: string | null | undefined) => modalPolicy(modal).services;
 export function modalOfService(service: string | null | undefined): Modal | null {
   const value = String(service ?? "").trim().toUpperCase();
   if (RAIL_SERVICES.includes(value)) return RAIL;
   if (PORT_SERVICES.includes(value)) return PORT;
+  if (ROAD_SERVICES.includes(value)) return ROAD;
   return null;
 }
 export const segmentLabel = (segment: string | null | undefined) =>
   segmentModals(segment)
     .map((modal) => `${MODAL_POLICIES[modal].icon} ${MODAL_POLICIES[modal].short}`)
     .join(" + ") || String(segment ?? "—");
+
+/** Agenda rodoviária distingue o mês inteiro das duas quinzenas. */
+export function scheduleIdentityKey(
+  flowCode: string,
+  year: number,
+  month: number,
+  division: string,
+  plaza: string,
+  modal: string,
+  periodWindow: string,
+) {
+  const monthKey = `${flowCode}|${year}${String(month).padStart(2, "0")}|${division}|${plaza}`;
+  return modal === ROAD ? `${monthKey}|${periodWindow || "Mês"}` : monthKey;
+}
 
 /** Sentido da operação portuária a partir dos locais do Fluxo. */
 export function portOperation(originType: string | null | undefined, destinationType: string | null | undefined) {
@@ -166,6 +201,9 @@ export function portReadjustmentRuleError(input: {
 }
 
 export function modalReadjustmentError(modal: Modal, opp: OpportunityReadjustment, contractEnd?: string) {
+  // Rodoviário respeita os parâmetros informados no contrato, sem impor uma
+  // soma padrão de índices ou um calendário único no Playground.
+  if (modal === ROAD) return null;
   const contractStart = String(opp.contract_start ?? "");
   const end = String(contractEnd ?? opp.contract_end ?? "");
   if (modal === PORT)

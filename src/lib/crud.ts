@@ -38,6 +38,8 @@ import {
   PORT_MOVEMENT_SERVICES,
   PORT_SERVICES,
   RAIL,
+  ROAD,
+  ROAD_SERVICES,
   RAIL_SERVICES,
   SHIP_LOCATION_TYPE,
   expectedPortMovement,
@@ -49,6 +51,7 @@ import {
   portTermsRuleError,
   segmentHasModal,
   segmentModals,
+  scheduleIdentityKey,
   takeOrPayModalSeparationError,
   takeOrPayRecordsByModal,
   type Modal,
@@ -131,6 +134,10 @@ export const listOpportunities = createServerFn({ method: "GET" }).handler(async
       diesel_pct: opportunities.diesel_pct,
       igpm_pct: opportunities.igpm_pct,
       ipca_pct: opportunities.ipca_pct,
+      road_diesel_period: opportunities.road_diesel_period,
+      road_diesel_pct: opportunities.road_diesel_pct,
+      road_diesel_base: opportunities.road_diesel_base,
+      road_reference_margin_pct: opportunities.road_reference_margin_pct,
       contracting_parties: opportunities.contracting_parties,
       vli_entity: opportunities.vli_entity,
       joint_debtor: opportunities.joint_debtor,
@@ -222,10 +229,12 @@ export const getOpportunityFull = createServerFn({ method: "GET" })
       })
       .from(accounts)
       .where(eq(accounts.id, opportunity.account_id));
-    const [contract] = await db
+    const contracts = await db
       .select()
       .from(netlex_contracts)
-      .where(eq(netlex_contracts.opportunity_id, id));
+      .where(eq(netlex_contracts.opportunity_id, id))
+      .orderBy(desc(netlex_contracts.created_at));
+    const contract = contracts[0];
     const [baseContract] = opportunity.base_contract_id
       ? await db
           .select({
@@ -246,6 +255,7 @@ export const getOpportunityFull = createServerFn({ method: "GET" })
       netlexContract: contract
         ? { ...contract, document: parseContractDocument(contract.document_json) }
         : null,
+      contracts: contracts.map((row) => ({ ...row, document: parseContractDocument(row.document_json) })),
       baseContract: baseContract ?? null,
       addenda: contract && contract.kind === "Contrato" ? await listContractAddenda(contract.id) : [],
       postContract:
@@ -286,7 +296,7 @@ async function listTakeOrPayFlows(opportunityId: string) {
       db.select().from(locations).where(eq(locations.id, flow.destination_id)),
       db.select().from(merchandise).where(eq(merchandise.id, flow.merchandise_id)),
     ]);
-    const icon = flow.modal === PORT ? "⚓" : "🚂";
+    const icon = flow.modal === PORT ? "⚓" : flow.modal === ROAD ? "🚚" : "🚂";
     result.push({ id, code: flow.code, modal: flow.modal, label: `${icon} ${flow.code} · ${origin?.code ?? "?"} → ${destination?.code ?? "?"} · ${product?.name ?? "Mercadoria"}` });
   }
   return result.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
@@ -363,6 +373,14 @@ function contractReadjustment(opportunity: typeof opportunities.$inferSelect) {
       notice:
         "Porto (ANTAQ): reajuste por inflação, sem diesel. Reajuste de preços informado com 30 dias de antecedência.",
     };
+  if (modals.includes(ROAD))
+    byModal[ROAD] = {
+      dieselPct: Number(opportunity.road_diesel_pct),
+      dieselPeriod: opportunity.road_diesel_period,
+      dieselBase: opportunity.road_diesel_base,
+      referenceMarginPct: Number(opportunity.road_reference_margin_pct ?? 5),
+      notice: "Rodoviário: parâmetros de repasse do diesel seguem o contrato; a apuração pode variar sem bloqueio fixo de calendário.",
+    };
   return {
     dieselPct: Number(opportunity.diesel_pct),
     igpmPct: Number(opportunity.igpm_pct),
@@ -374,25 +392,11 @@ function contractReadjustment(opportunity: typeof opportunities.$inferSelect) {
 
 /** Snapshot da cotação aprovada para a etapa simulada de envio ao NetLex. */
 export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
-  .inputValidator((data: { opportunityId: string }) => data)
+  .inputValidator((data: { opportunityId: string; quoteId?: string }) => data)
   .handler(
   async ({ data: input }) => {
     await ensureSchema();
-    const { opportunityId } = input as { opportunityId: string };
-    const [existing] = await db
-      .select()
-      .from(netlex_contracts)
-      .where(eq(netlex_contracts.opportunity_id, opportunityId));
-    if (existing)
-      return {
-        ok: true,
-        created: false,
-        contract: {
-          ...existing,
-          document: parseContractDocument(existing.document_json),
-        },
-      };
-
+    const { opportunityId, quoteId } = input as { opportunityId: string; quoteId?: string };
     const [opportunity] = await db
       .select()
       .from(opportunities)
@@ -442,10 +446,11 @@ export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
       .select()
       .from(quotes)
       .where(eq(quotes.opportunity_id, opportunityId));
-    const quote = syncedQuotes.find(
-      (row) => row.is_synced && row.status === "Sincronizada",
-    );
+    const quote = syncedQuotes.find((row) => row.id === quoteId && row.is_synced && row.status === "Sincronizada")
+      ?? (!quoteId ? syncedQuotes.find((row) => row.is_synced && row.status === "Sincronizada") : undefined);
     if (!quote) throw new Error("Conclua e sincronize uma Cotação antes de enviar o contrato.");
+    const [existing] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.quote_id, quote.id));
+    if (existing) return { ok: true, created: false, contract: { ...existing, document: parseContractDocument(existing.document_json) } };
     if (!["Ok", "Aprovada"].includes(quote.price_status))
       throw new Error("Valide e aprove os preços da Cotação antes de enviar o contrato.");
     const approvals = await db
@@ -629,7 +634,7 @@ export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
           quoteName: quote.name,
           quoteId: quote.id,
           priceApproval: quote.price_status,
-          tariffBasis: quote.tariff_mode || opportunity.integration_tariff,
+          tariffBasis: opportunity.segment === ROAD ? "Líquida" : quote.tariff_mode || opportunity.integration_tariff,
           currency: "BRL",
         },
         readjustment: contractReadjustment(opportunity),
@@ -641,6 +646,7 @@ export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
       const addendumContract = {
         id: contractId,
         opportunity_id: opportunityId,
+        quote_id: quote.id,
         netlex_number: number,
         title: addendumTitle,
         status: NETLEX_WAITING,
@@ -696,7 +702,7 @@ export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
         quoteId: quote.id,
         quoteStatus: quote.status,
         priceApproval: quote.price_status,
-        tariffBasis: opportunity.integration_tariff,
+        tariffBasis: opportunity.segment === ROAD ? "Líquida" : opportunity.integration_tariff,
         currency: "BRL",
       },
       readjustment: contractReadjustment(opportunity),
@@ -732,6 +738,7 @@ export const sendOpportunityToNetlex = createServerFn({ method: "POST" })
     const contract = {
       id: contractId,
       opportunity_id: opportunityId,
+      quote_id: quote.id,
       netlex_number: netlexNumber,
       title,
       kind: opportunity.instrument_type,
@@ -1535,7 +1542,7 @@ export const shuffleAddendumQuote = createServerFn({ method: "POST" })
       for (const group of plan.created) {
         const flow = flowById.get(group.flowId);
         if (!flow) continue;
-        const scheduleKey = `${flow.code}|${group.year}${String(group.month).padStart(2, "0")}|${group.division}|${group.plaza}`;
+        const scheduleKey = scheduleIdentityKey(flow.code, group.year, group.month, group.division, group.plaza, flow.modal, group.period_window);
         for (const entry of group.rows) {
           let itemId = entry.itemId;
           if (!itemId) {
@@ -1787,24 +1794,13 @@ export const getQuoteFull = createServerFn({ method: "GET" }).handler(async ({ d
     })),
   }));
   const addendum = quote.instrument_type === "Aditivo" ? await buildQuoteAddendum(id) : null;
-  const netlexContract =
-    quote.instrument_type === "Contrato"
-      ? ((
-          await db
-            .select({
-              id: netlex_contracts.id,
-              status: netlex_contracts.status,
-              netlex_number: netlex_contracts.netlex_number,
-            })
-            .from(netlex_contracts)
-            .where(eq(netlex_contracts.opportunity_id, quote.opportunity_id))
-            .orderBy(desc(netlex_contracts.created_at))
-        )[0] ?? null)
-      : null;
+  const contracts = await db.select().from(netlex_contracts)
+    .where(eq(netlex_contracts.quote_id, id)).orderBy(desc(netlex_contracts.created_at));
+  const netlexContract = (contracts[0] ?? null);
   const postContract = isPostContractInstrument(quote.instrument_type)
     ? await buildQuotePostContract(id, itemsWithPrices)
     : null;
-  return { quote, items: itemsWithPrices, thresholds, addendum, netlexContract, postContract };
+  return { quote, items: itemsWithPrices, thresholds, addendum, netlexContract, contracts, postContract };
 });
 
 export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
@@ -1828,6 +1824,10 @@ export const listQuoteOptions = createServerFn({ method: "GET" }).handler(
         ipca_pct: opportunities.ipca_pct,
         port_igpm_pct: opportunities.port_igpm_pct,
         port_ipca_pct: opportunities.port_ipca_pct,
+        road_diesel_period: opportunities.road_diesel_period,
+        road_diesel_pct: opportunities.road_diesel_pct,
+        road_diesel_base: opportunities.road_diesel_base,
+        road_reference_margin_pct: opportunities.road_reference_margin_pct,
       })
       .from(opportunities)
       .where(eq(opportunities.id, opportunityId));
@@ -2292,7 +2292,7 @@ export const syncQuote = createServerFn({ method: "POST" }).handler(async ({ dat
     !isQuoteSegment(opportunity.segment) ||
     !QUOTE_INSTRUMENTS.includes(opportunity.instrument_type)
   )
-    throw new Error("Esta versão atende Ferroviário, Portuário ou Ferroviário + Portuário de Contrato e ACS.");
+    throw new Error("Esta versão atende aos segmentos Ferroviário, Portuário e Rodoviário para Contrato e ACS.");
   if (
     opportunity.instrument_type === "ACS" &&
     opportunity.contract_start &&
@@ -2303,18 +2303,6 @@ export const syncQuote = createServerFn({ method: "POST" }).handler(async ({ dat
     const limit = new Date(start);
     limit.setMonth(limit.getMonth() + 12);
     if (end >= limit) throw new Error("A vigência ACS deve ser inferior a 12 meses.");
-  }
-  const syncedRows = await db
-    .select({ id: quotes.id })
-    .from(quotes)
-    .where(eq(quotes.opportunity_id, quote.opportunity_id));
-  if (syncedRows.some((row) => row.id !== id)) {
-    const matching = await db
-      .select()
-      .from(quotes)
-      .where(eq(quotes.opportunity_id, quote.opportunity_id));
-    if (matching.some((row) => row.id !== id && row.is_synced))
-      throw new Error("Esta oportunidade já tem uma Cotação sincronizada.");
   }
   const [firstItem] = await db
     .select()
@@ -2358,7 +2346,7 @@ export const syncQuote = createServerFn({ method: "POST" }).handler(async ({ dat
       throw new Error(
         "Volume, tarifa e Base Diesel devem ser consistentes em todas as linhas da mesma agenda.",
       );
-    const useCbs = (quote.tariff_mode || opportunity.integration_tariff) === "CBS";
+    const useCbs = groupModal !== ROAD && (quote.tariff_mode || opportunity.integration_tariff) === "CBS";
     if (
       group.some((row) =>
         useCbs
@@ -2420,7 +2408,7 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     !QUOTE_INSTRUMENTS.includes(opp.instrument_type)
   )
     throw new Error(
-      "A Cotação precisa pertencer a uma oportunidade Ferroviária, Portuária ou Ferroviário + Portuário de Contrato ou ACS em Negociação.",
+      "A Cotação precisa pertencer a uma oportunidade Ferroviária, Portuária ou Rodoviária de Contrato ou ACS em Negociação.",
     );
   const quoteModals = segmentModals(opp.segment);
   if (!opp.contract_start || !opp.contract_end)
@@ -2492,7 +2480,8 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
   const frequencyByFlow = new Map<string, Set<string>>();
   const dieselByFlow = new Map<string, Set<string>>();
   const windowsByContext = new Map<string, Set<string>>();
-  const tariffMode = quote.tariff_mode || opp.integration_tariff;
+  const tariffMode = segmentHasModal(opp.segment, ROAD) && !segmentHasModal(opp.segment, RAIL) && !segmentHasModal(opp.segment, PORT)
+    ? "Líquida" : quote.tariff_mode || opp.integration_tariff;
   const startMonth = Number(opp.contract_start.slice(0, 4) + opp.contract_start.slice(5, 7));
   const endMonth = Number(opp.contract_end.slice(0, 4) + opp.contract_end.slice(5, 7));
   for (const row of rows) {
@@ -2502,18 +2491,23 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     frequencyByFlow.set(flowId, (frequencyByFlow.get(flowId) ?? new Set()).add(row.frequency));
     dieselByFlow.set(flowId, (dieselByFlow.get(flowId) ?? new Set()).add(row.diesel_base_id));
     const context = `${flowId}|${row.year}|${row.month}|${row.division}|${row.plaza}`;
+    const rowContext = modalByItem.get(row.quote_line_item_id);
     windowsByContext.set(
       context,
       (windowsByContext.get(context) ?? new Set()).add(row.period_window),
     );
     if (monthKey < startMonth || monthKey > endMonth)
       throw new Error("A vigência da Oportunidade precisa cobrir a primeira e a última Agenda.");
-    if (frequencyByFlow.get(flowId)!.size > 1)
+    if (rowContext?.modal !== ROAD && frequencyByFlow.get(flowId)!.size > 1)
       throw new Error("Um Fluxo não pode misturar periodicidade mensal e anual na mesma Cotação.");
-    const rowContext = modalByItem.get(row.quote_line_item_id);
     if (rowContext?.modal === PORT) {
       const portError = portScheduleError(row, rowContext);
       if (portError) throw new Error(portError);
+      continue;
+    }
+    if (rowContext?.modal === ROAD) {
+      if (!ROAD_SERVICES.includes(row.service)) throw new Error(`O serviço ${row.service} não pertence ao catálogo rodoviário.`);
+      if (!row.diesel_base_id || row.diesel_base_date) throw new Error("A Agenda rodoviária precisa de Base Diesel e não usa Data Base Diesel individual.");
       continue;
     }
     if (!RAIL_SERVICES.includes(row.service))
@@ -2542,11 +2536,17 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
   }
   if ([...dieselByFlow.values()].some((bases) => bases.size > 1))
     throw new Error("Cada Fluxo Planejado só pode usar uma Base Diesel nesta Cotação.");
-  if ([...windowsByContext.values()].some((windows) => windows.size > 1))
+  const roadContexts = new Set(rows.filter((row) => modalByItem.get(row.quote_line_item_id)?.modal === ROAD)
+    .map((row) => `${flowForItem.get(row.quote_line_item_id)}|${row.year}|${row.month}|${row.division}|${row.plaza}`));
+  if ([...windowsByContext.entries()].some(([context, windows]) => {
+    if (!roadContexts.has(context)) return windows.size > 1;
+    return windows.has("Mês") && windows.size > 1 || [...windows].some((window) => !["Mês", "1ª Quinzena", "2ª Quinzena"].includes(window));
+  }))
     throw new Error("Não misture tipos de janela no mesmo Fluxo, ano, mês, divisão e praça.");
   for (const row of rows) {
     const flowId = flowForItem.get(row.quote_line_item_id) ?? "";
-    if (modalByItem.get(row.quote_line_item_id)?.modal === PORT) continue;
+    const modal = modalByItem.get(row.quote_line_item_id)?.modal;
+    if (modal === PORT || modal === ROAD) continue;
     if (
       (row.frequency === "Anual" || (monthsByFlow.get(flowId)?.size ?? 0) > 1) &&
       !row.diesel_base_date
@@ -2560,7 +2560,7 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
     groups.set(row.schedule_key, [...(groups.get(row.schedule_key) ?? []), row]);
   for (const group of groups.values()) {
     const groupModal = modalByItem.get(group[0].quote_line_item_id)?.modal ?? RAIL;
-    if (groupModal === RAIL && !group.some((row) => row.service === "FRETE"))
+    if (groupModal !== PORT && !group.some((row) => row.service === "FRETE"))
       throw new Error("Cada grupo precisa conter o serviço FRETE.");
     if (
       group.some(
@@ -2573,7 +2573,7 @@ export const completeQuote = createServerFn({ method: "POST" }).handler(async ({
       )
     )
       throw new Error("Volume, tarifa e Base Diesel devem ser iguais no grupo da agenda.");
-    const useCbs = tariffMode === "CBS";
+    const useCbs = groupModal !== ROAD && tariffMode === "CBS";
     if (
       group.some((row) =>
         useCbs
@@ -2818,6 +2818,29 @@ async function ensureModalCatalog(accountId: string, seed: number, modals: Modal
         [1, 4, 0], // TPD → Navio · Soja (embarque)
       ]);
   }
+  if (modals.includes(ROAD)) {
+    const locIds = await ensureCatalogLocations(
+      [
+        ["Unidade de Origem · Rodoviário", "RO1", "Uberaba", "MG", "Triângulo Mineiro", "Terminal"],
+        ["Unidade de Destino · Rodoviário", "RO2", "Paulínia", "SP", "Campinas", "Terminal"],
+        ["Unidade de Destino · Rodoviário Sul", "RO3", "Santos", "SP", "Baixada Santista", "Terminal"],
+        ["Unidade de Origem · Rodoviário Nordeste", "RO4", "Rondonópolis", "MT", "Centro-Oeste", "Terminal"],
+      ],
+      now,
+    );
+    const merchIds = await ensureCatalogMerchandise(
+      [["FERTILIZANTES", "TON"], ["SOJA", "TON"], ["AÇÚCAR", "TON"], ["MILHO", "TON"]],
+      now,
+    );
+    for (const name of ["S10", "S500"]) {
+      const [base] = await db.select({ id: diesel_bases.id }).from(diesel_bases).where(eq(diesel_bases.name, name));
+      if (!base) await db.insert(diesel_bases).values({ id: crypto.randomUUID(), name, anp_base: 0, created_at: now, updated_at: now });
+    }
+    if (!hasEligible(ROAD))
+      await insertFlows(ROAD, locIds, merchIds, [
+        [0, 1, 0], [0, 2, 1], [3, 1, 2], [0, 3, 3],
+      ]);
+  }
 }
 
 /** Cria uma Cotação, itens por fluxo e agendas relacionadas usando dados reproduzíveis pela seed. */
@@ -2835,7 +2858,7 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
       throw new Error("A oportunidade precisa estar em Negociação para receber uma Cotação.");
     if (!["Contrato", "ACS"].includes(opp.instrument_type) || !isQuoteSegment(opp.segment))
       throw new Error(
-        "Esta versão atende oportunidades Ferroviárias, Portuárias ou Ferroviário + Portuário de Contrato e ACS.",
+        "Esta versão atende oportunidades Ferroviárias, Portuárias e Rodoviárias de Contrato e ACS.",
       );
     if (!Number.isInteger(seed) || seed < 1) throw new Error("Informe uma seed inteira positiva.");
     if (!Number.isInteger(scheduleCount) || scheduleCount < 1 || scheduleCount > 24)
@@ -2873,7 +2896,7 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
         quote_number: quoteNum,
         name: `${opp.name} · ${opp.segment}`,
         record_type: "VLI_General",
-        tariff_mode: opp.integration_tariff,
+        tariff_mode: opp.segment === ROAD ? "Líquida" : opp.integration_tariff,
         status: "Rascunho",
         is_synced: 0,
         seed,
@@ -2883,6 +2906,7 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
       });
       for (const flow of selectedFlows) {
         const isPort = flow.modal === PORT;
+        const isRoad = flow.modal === ROAD;
         const originLoc = locationById.get(flow.origin_id);
         const destinationLoc = locationById.get(flow.destination_id);
         const merchName = merchById.get(flow.merchandise_id)?.name ?? "";
@@ -2898,7 +2922,9 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
               expectedPortMovement(originLoc.location_type, destinationLoc.location_type) ?? "EMBARQUE",
               ...f.helpers.arrayElements(["ARMAZENAGEM", "PESAGEM"], { min: 1, max: 2 }),
             ]
-          : [
+          : isRoad
+            ? ["FRETE"]
+            : [
               "FRETE",
               ...f.helpers.arrayElements(
                 ["CARGA", "DESCARGA", "BALDEAÇÃO", "MANOBRA ORIGEM", "MANOBRA DESTINO"],
@@ -2948,14 +2974,15 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
           const year = date.getUTCFullYear(),
             month = date.getUTCMonth() + 1;
           const period = `${year}${String(month).padStart(2, "0")}`;
-          const key = `${flow.code}|${period}|Todas|TODAS_PRACAS_NACIONAL`;
+          const periodWindow = "Mês";
+          const key = scheduleIdentityKey(flow.code, year, month, "Todas", "TODAS_PRACAS_NACIONAL", flow.modal, periodWindow);
           if (used.has(key)) continue;
           used.add(key);
           made++;
           const volume = isPort
             ? f.number.int({ min: 8000, max: 60000 })
             : f.number.int({ min: 1000, max: 9000 });
-          const useCbs = opp.integration_tariff === "CBS";
+          const useCbs = !isRoad && opp.integration_tariff === "CBS";
           // Preço de mercado do Jetsons por serviço; o preço praticado oscila em
           // torno dele (desconto de até 13% ou ágio de até 6%) para simular
           // cenários de competitividade e alçada.
@@ -2998,10 +3025,12 @@ export const generateQuoteBundle = createServerFn({ method: "POST" }).handler(
               tariff_cbs: useCbs ? tariffCents / 100 : null,
               tariff_net: useCbs ? 0 : tariffCents / 100,
               // Porto não usa Base Diesel: registro técnico “não se aplica” e data vazia.
-              diesel_base_id: isPort ? PORT_DIESEL_BASE_ID : bases[0].id,
+              diesel_base_id: isPort ? PORT_DIESEL_BASE_ID : isRoad
+                ? (await db.select().from(diesel_bases).where(eq(diesel_bases.name, opp.road_diesel_base || "S10")))[0]?.id ?? bases[0].id
+                : bases[0].id,
               diesel_base_date: isPort
                 ? null
-                : `${String(opp.application_day ?? 10).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
+                : isRoad ? null : `${String(opp.application_day ?? 10).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`,
               service,
               accessory_cbs: useCbs ? shareCents / 100 : null,
               accessory_cbs_pct: useCbs ? sharePct : null,
@@ -3316,7 +3345,7 @@ async function validateQuoteSchedule(
   const service = String(d.service ?? "")
     .trim()
     .toUpperCase();
-  if (d.frequency && !["Mensal", "Anual"].includes(String(d.frequency)))
+  if (d.frequency && !["Mensal", "Anual", "Quinzenal"].includes(String(d.frequency)))
     throw new Error("Periodicidade inválida.");
   if (
     d.period_window &&
@@ -3368,9 +3397,13 @@ async function validateQuoteSchedule(
   if (!opp || opp.stage !== "Negociação")
     throw new Error("A oportunidade vinculada precisa estar em Negociação.");
   if (!isQuoteSegment(opp.segment) || !QUOTE_INSTRUMENTS.includes(opp.instrument_type))
-    throw new Error("Esta agenda atende Ferroviário, Portuário ou Ferroviário + Portuário de Contrato e ACS.");
+    throw new Error("Esta agenda atende os segmentos Ferroviário, Portuário e Rodoviário de Contrato e ACS.");
   const isPortFlow = flow?.modal === PORT;
-  if (!isPortFlow && ![1, 10, 20].includes(Number(opp.application_day)))
+  const isRailFlow = flow?.modal === RAIL;
+  const isRoadFlow = flow?.modal === ROAD;
+  if (isRoadFlow && !["Mês", "1ª Quinzena", "2ª Quinzena"].includes(String(d.period_window ?? "Mês")))
+    throw new Error("No Rodoviário, escolha o mês inteiro ou uma das duas quinzenas.");
+  if (isRailFlow && ![1, 10, 20].includes(Number(opp.application_day)))
     throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
   if (!opp.contract_start || !opp.contract_end)
     throw new Error("Preencha início e fim da vigência na Oportunidade antes de criar Agendas.");
@@ -3399,10 +3432,16 @@ async function validateQuoteSchedule(
     d.diesel_base_id = PORT_DIESEL_BASE_ID;
     d.diesel_base_date = null;
   } else {
-    if (!RAIL_SERVICES.includes(service))
-      throw new Error("Selecione FRETE ou um acessório ferroviário válido.");
+    if (!(isRoadFlow ? ROAD_SERVICES : RAIL_SERVICES).includes(service))
+      throw new Error(isRoadFlow ? "Selecione FRETE para o Item rodoviário." : "Selecione FRETE ou um acessório ferroviário válido.");
     if (!d.diesel_base_id || isPortDieselBase(String(d.diesel_base_id)))
       throw new Error("Base de repasse de diesel é obrigatória para Ferroviário.");
+    if (isRoadFlow) {
+      const [base] = await db.select({ name: diesel_bases.name }).from(diesel_bases).where(eq(diesel_bases.id, String(d.diesel_base_id)));
+      if (base?.name !== (opp.road_diesel_base || "S10"))
+        throw new Error(`A Base Diesel desta Agenda deve seguir o contrato: ${opp.road_diesel_base || "S10"}.`);
+      if (d.diesel_base_date) throw new Error("No Rodoviário, a Data Base Diesel fica no período de apuração contratual, não em cada Agenda.");
+    }
   }
   if (opp.instrument_type === "ACS" && anyTolerance)
     throw new Error("ACS não aceita tolerâncias nem Take or Pay.");
@@ -3410,7 +3449,9 @@ async function validateQuoteSchedule(
     throw new Error("Na curva de ajuste, preços e Agendas vêm do contrato. Use “Mover volume” para redistribuir.");
   if (opp.instrument_type === SALES_ORDER && anyTolerance)
     throw new Error("A ordem de vendas herda o Take or Pay do contrato: não informe tolerâncias.");
-  const tariffMode = quote?.tariff_mode || opp.integration_tariff;
+  const tariffMode = isRoadFlow ? "Líquida" : quote?.tariff_mode || opp.integration_tariff;
+  if (isRoadFlow && tariffMode !== "Líquida")
+    throw new Error("A Cotação rodoviária usa tarifa líquida.");
   if (tariffMode === "CBS" && !(Number(cbs ?? 0) > 0))
     throw new Error("A Oportunidade usa tarifa CBS. Preencha Tarifa CBS e deixe a líquida vazia.");
   if (tariffMode !== "CBS" && !(Number(net ?? 0) > 0))
@@ -3419,7 +3460,18 @@ async function validateQuoteSchedule(
     );
   const division = String(d.division ?? "Todas"),
     plaza = String(d.plaza ?? "TODAS_PRACAS_NACIONAL");
-  const scheduleKey = `${flow.code}|${year}${String(month).padStart(2, "0")}|${division}|${plaza}`;
+  const scheduleKey = scheduleIdentityKey(flow.code, year, month, division, plaza, flow.modal, String(d.period_window ?? "Mês"));
+  if (isRoadFlow) {
+    const periodPrefix = `${flow.code}|${year}${String(month).padStart(2, "0")}|${division}|${plaza}|`;
+    const quoteItems = await db.select({ id: quote_line_items.id }).from(quote_line_items)
+      .where(eq(quote_line_items.quote_id, item.quote_id));
+    const siblingRows = quoteItems.length
+      ? await db.select().from(quote_schedules).where(inArray(quote_schedules.quote_line_item_id, quoteItems.map((row) => row.id)))
+      : [];
+    const conflicting = siblingRows.find((row) => row.id !== recordId && row.schedule_key.startsWith(periodPrefix) &&
+      (String(d.period_window ?? "Mês") === "Mês" || row.period_window === "Mês"));
+    if (conflicting) throw new Error("Use a Agenda mensal ou as quinzenas para o mesmo mês, divisão e praça, sem misturar os formatos.");
+  }
   // A chave identifica a Agenda dentro da Cotação: Cotações alternativas e a
   // linha de base de um aditivo reutilizam os mesmos períodos.
   const duplicates = await quoteSchedulesByKey(item.quote_id, scheduleKey);
@@ -3481,7 +3533,7 @@ async function validateQuoteSchedule(
     throw new Error("Preencha tarifa acessória e percentual no modo CBS.");
   if (tariffMode !== "CBS" && (accessoryNet === null || accessoryPct === null))
     throw new Error("Preencha tarifa acessória e percentual no modo líquido.");
-  if (!isPortFlow) {
+  if (isRailFlow) {
     d.diesel_base_date = applicationDate(
       Number(opp.application_day),
       d.diesel_base_date,
@@ -3490,6 +3542,9 @@ async function validateQuoteSchedule(
     );
     if (!isDieselBaseDateApplicable(d.diesel_base_date, Number(opp.application_day), month, year))
       throw new Error("A Data Base Diesel deve estar no mês da Agenda ou no mês imediatamente anterior.");
+  } else if (isRoadFlow) {
+    if (d.diesel_base_date) throw new Error("No Rodoviário, o repasse do diesel segue os parâmetros do Contrato, sem data por Agenda.");
+    d.diesel_base_date = null;
   }
   d.tariff_cbs = cbs;
   d.tariff_net = net ?? 0;
@@ -3558,12 +3613,25 @@ async function assertOpportunityContractUnchanged(
     );
 }
 
+async function enforceRoadOpportunityFields(recordId: string | null | undefined, data: Record<string, unknown>) {
+  const [current] = recordId ? await db.select({ segment: opportunities.segment }).from(opportunities).where(eq(opportunities.id, recordId)) : [];
+  if ((data.segment ?? current?.segment) !== ROAD) return;
+  const pct = Number(data.road_diesel_pct ?? 0);
+  const base = String(data.road_diesel_base ?? "S10");
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw new Error("Informe um percentual de repasse rodoviário entre 0% e 100%.");
+  if (!["S10", "S500"].includes(base)) throw new Error("A base diesel rodoviária deve ser S10 ou S500.");
+  data.road_diesel_pct = pct;
+  data.road_diesel_base = base;
+  data.road_reference_margin_pct = 5;
+}
+
 export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ data: input }) => {
   await ensureSchema();
   const { table, recordId, data } = input as SaveInput;
   const t = TABLES[table];
   if (!t) throw new Error(`Objeto desconhecido: ${table}`);
   if (table === "opportunities") {
+    await enforceRoadOpportunityFields(recordId, data);
     if (!recordId && data.application_day === undefined) data.application_day = 10;
     if (data.application_day !== undefined) data.application_day = Number(data.application_day);
     if (data.take_or_pay !== undefined || data.take_or_pay_config !== undefined)
@@ -3587,7 +3655,7 @@ export const saveRecord = createServerFn({ method: "POST" }).handler(async ({ da
       !QUOTE_INSTRUMENTS.includes(opp.instrument_type)
     )
       throw new Error(
-        "A Cotação exige uma oportunidade Ferroviária, Portuária ou Ferroviário + Portuário de Contrato ou ACS em Negociação.",
+        "A Cotação exige uma oportunidade Ferroviária, Portuária ou Rodoviária de Contrato ou ACS em Negociação.",
       );
     if (!recordId && segmentHasModal(opp.segment, PORT) && !(data as any).port_terms)
       (data as any).port_terms = JSON.stringify(DEFAULT_PORT_TERMS);
@@ -3743,7 +3811,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
       !QUOTE_INSTRUMENTS.includes(opp.instrument_type)
     )
       throw new Error(
-        "A Oportunidade precisa ser Ferroviária, Portuária ou Ferroviário + Portuário, de Contrato/ACS e estar em Negociação.",
+        "A Oportunidade precisa ser Ferroviária, Portuária ou Rodoviária, de Contrato/ACS e estar em Negociação.",
       );
     if (!opp.contract_start || !opp.contract_end)
       throw new Error("Preencha início e fim da vigência na Oportunidade antes de montar Agendas.");
@@ -3776,13 +3844,14 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
       );
     const flowModal = flow.modal as Modal;
     const isPortFlow = flowModal === PORT;
+    const isRoadFlow = flowModal === ROAD;
     const policy = modalPolicy(flowModal);
     // Reajuste do modal do fluxo: ferro (Diesel + IGP-M + IPCA) ou porto (IGP-M + IPCA).
     if (termDays > 365) {
       const readjustmentError = modalReadjustmentError(flowModal, opp);
       if (readjustmentError) throw new Error(`${policy.readjustmentStepTitle}: ${readjustmentError}`);
     }
-    if (!isPortFlow && ![1, 10, 20].includes(Number(opp.application_day)))
+    if (flowModal === RAIL && ![1, 10, 20].includes(Number(opp.application_day)))
       throw new Error("Defina na Oportunidade um dia de aplicação igual a 1, 10 ou 20.");
     if (!policy.services.includes(request.itemService))
       throw new Error(
@@ -3799,6 +3868,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
     if (!request.groups.length) throw new Error("Adicione ao menos um grupo de Agenda.");
     if (!["CBS", "Líquida"].includes(request.tariffMode))
       throw new Error("Escolha tarifa CBS ou tarifa líquida nesta Cotação.");
+    if (isRoadFlow && request.tariffMode !== "Líquida") throw new Error("As Cotações rodoviárias usam tarifa líquida.");
     const quoteItemsBefore = await db
       .select({ id: quote_line_items.id })
       .from(quote_line_items)
@@ -3835,11 +3905,27 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         .from(diesel_bases)
         .where(eq(diesel_bases.id, request.groups[0].diesel_base_id));
       if (!dieselBase || isPortDieselBase(dieselBase.id)) throw new Error("Selecione uma Base Diesel válida.");
+      if (isRoadFlow && dieselBase.name !== (opp.road_diesel_base || "S10"))
+        throw new Error(`A Base Diesel desta Agenda deve seguir o contrato: ${opp.road_diesel_base || "S10"}.`);
     }
     const startMonth = Number(opp.contract_start.slice(0, 4) + opp.contract_start.slice(5, 7));
     const endMonth = Number(opp.contract_end.slice(0, 4) + opp.contract_end.slice(5, 7));
     const isAddendum = opp.instrument_type === "Aditivo";
     const draftKeys = new Set<string>();
+    const roadBaseKeys = new Map<string, Set<string>>();
+    if (isRoadFlow) {
+      for (const existingItem of quoteItemsBefore) {
+        const [existingFlow] = await db.select({ code: planned_flows.code }).from(planned_flows)
+          .innerJoin(quote_line_items, eq(quote_line_items.planned_flow_id, planned_flows.id))
+          .where(eq(quote_line_items.id, existingItem.id));
+        if (!existingFlow || existingFlow.code !== flow.code) continue;
+        const schedules = await db.select().from(quote_schedules).where(eq(quote_schedules.quote_line_item_id, existingItem.id));
+        for (const row of schedules) {
+          const baseKey = `${row.year}${String(row.month).padStart(2, "0")}|${row.division}|${row.plaza}`;
+          roadBaseKeys.set(baseKey, (roadBaseKeys.get(baseKey) ?? new Set()).add(row.period_window));
+        }
+      }
+    }
     const rowsToInsert: Array<Record<string, unknown>> = [];
     let lastPeriod = endMonth;
     for (const group of request.groups) {
@@ -3879,8 +3965,10 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         throw new Error("A ordem de vendas precisa ficar dentro da vigência do contrato-base; ela não estende prazo (use Aditivo).");
       if (!group.diesel_base_id || group.diesel_base_id !== request.groups[0].diesel_base_id)
         throw new Error("Use uma única Base Diesel por Fluxo nesta Cotação.");
-      if (!["Mensal", "Anual"].includes(group.frequency))
+      if (!["Mensal", "Anual", "Quinzenal"].includes(group.frequency))
         throw new Error("Periodicidade inválida na Agenda.");
+      if (isRoadFlow && !["Mês", "1ª Quinzena", "2ª Quinzena"].includes(group.period_window))
+        throw new Error("No Rodoviário, escolha o mês inteiro ou uma das duas quinzenas.");
       if (
         ![
           "Mês",
@@ -3897,7 +3985,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         ].includes(group.period_window)
       )
         throw new Error("Período inválido na Agenda.");
-      const normalizedDieselDate = isPortFlow
+      const normalizedDieselDate = isPortFlow || isRoadFlow
         ? null
         : applicationDate(Number(opp.application_day), group.diesel_base_date, group.month, group.year);
       if (!isPortFlow && !group.services.some((entry) => entry.service === "FRETE"))
@@ -3906,7 +3994,7 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
         throw new Error(
           isPortFlow
             ? "O grupo contém um serviço portuário inválido."
-            : "O grupo contém um serviço ferroviário inválido.",
+            : isRoadFlow ? "O grupo contém um serviço rodoviário inválido." : "O grupo contém um serviço ferroviário inválido.",
         );
       if (isPortFlow && expectedMovement) {
         const wrong = group.services.find(
@@ -3931,7 +4019,15 @@ export const saveQuoteItemScreenflow = createServerFn({ method: "POST" }).handle
       const percentTotal = group.services.reduce((sum, entry) => sum + Number(entry.percent), 0);
       if (Math.abs(percentTotal - 100) > 0.2)
         throw new Error("O rateio percentual do grupo precisa somar 100%.");
-      const scheduleKey = `${flow.code}|${group.year}${String(group.month).padStart(2, "0")}|${group.division}|${group.plaza}`;
+      const scheduleKey = scheduleIdentityKey(flow.code, group.year, group.month, group.division, group.plaza, flowModal, group.period_window);
+      if (isRoadFlow) {
+        const baseKey = `${group.year}${String(group.month).padStart(2, "0")}|${group.division}|${group.plaza}`;
+        const windows = roadBaseKeys.get(baseKey) ?? new Set<string>();
+        if (windows.has("Mês") || group.period_window === "Mês" && windows.size)
+          throw new Error("Use a Agenda mensal ou as quinzenas para o mesmo mês, divisão e praça, sem misturar os formatos.");
+        windows.add(group.period_window);
+        roadBaseKeys.set(baseKey, windows);
+      }
       if (draftKeys.has(scheduleKey))
         throw new Error(
           "Cada período precisa ser um grupo único; una os serviços do mesmo período no mesmo grupo.",
@@ -4089,6 +4185,7 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
         chunk.map(async ({ recordId, data }, localIndex) => {
           const recordData = { ...data };
           if (table === "opportunities") {
+            await enforceRoadOpportunityFields(recordId, recordData);
             if (!recordId && recordData.application_day === undefined)
               recordData.application_day = 10;
             if (recordData.application_day !== undefined)
@@ -4109,7 +4206,7 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
               !QUOTE_INSTRUMENTS.includes(opp.instrument_type)
             )
               throw new Error(
-                "A Cotação exige uma oportunidade Ferroviária, Portuária ou Ferroviário + Portuário de Contrato ou ACS em Negociação.",
+                "A Cotação exige uma oportunidade de segmento Ferroviário, Portuário ou Rodoviário de Contrato ou ACS em Negociação.",
               );
             if (!recordId) {
               if (!recordData.port_terms && segmentHasModal(opp.segment, PORT))
@@ -4117,7 +4214,7 @@ export const saveRecordsBulk = createServerFn({ method: "POST" }).handler(
               if (!recordData.quote_number)
                 recordData.quote_number = `COT-${Date.now().toString().slice(-6)}${String(offset + localIndex).padStart(2, "0")}`;
               if (!recordData.seed) recordData.seed = 20260929;
-              if (!recordData.tariff_mode) recordData.tariff_mode = opp.integration_tariff;
+              recordData.tariff_mode = opp.segment === ROAD ? "Líquida" : recordData.tariff_mode || opp.integration_tariff;
             }
           }
           if (table === "quote_schedules") await validateQuoteSchedule(recordId, recordData);
@@ -4302,6 +4399,8 @@ export const updateOpportunityReadjustment = createServerFn({ method: "POST" }).
       first_readjustment_date: string | null;
       /** Portuário: grava IGP-M/IPCA do porto (sem diesel). */
       modal?: string;
+      road_diesel_period?: string;
+      road_diesel_base?: string;
     };
     if (!data.id) throw new Error("Oportunidade não informada.");
     const [opportunity] = await db.select().from(opportunities).where(eq(opportunities.id, data.id));
@@ -4313,6 +4412,23 @@ export const updateOpportunityReadjustment = createServerFn({ method: "POST" }).
       .from(netlex_contracts)
       .where(eq(netlex_contracts.opportunity_id, data.id));
     if (sentContract) throw new Error("A minuta já foi enviada; seus parâmetros estão bloqueados.");
+    if (data.modal === ROAD) {
+      if (!segmentHasModal(opportunity.segment, ROAD))
+        throw new Error("O segmento da Oportunidade não inclui o modal rodoviário.");
+      const pct = Number(data.diesel_pct);
+      const base = data.road_diesel_base;
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100)
+        throw new Error("Informe um percentual de repasse entre 0% e 100%.");
+      if (base !== "S10" && base !== "S500") throw new Error("Selecione a base diesel S10 ou S500.");
+      await db.update(opportunities).set({
+        road_diesel_period: String(data.road_diesel_period ?? "").trim() || null,
+        road_diesel_pct: pct,
+        road_diesel_base: base,
+        road_reference_margin_pct: 5,
+        updated_at: new Date().toISOString(),
+      }).where(eq(opportunities.id, data.id));
+      return { ok: true };
+    }
     if (data.modal === PORT) {
       if (!segmentHasModal(opportunity.segment, PORT))
         throw new Error("O segmento da Oportunidade não inclui o modal portuário.");
@@ -4585,7 +4701,7 @@ async function computeQuotePriceComparison(quoteId: string): Promise<PriceCompar
     .select()
     .from(opportunities)
     .where(eq(opportunities.id, quote.opportunity_id));
-  const tariffMode = quote.tariff_mode || opp?.integration_tariff || "Líquida";
+  const tariffMode = opp?.segment === ROAD ? "Líquida" : quote.tariff_mode || opp?.integration_tariff || "Líquida";
   const useCbs = tariffMode === "CBS";
   const items = await db
     .select()
@@ -4958,7 +5074,7 @@ export const applyRecommendedPrices = createServerFn({ method: "POST" }).handler
       .select()
       .from(opportunities)
       .where(eq(opportunities.id, quote.opportunity_id));
-    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+    const useCbs = opp?.segment !== ROAD && (quote.tariff_mode || opp?.integration_tariff) === "CBS";
     const groups = new Map<string, Array<typeof quote_schedules.$inferSelect>>();
     for (const item of items) {
       const schedules = await db
@@ -5046,7 +5162,7 @@ export const bulkAdjustQuotePrices = createServerFn({ method: "POST" }).handler(
       .select()
       .from(opportunities)
       .where(eq(opportunities.id, quote.opportunity_id));
-    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+    const useCbs = opp?.segment !== ROAD && (quote.tariff_mode || opp?.integration_tariff) === "CBS";
     const items = await db
       .select()
       .from(quote_line_items)
@@ -5149,7 +5265,7 @@ export const updateScheduleTariff = createServerFn({ method: "POST" }).handler(
       .select()
       .from(opportunities)
       .where(eq(opportunities.id, quote.opportunity_id));
-    const useCbs = (quote.tariff_mode || opp?.integration_tariff) === "CBS";
+    const useCbs = opp?.segment !== ROAD && (quote.tariff_mode || opp?.integration_tariff) === "CBS";
     const group = await quoteSchedulesByKey(quote.id, schedule.schedule_key);
     const changedIndex = group.findIndex((row) => row.id === scheduleId);
     if (changedIndex < 0) throw new Error("A Agenda não pertence ao grupo selecionado.");
@@ -5855,7 +5971,8 @@ export const sendSalesOrderToClient = createServerFn({ method: "POST" })
     const nowIso = now.toISOString();
     const expiresAt = new Date(now.valueOf() + SALES_ORDER_VALIDITY_DAYS * 86400000).toISOString();
     const contactInfo = { id: contact.id, name: contact.name, email: contact.email, title: contact.title };
-    const [existing] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.opportunity_id, opp.id));
+    const quote = await approvedSyncedQuote(opp.id);
+    const [existing] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.quote_id, quote.id));
     if (existing) {
       const doc = parseContractDocument(existing.document_json);
       const status = effectiveSalesOrderStatus(existing.status, doc.expiresAt);
@@ -5876,7 +5993,6 @@ export const sendSalesOrderToClient = createServerFn({ method: "POST" })
         .where(eq(netlex_contracts.id, existing.id));
       return { ok: true, id: existing.id, resent: true };
     }
-    const quote = await approvedSyncedQuote(opp.id);
     const [account] = await db.select().from(accounts).where(eq(accounts.id, opp.account_id));
     const { items, totals } = await buildDocItemsFromQuote(quote.id);
     if (!items.length || items.some((item) => !item.schedules.length))
@@ -5913,7 +6029,7 @@ export const sendSalesOrderToClient = createServerFn({ method: "POST" })
         priceApproval: quote.price_status,
         alcadaLevel: quote.alcada_level,
         maxDiscountPct: quote.max_discount_pct,
-        tariffBasis: quote.tariff_mode || opp.integration_tariff,
+      tariffBasis: opp.segment === ROAD ? "Líquida" : quote.tariff_mode || opp.integration_tariff,
         currency: "BRL",
       },
       readjustment: baseDoc.readjustment ?? null,
@@ -5926,6 +6042,7 @@ export const sendSalesOrderToClient = createServerFn({ method: "POST" })
     await db.insert(netlex_contracts).values({
       id,
       opportunity_id: opp.id,
+      quote_id: quote.id,
       netlex_number: number,
       title,
       status: SALES_ORDER_STATUS.sent,
@@ -5979,10 +6096,10 @@ export const registerAdjustmentCurve = createServerFn({ method: "POST" })
     const [opp] = await db.select().from(opportunities).where(eq(opportunities.id, input.opportunityId));
     if (!opp || opp.instrument_type !== ADJUSTMENT_CURVE) throw new Error("Oportunidade de curva de ajuste não encontrada.");
     if (opp.stage !== "Formalização") throw new Error("Avance a Oportunidade para Formalização antes de registrar.");
-    const [existing] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.opportunity_id, opp.id));
-    if (existing) return { ok: true, id: existing.id, created: false };
     const base = await signedBaseContract(opp);
     const quote = await approvedSyncedQuote(opp.id);
+    const [existing] = await db.select().from(netlex_contracts).where(eq(netlex_contracts.quote_id, quote.id));
+    if (existing) return { ok: true, id: existing.id, created: false };
     const curve = await buildQuoteCurve(quote.id);
     if (!curve.changed || !curve.balanced)
       throw new Error("A curva precisa ter ao menos um deslocamento e manter o total de cada fluxo.");
@@ -6016,6 +6133,7 @@ export const registerAdjustmentCurve = createServerFn({ method: "POST" })
     await db.insert(netlex_contracts).values({
       id,
       opportunity_id: opp.id,
+      quote_id: quote.id,
       netlex_number: number,
       title,
       status: CURVE_STATUS.registered,

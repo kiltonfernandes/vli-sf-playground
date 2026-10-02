@@ -70,6 +70,10 @@ export const opportunities = sqliteTable(
     /** Reajuste do modal portuário (sem diesel): IGP-M/IPCA_Harbor no Salesforce. */
     port_igpm_pct: real("port_igpm_pct").notNull().default(100),
     port_ipca_pct: real("port_ipca_pct").notNull().default(0),
+    road_diesel_period: text("road_diesel_period"),
+    road_diesel_pct: real("road_diesel_pct").notNull().default(0),
+    road_diesel_base: text("road_diesel_base"),
+    road_reference_margin_pct: real("road_reference_margin_pct").notNull().default(5),
     contracting_parties: text("contracting_parties"),
     vli_entity: text("vli_entity"),
     joint_debtor: text("joint_debtor"),
@@ -92,6 +96,7 @@ export const netlex_contracts = sqliteTable(
     opportunity_id: text("opportunity_id")
       .notNull()
       .references(() => opportunities.id, { onDelete: "cascade" }),
+    quote_id: text("quote_id"),
     netlex_number: text("netlex_number").notNull(),
     title: text("title").notNull(),
     status: text("status").notNull().default("Análise jurídica"),
@@ -105,7 +110,8 @@ export const netlex_contracts = sqliteTable(
     updated_at: text("updated_at").notNull(),
   },
   (t) => [
-    uniqueIndex("idx_netlex_contracts_opportunity_id").on(t.opportunity_id),
+    index("idx_netlex_contracts_opportunity_id").on(t.opportunity_id),
+    index("idx_netlex_contracts_quote_id").on(t.quote_id),
     uniqueIndex("idx_netlex_contracts_number").on(t.netlex_number),
   ],
 );

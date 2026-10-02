@@ -75,6 +75,10 @@ export function ensureSchema(): Promise<void> {
       diesel_pct real NOT NULL DEFAULT 0,
       igpm_pct real NOT NULL DEFAULT 0,
       ipca_pct real NOT NULL DEFAULT 0,
+      road_diesel_period text,
+      road_diesel_pct real NOT NULL DEFAULT 0,
+      road_diesel_base text,
+      road_reference_margin_pct real NOT NULL DEFAULT 5,
       contracting_parties text,
       vli_entity text,
       joint_debtor text,
@@ -89,7 +93,8 @@ export function ensureSchema(): Promise<void> {
     );
     await client.execute(`CREATE TABLE IF NOT EXISTS netlex_contracts (
       id text PRIMARY KEY,
-      opportunity_id text NOT NULL UNIQUE REFERENCES opportunities(id) ON DELETE CASCADE,
+      opportunity_id text NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+      quote_id text,
       netlex_number text NOT NULL UNIQUE,
       title text NOT NULL,
       status text NOT NULL DEFAULT 'Análise jurídica',
@@ -132,11 +137,45 @@ export function ensureSchema(): Promise<void> {
       { table: "netlex_contracts", name: "signed_at", sql: `ALTER TABLE netlex_contracts ADD COLUMN signed_at text` },
       { table: "opportunities", name: "port_igpm_pct", sql: `ALTER TABLE opportunities ADD COLUMN port_igpm_pct real NOT NULL DEFAULT 100` },
       { table: "opportunities", name: "port_ipca_pct", sql: `ALTER TABLE opportunities ADD COLUMN port_ipca_pct real NOT NULL DEFAULT 0` },
+      { table: "opportunities", name: "road_diesel_period", sql: `ALTER TABLE opportunities ADD COLUMN road_diesel_period text` },
+      { table: "opportunities", name: "road_diesel_pct", sql: `ALTER TABLE opportunities ADD COLUMN road_diesel_pct real NOT NULL DEFAULT 0` },
+      { table: "opportunities", name: "road_diesel_base", sql: `ALTER TABLE opportunities ADD COLUMN road_diesel_base text` },
+      { table: "opportunities", name: "road_reference_margin_pct", sql: `ALTER TABLE opportunities ADD COLUMN road_reference_margin_pct real NOT NULL DEFAULT 5` },
+      { table: "netlex_contracts", name: "quote_id", sql: `ALTER TABLE netlex_contracts ADD COLUMN quote_id text` },
     ];
     for (const column of addendumColumns) {
       const info = await client.execute(`PRAGMA table_info(${column.table})`);
       if (!info.rows.some((row) => row.name === column.name)) await client.execute(column.sql);
     }
+    // Versões anteriores limitavam a um contrato por Oportunidade. Preserve os
+    // registros antigos e permita que cada Cotação tenha seu próprio contrato.
+    const netlexDefinition = await client.execute({
+      sql: `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'netlex_contracts'`,
+    });
+    const oldNetlexSql = String(netlexDefinition.rows[0]?.sql ?? "");
+    if (/opportunity_id\s+text\s+NOT NULL\s+UNIQUE/i.test(oldNetlexSql)) {
+      await client.execute(`CREATE TABLE netlex_contracts_v2 (
+        id text PRIMARY KEY,
+        opportunity_id text NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+        quote_id text,
+        netlex_number text NOT NULL UNIQUE,
+        title text NOT NULL,
+        status text NOT NULL DEFAULT 'Análise jurídica',
+        kind text NOT NULL DEFAULT 'Contrato',
+        base_contract_id text,
+        signed_at text,
+        document_json text NOT NULL,
+        created_at text NOT NULL,
+        updated_at text NOT NULL
+      )`);
+      await client.execute(`INSERT INTO netlex_contracts_v2
+        (id, opportunity_id, quote_id, netlex_number, title, status, kind, base_contract_id, signed_at, document_json, created_at, updated_at)
+        SELECT id, opportunity_id, quote_id, netlex_number, title, status, kind, base_contract_id, signed_at, document_json, created_at, updated_at FROM netlex_contracts`);
+      await client.execute(`DROP TABLE netlex_contracts`);
+      await client.execute(`ALTER TABLE netlex_contracts_v2 RENAME TO netlex_contracts`);
+    }
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_netlex_contracts_opportunity_id ON netlex_contracts(opportunity_id)`);
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_netlex_contracts_quote_id ON netlex_contracts(quote_id)`);
     // Renomeia o status inicial do NetLex: "Aguardando retorno da NetLex" virou "Análise jurídica".
     const legacyNetlex = await client.execute({
       sql: `SELECT id, document_json FROM netlex_contracts WHERE status = ?`,
@@ -173,6 +212,13 @@ export function ensureSchema(): Promise<void> {
     await client.execute(
       `CREATE INDEX IF NOT EXISTS idx_quotes_opportunity_id ON quotes(opportunity_id)`,
     );
+    await client.execute(`UPDATE quotes SET tariff_mode = 'Líquida' WHERE opportunity_id IN (
+      SELECT id FROM opportunities WHERE segment = 'Rodoviário'
+    ) AND (tariff_mode IS NULL OR tariff_mode <> 'Líquida')`);
+    await client.execute(`UPDATE netlex_contracts SET quote_id = (
+      SELECT q.id FROM quotes q WHERE q.opportunity_id = netlex_contracts.opportunity_id
+      ORDER BY q.is_synced DESC, q.created_at DESC LIMIT 1
+    ) WHERE quote_id IS NULL`);
     await client.execute(
       `CREATE TABLE IF NOT EXISTS quote_line_items (id text PRIMARY KEY, quote_id text NOT NULL REFERENCES quotes(id) ON DELETE CASCADE, planned_flow_id text NOT NULL REFERENCES planned_flows(id) ON DELETE CASCADE, service text NOT NULL DEFAULT 'FRETE', volume_total real NOT NULL DEFAULT 0, revenue_total real NOT NULL DEFAULT 0, top_eligible integer NOT NULL DEFAULT 0, created_at text NOT NULL, updated_at text NOT NULL)`,
     );

@@ -10,9 +10,18 @@ Todo batch que altera o produto deve usar o formato `vVERSÃO_ANTERIOR → vNOVA
 
 ## Changelog
 
+### v11.21.20 — Fluxo Rodoviário
+
+- **Oportunidade rodoviária**: segmento Rodoviário em Oportunidades e Cotações, tarifa líquida, margem padrão de referência de 5% para fluxo novo e parâmetros de diesel do contrato (período de apuração, percentual de repasse e base S10/S500). A validação aceita os ajustes registrados sem impor calendário ferroviário.
+- **Catálogo local**: fluxos rodoviários mockados por Conta, locais e mercadorias para exploração no Playground; serviço FRETE.
+- **Agendas**: mês inteiro ou 1ª quinzena (dias 1 a 15) e 2ª quinzena (dia 16 ao fim do mês). A criação em lote permite gerar meses ou as duas quinzenas por mês. Não se mistura Agenda mensal e quinzenas no mesmo mês, divisão e praça. A base contratual aparece nas Agendas sem data diesel individual.
+- **Preço e alçadas**: tarifa líquida por Agenda; validação, margem e aprovação seguem o comparativo e os perfis já usados nos demais modais.
+- **Contratos por Cotação**: cada minuta NetLex simulada guarda o vínculo com a Cotação de origem. A Oportunidade lista documentos de todas as Cotações, e cada Cotação lista seus próprios contratos. É possível sincronizar e formalizar mais de uma Cotação da mesma Oportunidade.
+- **Reajuste no documento**: parâmetros do diesel rodoviário e margem de referência são incluídos na minuta demonstrativa.
+
 ### v10.21.20 — Modal Portuário e segmento Ferroviário + Portuário
 
-- **Segmentos**: a Oportunidade passa a aceitar **Ferroviário**, **Portuário** e **Ferroviário + Portuário**. As regras de cada modal ficam em `src/lib/segments.ts` e não reaproveitam silenciosamente as regras ferroviárias. Rodoviário continua fora do escopo.
+- **Segmentos**: a Oportunidade passou a aceitar **Ferroviário**, **Portuário** e **Ferroviário + Portuário**. As regras de cada modal ficam em `src/lib/segments.ts` e não reaproveitam silenciosamente as regras ferroviárias.
 - **Catálogo portuário mock**: terminais TIPLAM (TPL · Santos), TPD (Vitória), TSL (São Luís), TMIB (TMB · Barra dos Coqueiros) e o ponto de navio NAV (Longo curso); mercadorias de granel (soja, milho, farelo, fertilizantes, açúcar) e fluxos portuários por Conta. Códigos de fluxo passaram a ser únicos por Conta, evitando colisão de `schedule_key` entre modais.
 - **Cotação portuária**: serviços **EMBARQUE**, **DESEMBARQUE**, **ARMAZENAGEM** e **PESAGEM** (sem FRETE). A operação de cais precisa ser coerente com o fluxo (terminal → navio = Embarque; navio → terminal = Desembarque). **Base Diesel não se aplica**: a Agenda portuária grava a sentinela técnica “NÃO SE APLICA · PORTO” e não aceita data de diesel. ARMAZENAGEM exige as **Condições portuárias · ANTAQ** da Cotação (free time padrão 7 dias, períodos de 5 dias), editáveis no card próprio.
 - **Reajuste por modal**: o ferro mantém Diesel + IGP-M/IPCA; o porto tem reajuste anual próprio IGP-M/IPCA (`port_igpm_pct`/`port_ipca_pct`, padrão 100% IGP-M como hipótese), sem diesel. No combinado, cada modal é validado separadamente, no screenflow e na Oportunidade.
@@ -562,7 +571,7 @@ O push/merge em `main` aciona o deploy configurado para o projeto. Para produç�
 
 - Integração externa com NetLex, questionário jurídico, preenchimento de complementos jurídicos e retorno automático de status. A mudança para Assinatura e o fechamento são simulados no Playground.
 - Integração direta com Salesforce e Jetsons; o catálogo, as rotas e os preços recomendados desta versão são dados mockados locais, e a notificação de aprovação por e-mail não existe (a decisão acontece na aba Aprovação).
-- Rodoviário, acessórios/alçadas portuárias definitivos (dependem do KT portuário), outros Record Types de Cotação e upload CSV do gerador v6.2.
+- Acessórios/alçadas portuárias definitivos (dependem do KT portuário), outros Record Types de Cotação e upload CSV do gerador v6.2.
 - Partes contratuais granulares como registros e relacionamentos próprios.
 - Campos customizados persistidos criados pela interface. A personalização existente cobre exibição e ordem das colunas.
 - Portal Experience Cloud e e-mail reais da ordem de vendas: o envio e o aceite são simulados dentro do Playground.
